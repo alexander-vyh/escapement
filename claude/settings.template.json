@@ -1,0 +1,268 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/project-bootstrap.sh",
+            "timeout": 15000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/session_cleanup.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/mol_status_check.py",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(gh pr create:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/outcome_assertion_gate.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(bd create:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/discovery-gate.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(bd close:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/discovery-close-gate.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/review_gate.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(bd update:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/review_gate.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(bd create:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/spec_id_enforcement.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(openspec:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/openspec_init_guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/enforce_named_agents.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/review_gate.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tdd-gate.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tdd-gate.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/external_comment_gate.py",
+            "statusMessage": "Checking for external comments..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_slack_slack__slack_send_message|mcp__plugin_slack_slack__slack_send_message_draft|mcp__plugin_slack_slack__slack_schedule_message|mcp__plugin_slack_slack__slack_create_canvas|mcp__plugin_slack_slack__slack_update_canvas|mcp__claude_ai_Gmail__gmail_create_draft",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/external_comment_gate.py",
+            "statusMessage": "Checking for external comments..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/discovery-nudge.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/review_nudge.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash(gcloud run jobs execute:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Cloud Run job completed\" with title \"Claude Code\"'"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(terraform apply:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Terraform apply completed\" with title \"Claude Code\"'"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(gcloud run jobs executions:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"GCloud execution completed\" with title \"Claude Code\"'"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/design_doc_location_guard.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/test_reminder.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/design_doc_location_guard.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/test_reminder.py"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/pre-compact-save.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "ANTHROPIC_CUSTOM_HEADERS": "anthropic-beta: context-1m-2025-08-07"
+  }
+}

@@ -1,0 +1,12 @@
+# Backups produced by INSTALL.sh (should never be committed)
+*.backup-*
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~

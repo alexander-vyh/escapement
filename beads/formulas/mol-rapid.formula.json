@@ -1,0 +1,41 @@
+{
+  "formula": "mol-rapid",
+  "description": "Rapid workflow for bug fixes, chores, and small tasks. Diagnose before fixing, verify the outcome, leave a regression test.",
+  "version": 2,
+  "type": "workflow",
+  "vars": {
+    "title": {
+      "description": "What needs to be done (short description)",
+      "required": true
+    },
+    "acceptance": {
+      "description": "Done when... (one sentence, observable outcome)",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "diagnose",
+      "title": "Diagnose: {{title}}",
+      "description": "Phase: UNDERSTAND\n\nBefore fixing anything, understand the root cause.\n\n1. Reproduce the problem — run the failing command, see the actual error\n2. Trace the cause — don't stop at the symptom. Follow the error to its source.\n   - Is this a direct bug, or a symptom of something upstream?\n   - Are there related failures that share the same root cause? (check bd list for siblings)\n   - Would fixing this fix other open beads too?\n3. Write a one-sentence root cause: 'This fails because [X], not because [surface symptom].'\n4. Update this bead's description with the root cause finding.\n\nIf diagnosis reveals this is bigger than expected (multiple root causes, architectural issue, needs design), recommend upgrading to mol-feature instead of continuing.\n\nClose this step when root cause is identified.",
+      "type": "task",
+      "priority": 2
+    },
+    {
+      "id": "implement",
+      "title": "Fix: {{title}}",
+      "description": "Phase: FIX\n\nImplement the fix with TDD:\n1. Write a failing test that reproduces the bug (the test must fail WITHOUT the fix and pass WITH it)\n2. Implement the minimal fix\n3. Run the test — verify it passes\n4. Check for downstream effects — did this fix unblock other failing tests/models?\n\nThe regression test is NOT optional. Every bug fix must leave a test that would catch the bug if it recurred. Tag the test with the requirement ID: // covers #{{title}}-regression\n\nAcceptance: {{acceptance}}",
+      "type": "task",
+      "needs": ["diagnose"],
+      "priority": 2
+    },
+    {
+      "id": "verify",
+      "title": "Verify: {{title}}",
+      "description": "Phase: CONFIRM\n\nVerify the OUTCOME, not just that tests pass:\n1. Run the exact workflow the user cares about — not just the unit test\n2. Check downstream: did fixing this resolve related failures? Update or close sibling beads if so.\n3. Check the acceptance criterion: {{acceptance}} — is it actually true now?\n4. Dispatch adversarial-reviewer subagent (isolated, no conversation history) on the changed files — even for bugs, the fix should be reviewed.\n\nIf the outcome isn't achieved, keep working. 'Tests pass' is not verification.",
+      "type": "task",
+      "needs": ["implement"],
+      "priority": 2
+    }
+  ]
+}

@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Claude Code hook: TDD enforcement — test before implementation.
+
+Fires as PreToolUse on Write and Edit.
+
+When writing to an implementation file in a repo with a tests/ directory,
+checks that test files have been modified in the working tree first.
+If no test files are modified, prompts the user to confirm.
+
+Severity: ask (not block) — the user can always override.
+
+Input (via stdin):
+  JSON with hook_event_name, tool_name, tool_input
+Exit codes:
+  0 — allow or ask
+  2 — deny (not used by this hook)
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# File classification
+# ---------------------------------------------------------------------------
+
+# Extensions that are never "implementation code"
+_EXEMPT_EXTENSIONS = frozenset({
+    ".toml", ".yaml", ".yml", ".json", ".ini", ".cfg", ".env",
+    ".md", ".rst", ".txt",
+    ".html", ".css", ".svg",
+    ".lock", ".gitignore", ".dockerignore",
+    ".sh", ".bash",
+    ".sql",
+})
+
+# Directory segments that indicate throwaway / non-production code
+_EXEMPT_DIR_SEGMENTS = frozenset({
+    "scripts", "bin", "tools", "scratch", "spike", "prototype",
+    "docs", "doc", "migrations", "alembic",
+})
+
+# Test file patterns
+_TEST_PATTERNS: list[re.Pattern] = [
+    # Python
+    re.compile(r"^test_.*\.py$"),
+    re.compile(r"^.*_test\.py$"),
+    re.compile(r"^conftest\.py$"),
+    # JS/TS
+    re.compile(r"^.*\.test\.\w+$"),
+    re.compile(r"^.*\.spec\.\w+$"),
+    # Go
+    re.compile(r"^.*_test\.go$"),
+    # Rust (test modules are inline, but test files may exist)
+    re.compile(r"^.*_test\.rs$"),
+]
+
+
+def is_test_file(filepath: str) -> bool:
+    """Check if a file path looks like a test file."""
+    name = os.path.basename(filepath)
+    parts = set(Path(filepath).parts)
+
+    # File in a tests/ or test/ or __tests__/ directory
+    if parts & {"tests", "test", "__tests__"}:
+        return True
+
+    # Filename matches test patterns
+    return any(p.match(name) for p in _TEST_PATTERNS)
+
+
+def is_exempt_file(filepath: str) -> bool:
+    """Check if a file is exempt from TDD enforcement."""
+    name = os.path.basename(filepath)
+    ext = os.path.splitext(name)[1].lower()
+
+    # Exempt extensions
+    if ext in _EXEMPT_EXTENSIONS:
+        return True
+
+    # Exempt directory segments
+    parts = set(Path(filepath).parts)
+    if parts & _EXEMPT_DIR_SEGMENTS:
+        return True
+
+    # __init__.py files (structural, not behavioral)
+    if name == "__init__.py":
+        return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Git helpers
+# ---------------------------------------------------------------------------
+
+def find_git_root(filepath: str) -> str | None:
+    """Find the git repo root for a given file path.
+
+    Walks up from the file's directory to find the nearest existing parent,
+    since the target file (and its immediate parent) may not exist yet.
+    """
+    search_dir = Path(filepath).parent
+    while not search_dir.is_dir():
+        parent = search_dir.parent
+        if parent == search_dir:
+            return None  # hit filesystem root
+        search_dir = parent
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+            cwd=str(search_dir),
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def has_tests_directory(repo_root: str) -> bool:
+    """Check if the repo has a tests/ directory."""
+    return (Path(repo_root) / "tests").is_dir()
+
+
+def get_modified_files(repo_root: str) -> list[str]:
+    """Get all modified, staged, and untracked files in the working tree."""
+    files: list[str] = []
+
+    try:
+        # Unstaged modifications
+        r1 = subprocess.run(
+            ["git", "diff", "--name-only"],
+            capture_output=True, text=True, timeout=5, cwd=repo_root,
+        )
+        if r1.returncode == 0:
+            files.extend(f for f in r1.stdout.strip().split("\n") if f)
+
+        # Staged modifications
+        r2 = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            capture_output=True, text=True, timeout=5, cwd=repo_root,
+        )
+        if r2.returncode == 0:
+            files.extend(f for f in r2.stdout.strip().split("\n") if f)
+
+        # Untracked new files
+        r3 = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            capture_output=True, text=True, timeout=5, cwd=repo_root,
+        )
+        if r3.returncode == 0:
+            files.extend(f for f in r3.stdout.strip().split("\n") if f)
+
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    return files
+
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+def allow() -> int:
+    """Allow the action."""
+    return 0
+
+
+def ask(hook_event: str, message: str) -> int:
+    """Prompt the user for confirmation."""
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": hook_event,
+            "permissionDecision": "ask",
+            "permissionDecisionReason": message,
+        }
+    }))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    try:
+        data = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+
+    hook_event = data.get("hook_event_name", "") or data.get("hookEventName", "")
+    tool_name = data.get("tool_name", "")
+    tool_input = data.get("tool_input", {})
+
+    if hook_event != "PreToolUse":
+        return 0
+    if tool_name not in ("Write", "Edit"):
+        return 0
+
+    # Extract file path from tool input
+    if not isinstance(tool_input, dict):
+        return 0
+    filepath = tool_input.get("file_path", "")
+    if not filepath:
+        return 0
+
+    # --- Exemption checks (fast path) ---
+
+    # Writing a test file? Always allow — this IS TDD
+    if is_test_file(filepath):
+        return allow()
+
+    # Exempt file type (config, docs, scripts, etc.)?
+    if is_exempt_file(filepath):
+        return allow()
+
+    # Not in a git repo? Allow — not "actual dev"
+    repo_root = find_git_root(filepath)
+    if not repo_root:
+        return allow()
+
+    # Repo has no tests/ directory? Allow — no test infrastructure
+    if not has_tests_directory(repo_root):
+        return allow()
+
+    # --- TDD enforcement ---
+
+    # Check if any test files have been modified in the working tree
+    modified_files = get_modified_files(repo_root)
+    has_test_changes = any(is_test_file(f) for f in modified_files)
+
+    if has_test_changes:
+        return allow()
+
+    # No test files modified — nudge toward TDD
+    rel_path = os.path.relpath(filepath, repo_root)
+    return ask(
+        hook_event,
+        f"TDD: writing to '{rel_path}' but no test files have been modified yet. "
+        f"Write the failing test first, or say 'proceed' to skip TDD for this change.",
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
