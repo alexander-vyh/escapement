@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>claude-workflow-setup — visual tour</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --fg: #1c1917;
+    --muted: #57534e;
+    --line: #e7e5e4;
+    --card: #ffffff;
+    --accent: #4338ca;
+    --accent-soft: #eef2ff;
+    --code-bg: #f5f5f4;
+
+    --hook-openspec: #4338ca;
+    --hook-tdd: #b91c1c;
+    --hook-outcome: #b45309;
+    --hook-agent: #047857;
+    --hook-serena: #6d28d9;
+
+    --phase-design: #4338ca;
+    --phase-validate: #b45309;
+    --phase-build: #047857;
+    --phase-learn: #6d28d9;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 16px;
+    line-height: 1.55;
+    scroll-snap-type: y mandatory;
+    overflow-y: scroll;
+    height: 100vh;
+  }
+
+  section.slide {
+    min-height: 100vh;
+    padding: 4rem 6rem;
+    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+
+  @media (max-width: 800px) {
+    section.slide { padding: 2.5rem 1.5rem; }
+  }
+
+  .slide-number {
+    position: absolute;
+    top: 1.5rem;
+    right: 2rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+  }
+
+  h1 { font-size: 3rem; margin: 0 0 1rem; letter-spacing: -0.02em; font-weight: 700; }
+  h2 { font-size: 2rem; margin: 0 0 1rem; letter-spacing: -0.01em; font-weight: 600; }
+  h3 { font-size: 1.15rem; margin: 0 0 0.5rem; font-weight: 600; }
+  .tagline { font-size: 1.25rem; color: var(--muted); margin-bottom: 2rem; }
+  .lede { font-size: 1.05rem; color: var(--muted); max-width: 65ch; }
+  p { max-width: 70ch; }
+  code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.9em; font-family: "SF Mono", Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); padding: 1rem 1.25rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid currentColor; }
+  a:hover { opacity: 0.7; }
+
+  .pill {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin-right: 0.4rem;
+  }
+
+  /* Layered card grid */
+  .layer-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.5rem; }
+  @media (max-width: 800px) { .layer-grid { grid-template-columns: 1fr; } }
+  .layer-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 1.25rem;
+  }
+  .layer-card .num { font-size: 0.7rem; color: var(--muted); letter-spacing: 0.1em; font-weight: 600; }
+  .layer-card h3 { margin-top: 0.4rem; }
+  .layer-card p { font-size: 0.9rem; color: var(--muted); margin: 0.5rem 0 0; }
+  .layer-card .path { font-family: monospace; font-size: 0.78rem; color: var(--accent); margin-top: 0.6rem; }
+
+  /* Flow diagram (core pattern) */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    align-items: flex-start;
+    margin-top: 1.5rem;
+    font-size: 0.95rem;
+  }
+  .flow-step {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    padding: 0.65rem 1rem;
+    border-radius: 4px;
+    min-width: 380px;
+  }
+  .flow-step .label { font-weight: 600; }
+  .flow-step .hint { font-size: 0.85rem; color: var(--muted); margin-top: 0.15rem; }
+  .flow-arrow { color: var(--muted); padding-left: 1rem; font-size: 0.85rem; }
+
+  /* Molecule timeline */
+  .timeline {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 1.5rem;
+    flex-wrap: wrap;
+  }
+  .ts {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.85rem;
+    flex: 1;
+    min-width: 130px;
+    text-align: center;
+    position: relative;
+  }
+  .ts.gate { border-style: dashed; background: #fef3c7; border-color: #ca8a04; }
+  .ts .phase-tag {
+    display: block;
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.2rem;
+    font-weight: 600;
+  }
+  .ts.phase-design { border-top: 3px solid var(--phase-design); }
+  .ts.phase-validate { border-top: 3px solid var(--phase-validate); }
+  .ts.phase-build { border-top: 3px solid var(--phase-build); }
+  .ts.phase-learn { border-top: 3px solid var(--phase-learn); }
+  .ts.gate.phase-design { border-top: 3px solid var(--phase-design); }
+  .ts.gate.phase-validate { border-top: 3px solid var(--phase-validate); }
+
+  .phase-legend { display: flex; gap: 1.25rem; margin-top: 0.75rem; font-size: 0.8rem; color: var(--muted); flex-wrap: wrap; }
+  .phase-legend span { display: flex; align-items: center; gap: 0.4rem; }
+  .phase-legend .swatch { width: 12px; height: 12px; border-radius: 2px; }
+
+  /* Lists with one-line descriptions */
+  .item-list { list-style: none; padding: 0; margin: 1.5rem 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 1.5rem; }
+  @media (max-width: 800px) { .item-list { grid-template-columns: 1fr; } }
+  .item-list li {
+    border-left: 2px solid var(--line);
+    padding: 0.3rem 0.75rem;
+    font-size: 0.92rem;
+  }
+  .item-list li strong { font-family: monospace; font-weight: 600; font-size: 0.88em; }
+  .item-list li .desc { color: var(--muted); }
+
+  /* Hook groups */
+  .hook-group { margin-top: 1.2rem; }
+  .hook-group h3 { display: flex; align-items: center; gap: 0.6rem; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .hook-group .marker { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .hook-group.openspec .marker { background: var(--hook-openspec); }
+  .hook-group.tdd .marker { background: var(--hook-tdd); }
+  .hook-group.outcome .marker { background: var(--hook-outcome); }
+  .hook-group.agent .marker { background: var(--hook-agent); }
+  .hook-group.serena .marker { background: var(--hook-serena); }
+  .hook-group ul { list-style: none; padding: 0; margin: 0.5rem 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.2rem 1.5rem; font-size: 0.85rem; }
+  @media (max-width: 800px) { .hook-group ul { grid-template-columns: 1fr; } }
+  .hook-group li { padding: 0.15rem 0; }
+  .hook-group li strong { font-family: monospace; font-size: 0.88em; }
+  .hook-group li .desc { color: var(--muted); }
+
+  /* Borrow recommendations */
+  .borrow {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1rem 1.5rem;
+    margin-top: 1.5rem;
+    max-width: 70ch;
+  }
+  .borrow .level { font-weight: 700; color: var(--accent); padding-top: 0.1rem; }
+  .borrow .what strong { font-family: monospace; font-size: 0.92em; }
+  .borrow .what { font-size: 0.95rem; }
+  .borrow .what .why { color: var(--muted); font-size: 0.88em; display: block; margin-top: 0.2rem; }
+
+  /* Warnings */
+  .warn {
+    border-left: 3px solid #b45309;
+    background: #fef3c7;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    font-size: 0.95rem;
+    border-radius: 0 4px 4px 0;
+  }
+  .warn strong { display: block; margin-bottom: 0.15rem; }
+
+  /* Progress dots */
+  .nav-dots {
+    position: fixed;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    z-index: 100;
+  }
+  .nav-dots a {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--line);
+    border: none;
+    display: block;
+    transition: background 0.2s;
+  }
+  .nav-dots a.active { background: var(--accent); }
+
+  /* Hint */
+  .nav-hint {
+    position: fixed;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.75rem;
+    color: var(--muted);
+    background: var(--card);
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    z-index: 100;
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav-dots" id="nav-dots"></nav>
+<div class="nav-hint">arrows ↑↓ or scroll to navigate</div>
+
+<!-- ============================================================== -->
+<section class="slide" id="s1">
+  <div class="slide-number">01</div>
+  <h1>claude-workflow-setup</h1>
+  <div class="tagline">OpenSpec, opinionated.</div>
+  <p class="lede">
+    A snapshot of one working Claude Code setup. Built on top of
+    <a href="https://github.com/Fission-AI/OpenSpec">OpenSpec</a>,
+    wired to <a href="https://github.com/steveyegge/beads">Beads</a>,
+    enforced by Claude Code hooks. Strong opinions. Take what's useful, ignore the rest.
+  </p>
+  <p class="lede" style="margin-top:0.5rem;">
+    <a href="https://github.com/alexander-vyh/claude-workflow-setup">github.com/alexander-vyh/claude-workflow-setup</a>
+  </p>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s2">
+  <div class="slide-number">02</div>
+  <h2>What this actually is</h2>
+  <p>A <strong>workflow built on OpenSpec</strong>, not a replacement. Four overlays:</p>
+  <div class="layer-grid">
+    <div class="layer-card">
+      <div class="num">01</div>
+      <h3>Adversarial discovery</h3>
+      <p>Riskiest-assumption, pre-mortem, red/blue team, walking-skeleton — injected as internal prompts; <em>not</em> visible in the output docs.</p>
+    </div>
+    <div class="layer-card">
+      <div class="num">02</div>
+      <h3>Bridge to beads</h3>
+      <p>OpenSpec's <code>tasks.md</code> becomes a real task graph via <code>bd create --spec-id …</code>. Agents execute against acceptance criteria linked back to specs.</p>
+    </div>
+    <div class="layer-card">
+      <div class="num">03</div>
+      <h3>Molecule formula</h3>
+      <p><code>mol-feature</code> orchestrates brainstorm → discovery → skeleton → build → retro as a single <code>bd mol pour</code> command with two human gates.</p>
+    </div>
+    <div class="layer-card">
+      <div class="num">04</div>
+      <h3>Discipline hooks</h3>
+      <p>Tool-call-level enforcement: TDD-first, named-agent teams, outcome verification, spec-ID linkage, never-suppress.</p>
+    </div>
+  </div>
+  <p style="margin-top:1.5rem; font-size:0.95rem; color:var(--muted);">
+    The artifacts on disk — <code>proposal.md</code>, <code>design.md</code>, <code>specs/*.md</code>, <code>tasks.md</code> — are standard OpenSpec. A teammate using bare OpenSpec can read them with zero extra context.
+  </p>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s3">
+  <div class="slide-number">03</div>
+  <h2>The core loop</h2>
+  <div class="flow">
+    <div class="flow-step">
+      <div class="label">you say "build X"</div>
+      <div class="hint">A user prompt with feature-intent keywords</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step">
+      <div class="label">mol-feature (beads)</div>
+      <div class="hint">Root epic + 9 step tasks (2 are gates) created via <code>bd mol pour</code></div>
+    </div>
+    <div class="flow-arrow">↓  step: discovery</div>
+    <div class="flow-step">
+      <div class="label">/discovery skill</div>
+      <div class="hint">Adversarial overlay on OpenSpec CLI → writes <code>openspec/changes/{name}/{proposal,design,specs/*,tasks}.md</code></div>
+    </div>
+    <div class="flow-arrow">↓  step: work-breakdown</div>
+    <div class="flow-step">
+      <div class="label">/work-breakdown skill</div>
+      <div class="hint">Reads openspec/, writes <code>bd spec</code> issues (<code>--acceptance</code>) and <code>bd task</code> issues (<code>--spec-id</code> linked)</div>
+    </div>
+    <div class="flow-arrow">↓  step: execute-skeleton → review → execute-full</div>
+    <div class="flow-step">
+      <div class="label">parallel named agents</div>
+      <div class="hint">Implement tasks, reading <code>--acceptance</code> via <code>--spec-id</code>. Each agent gates on a Test Oracle Brief before writing code.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s4">
+  <div class="slide-number">04</div>
+  <h2>The molecule lifecycle</h2>
+  <p>9 steps · 2 gates · 4 phases</p>
+  <div class="timeline">
+    <div class="ts phase-design"><span class="phase-tag">Design</span>brainstorm</div>
+    <div class="ts phase-design"><span class="phase-tag">Design</span>discovery</div>
+    <div class="ts gate phase-design"><span class="phase-tag">Gate</span>review-discovery</div>
+    <div class="ts phase-design"><span class="phase-tag">Design</span>work-breakdown</div>
+    <div class="ts phase-validate"><span class="phase-tag">Validate</span>execute-skeleton</div>
+    <div class="ts gate phase-validate"><span class="phase-tag">Gate</span>review-skeleton</div>
+    <div class="ts phase-build"><span class="phase-tag">Build</span>execute-full</div>
+    <div class="ts phase-learn"><span class="phase-tag">Learn</span>ceremony-retro</div>
+    <div class="ts phase-learn"><span class="phase-tag">Learn</span>outcome-check</div>
+  </div>
+  <div class="phase-legend">
+    <span><span class="swatch" style="background:var(--phase-design);"></span> Design</span>
+    <span><span class="swatch" style="background:var(--phase-validate);"></span> Validate</span>
+    <span><span class="swatch" style="background:var(--phase-build);"></span> Build</span>
+    <span><span class="swatch" style="background:var(--phase-learn);"></span> Learn</span>
+    <span style="margin-left:1rem;">⌐ dashed border = human gate</span>
+  </div>
+  <p style="margin-top:1.5rem; font-size:0.9rem; color:var(--muted);">
+    Each step is a <code>bd</code> issue with a <code>description</code> that tells Claude what to do — often "run /discovery" or "dispatch named agents via TeamCreate". The formula is the script; the skills are the subroutines.
+  </p>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s5">
+  <div class="slide-number">05</div>
+  <h2>Six layers — adopt one, some, or all</h2>
+  <div class="layer-grid">
+    <div class="layer-card">
+      <div class="num">LAYER 1</div>
+      <h3>Formulas</h3>
+      <p>Workflow definitions for <code>bd mol pour</code> — 9-step <code>mol-feature</code> and 2-step <code>mol-rapid</code>.</p>
+      <div class="path">beads/formulas/*.json</div>
+    </div>
+    <div class="layer-card">
+      <div class="num">LAYER 2</div>
+      <h3>Skills</h3>
+      <p>The "how" for each step. Discovery, work-breakdown, beads-execution, oracle review, plus parallel-agent dispatch wrappers.</p>
+      <div class="path">claude/skills/*/SKILL.md</div>
+    </div>
+    <div class="layer-card">
+      <div class="num">LAYER 3</div>
+      <h3>Commands</h3>
+      <p>Slash-command shims: <code>/discovery</code>, <code>/work-breakdown</code>, <code>/brainstorm</code>, <code>/review</code>.</p>
+      <div class="path">claude/commands/*.md</div>
+    </div>
+    <div class="layer-card">
+      <div class="num">LAYER 4</div>
+      <h3>Rules</h3>
+      <p>Global discipline — TDD-first, agent teams, outcome ownership, never-suppress, Serena-first.</p>
+      <div class="path">claude/rules/*.md</div>
+    </div>
+    <div class="layer-card">
+      <div class="num">LAYER 5</div>
+      <h3>Hooks</h3>
+      <p>Tool-call-level enforcement. 21 Python/shell scripts grouped into 5 functional families.</p>
+      <div class="path">claude/hooks/*.py</div>
+    </div>
+    <div class="layer-card">
+      <div class="num">LAYER 6</div>
+      <h3>Bootstrap</h3>
+      <p>SessionStart hook that auto-inits openspec, beads, direnv, and Serena per repo.</p>
+      <div class="path">scripts/project-bootstrap.sh</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s6">
+  <div class="slide-number">06</div>
+  <h2>The skill stack</h2>
+  <p>Eight skills. Each wraps a step of the workflow.</p>
+  <ul class="item-list">
+    <li><strong>build</strong> — <span class="desc">front-door router; classifies the work, pours the right molecule</span></li>
+    <li><strong>brainstorming</strong> — <span class="desc">"should we build this at all?" pre-filter with rotating creative lenses</span></li>
+    <li><strong>discovery</strong> — <span class="desc">adversarial wrapper on OpenSpec CLI; injects pre-mortem, red/blue team, walking-skeleton</span></li>
+    <li><strong>work-breakdown</strong> — <span class="desc">reads <code>openspec/changes/{name}/</code>, creates bd spec + task issues with spec-id links</span></li>
+    <li><strong>beads-execution</strong> — <span class="desc">reads <code>bd ready</code>, dispatches named-team subagents per task</span></li>
+    <li><strong>behavioral-test-oracle-review</strong> — <span class="desc">required Test Oracle Brief before any behavioral code change</span></li>
+    <li><strong>dispatching-parallel-agents</strong> — <span class="desc">mandatory TeamCreate + named agents; no anonymous dispatch</span></li>
+    <li><strong>subagent-driven-development</strong> — <span class="desc">two-stage review per task: spec compliance → code quality</span></li>
+  </ul>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s7">
+  <div class="slide-number">07</div>
+  <h2>The rules — opinions, made explicit</h2>
+  <ul class="item-list">
+    <li><strong>planning-discipline.md</strong> — <span class="desc">pour <code>mol-feature</code> for any non-trivial work</span></li>
+    <li><strong>tdd-enforcement.md</strong> — <span class="desc">failing test FIRST in any test-capable repo</span></li>
+    <li><strong>agent-teams-default.md</strong> — <span class="desc"><code>TeamCreate</code> + named agents for anything multi-step</span></li>
+    <li><strong>outcome-ownership.md</strong> — <span class="desc">done = verified end-to-end, not "compiles"</span></li>
+    <li><strong>molecule-awareness.md</strong> — <span class="desc">surface active molecules on every session start</span></li>
+    <li><strong>beads-worktree-integration.md</strong> — <span class="desc"><code>bd worktree create</code>, not <code>git worktree add</code></span></li>
+    <li><strong>never-suppress.md</strong> — <span class="desc">no <code>#noqa</code>, no <code>--no-verify</code>, no test downgrades</span></li>
+    <li><strong>serena-first.md</strong> — <span class="desc">symbol tools over full-file Read when Serena is onboarded</span></li>
+  </ul>
+  <p style="margin-top:1.5rem; font-size:0.9rem; color:var(--muted);">
+    Read each before installing. Edit to match your philosophy. These are not universally applicable — TDD and never-suppress in particular will feel restrictive in repos with legacy suppression patterns.
+  </p>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s8">
+  <div class="slide-number">08</div>
+  <h2>The hooks — what the rules can't enforce alone</h2>
+
+  <div class="hook-group openspec">
+    <h3><span class="marker"></span> OpenSpec workflow</h3>
+    <ul>
+      <li><strong>openspec_init_guard</strong> <span class="desc">— block openspec commands when openspec/ missing</span></li>
+      <li><strong>design_doc_location_guard</strong> <span class="desc">— warn on docs/plans/ design docs</span></li>
+      <li><strong>discovery-gate</strong> <span class="desc">— block bd create of features without design doc</span></li>
+      <li><strong>discovery-nudge</strong> <span class="desc">— nudge /discovery on feature-intent prompts</span></li>
+      <li><strong>discovery-close-gate</strong> <span class="desc">— surface proof-of-delivery on bd close</span></li>
+      <li><strong>spec_id_enforcement</strong> <span class="desc">— require --spec-id under mol-feature</span></li>
+      <li><strong>mol_status_check</strong> <span class="desc">— surface active molecules on session start</span></li>
+    </ul>
+  </div>
+
+  <div class="hook-group tdd">
+    <h3><span class="marker"></span> TDD + test oracle discipline</h3>
+    <ul>
+      <li><strong>tdd-gate</strong> <span class="desc">— require test edits before implementation</span></li>
+      <li><strong>test_oracle_brief_gate</strong> <span class="desc">— require Test Oracle Brief for code changes</span></li>
+      <li><strong>test_reminder</strong> <span class="desc">— PostToolUse nudge to run tests</span></li>
+      <li><strong>implementation_echo_test_gate</strong> <span class="desc">— reject tests that echo implementation</span></li>
+      <li><strong>oracle_downgrade_warning_gate</strong> <span class="desc">— warn on test oracle weakening</span></li>
+      <li><strong>outcome_assertion_gate</strong> <span class="desc">— on PR create, gate on assertion quality</span></li>
+    </ul>
+  </div>
+
+  <div class="hook-group outcome">
+    <h3><span class="marker"></span> Outcome verification + shirking</h3>
+    <ul>
+      <li><strong>validate_no_shirking</strong> <span class="desc">— block "pre-existing failure" evasion</span></li>
+      <li><strong>review_gate</strong> <span class="desc">— soft gate on bd close without review agent</span></li>
+      <li><strong>review_nudge</strong> <span class="desc">— nudge /review on review-intent prompts</span></li>
+    </ul>
+  </div>
+
+  <div class="hook-group agent">
+    <h3><span class="marker"></span> Agent discipline</h3>
+    <ul>
+      <li><strong>enforce_named_agents</strong> <span class="desc">— block anonymous or teamless multi-agent dispatch</span></li>
+      <li><strong>context_burn_detector</strong> <span class="desc">— nudge agent dispatch after excessive inline research</span></li>
+      <li><strong>session_cleanup</strong> <span class="desc">— clean /tmp state from the above</span></li>
+    </ul>
+  </div>
+
+  <div class="hook-group serena">
+    <h3><span class="marker"></span> Serena navigation (silent unless onboarded)</h3>
+    <ul>
+      <li><strong>serena_preference_gate</strong> <span class="desc">— block full-file Read when Serena available</span></li>
+      <li><strong>serena_preference_injection</strong> <span class="desc">— UserPromptSubmit guidance toward symbol tools</span></li>
+      <li><strong>serena_onboarding_check</strong> <span class="desc">— nudge onboarding when missing</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s9">
+  <div class="slide-number">09</div>
+  <h2>What to borrow</h2>
+  <p>Not interested in the whole stack? Here's the ordered shopping list.</p>
+  <div class="borrow">
+    <div class="level">If you take ONE thing</div>
+    <div class="what">
+      <strong>The adversarial discovery overlays</strong> in <code>claude/skills/discovery/SKILL.md</code>.
+      <span class="why">Plain OpenSpec discovery, plus internal prompts for riskiest-assumption, pre-mortem, red/blue team, walking-skeleton. Output looks like normal OpenSpec — only the thinking that produced it changed.</span>
+    </div>
+
+    <div class="level">If you take TWO</div>
+    <div class="what">
+      <strong>+ the spec-ID linkage</strong> in <code>claude/skills/work-breakdown/SKILL.md</code> and <code>claude/hooks/spec_id_enforcement.py</code>.
+      <span class="why">Connects OpenSpec specs to beads tasks so agents working a task can read its acceptance criteria directly. The hook makes it impossible to forget.</span>
+    </div>
+
+    <div class="level">If you take THREE</div>
+    <div class="what">
+      <strong>+ never-suppress.md and outcome-ownership.md</strong>.
+      <span class="why">Two short discipline rules. No <code>#noqa</code>, no <code>--no-verify</code>, no test downgrades; "done" means the user's outcome is happening, not "compiles." Drop into <code>~/.claude/rules/</code> and they're live.</span>
+    </div>
+
+    <div class="level">If you take EVERYTHING</div>
+    <div class="what">
+      <strong>Clone the repo, run <code>./INSTALL.sh</code>, merge <code>settings.template.json</code>.</strong>
+      <span class="why">Symlink-based install — <code>git pull</code> updates your live config. Existing files backed up to <code>*.backup-{timestamp}</code> first.</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s10">
+  <div class="slide-number">10</div>
+  <h2>Warnings</h2>
+
+  <div class="warn">
+    <strong>This is opinionated.</strong>
+    The rules will feel restrictive if your project lacks test infrastructure or relies on legacy suppression patterns. Read <code>claude/rules/</code> before installing. Edit to match your philosophy.
+  </div>
+
+  <div class="warn">
+    <strong>Hooks are load-bearing.</strong>
+    Skills produce guidance. Hooks produce enforcement. Skills without hooks → Claude drifts. Hooks without skills → blocks without a path forward. Install both, or neither.
+  </div>
+
+  <div class="warn">
+    <strong>Path assumptions.</strong>
+    Bootstrap script is gated on <code>~/GitHub/*</code>. Some rules reference <code>~/GitHub/</code> paths. Edit if your repos live elsewhere.
+  </div>
+
+  <div class="warn">
+    <strong>Personal config not bundled.</strong>
+    <code>~/.claude/settings.json</code> (auth, permissions) and <code>~/.claude/projects/*/memory/</code> are excluded. The installer manages only the workflow files.
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s11">
+  <div class="slide-number">11</div>
+  <h2>Try it</h2>
+  <pre><code>git clone https://github.com/alexander-vyh/claude-workflow-setup ~/GitHub/claude-workflow-setup
+cd ~/GitHub/claude-workflow-setup
+./INSTALL.sh
+# then manually merge claude/settings.template.json into ~/.claude/settings.json</code></pre>
+  <h3 style="margin-top:2rem;">Validation prompt for the first session</h3>
+  <p>Open Claude Code in a fresh git repo under <code>~/GitHub/</code> and say:</p>
+  <pre><code>let's build a small feature to validate the setup — add a /status slash command</code></pre>
+  <p>Claude should pour <code>mol-feature</code> and walk you through brainstorm → discovery → review → breakdown → skeleton → build → retro. If that flow happens end-to-end, you're wired correctly.</p>
+  <h3 style="margin-top:2rem;">Uninstall</h3>
+  <pre><code>./INSTALL.sh --uninstall   # removes symlinks; backups left alone</code></pre>
+</section>
+
+<!-- ============================================================== -->
+<section class="slide" id="s12">
+  <div class="slide-number">12</div>
+  <h2>Credits</h2>
+  <p>The substance comes from elsewhere; this repo is the glue.</p>
+  <ul class="item-list">
+    <li><strong>OpenSpec</strong> <span class="desc">— the structured change-management framework this workflow runs on top of</span></li>
+    <li><strong>Beads</strong> <span class="desc">— graph-based task tracker designed for AI agents, with molecule formulas as a templating layer</span></li>
+    <li><strong>Serena</strong> <span class="desc">— LSP-backed semantic code navigation; the rule + hooks make it the default during build</span></li>
+    <li><strong>Walking-skeleton thinking</strong> <span class="desc">— riskiest assumption first, 1–3 tasks, 30–60 min each</span></li>
+    <li><strong>Manager Tools / Radical Candor / Playing to Win</strong> <span class="desc">— the rules' flavor on outcome ownership and feedback</span></li>
+    <li><strong>Lencioni / Grove / Brené Brown</strong> <span class="desc">— outcome-ownership and psychological safety underpinnings</span></li>
+  </ul>
+  <p style="margin-top:2rem;">
+    Built by <a href="https://github.com/alexander-vyh">Alexander Vyhmeister</a>. Questions or pairing? Reach out on Slack or open an issue.
+  </p>
+</section>
+
+<script>
+  // Build progress dots
+  const slides = document.querySelectorAll('section.slide');
+  const navDots = document.getElementById('nav-dots');
+  slides.forEach((s, i) => {
+    const a = document.createElement('a');
+    a.href = '#' + s.id;
+    a.dataset.idx = i;
+    a.title = 'Slide ' + (i + 1);
+    navDots.appendChild(a);
+  });
+
+  const dots = navDots.querySelectorAll('a');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (e.isIntersecting) {
+        const idx = Array.from(slides).indexOf(e.target);
+        dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+      }
+    });
+  }, { threshold: 0.5 });
+  slides.forEach((s) => observer.observe(s));
+
+  // Keyboard navigation
+  document.addEventListener('keydown', (e) => {
+    const active = document.querySelector('.nav-dots a.active');
+    const idx = active ? Number(active.dataset.idx) : 0;
+    let next = idx;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown' || e.key === 'j') {
+      next = Math.min(slides.length - 1, idx + 1);
+      e.preventDefault();
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'k') {
+      next = Math.max(0, idx - 1);
+      e.preventDefault();
+    } else if (e.key === 'Home') {
+      next = 0;
+      e.preventDefault();
+    } else if (e.key === 'End') {
+      next = slides.length - 1;
+      e.preventDefault();
+    }
+    if (next !== idx) slides[next].scrollIntoView({ behavior: 'smooth' });
+  });
+</script>
+
+</body>
+</html>
