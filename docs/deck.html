@@ -249,6 +249,21 @@
     border: 1px solid var(--line);
     z-index: 100;
   }
+
+  /* Pour moments */
+  .pour-moments { margin-top: 1.25rem; display: flex; flex-direction: column; gap: 0.9rem; }
+  .moment { display: grid; grid-template-columns: 2rem 1fr; gap: 1rem; align-items: start; }
+  .moment-num {
+    width: 1.75rem; height: 1.75rem; border-radius: 50%;
+    background: var(--accent); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: 0.8rem;
+    margin-top: 0.1rem;
+  }
+  .moment-body { min-width: 0; }
+  .moment-title { font-weight: 600; margin-bottom: 0.3rem; font-size: 0.95rem; }
+  .moment-body pre { margin: 0; font-size: 0.75rem; line-height: 1.4; }
+  .moment-body p { font-size: 0.9rem; margin: 0; max-width: none; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -365,8 +380,85 @@
 </section>
 
 <!-- ============================================================== -->
+<!-- ============================================================== -->
 <section class="slide" id="s5">
   <div class="slide-number">05</div>
+  <h2>What a <code>mol-feature</code> pour produces</h2>
+  <p>Five concrete moments, in order.</p>
+
+  <div class="pour-moments">
+
+    <div class="moment">
+      <div class="moment-num">1</div>
+      <div class="moment-body">
+        <div class="moment-title">You pour the molecule</div>
+        <pre><code>bd mol pour mol-feature \
+  --var name="add-status-cmd" \
+  --var problem="agents need a /status slash command"</code></pre>
+      </div>
+    </div>
+
+    <div class="moment">
+      <div class="moment-num">2</div>
+      <div class="moment-body">
+        <div class="moment-title">Beads creates an epic + 9 step tasks, with dependencies wired up</div>
+        <pre><code>repo-abc        [epic]    add-status-cmd
+repo-abc.1      [step]    brainstorm           ready
+repo-abc.2      [step]    discovery            blocked
+repo-abc.3      [gate]    review-discovery     blocked
+repo-abc.4      [step]    work-breakdown       blocked
+repo-abc.5      [step]    execute-skeleton     blocked
+repo-abc.6      [gate]    review-skeleton      blocked
+repo-abc.7      [step]    execute-full         blocked
+repo-abc.8      [step]    ceremony-retro       blocked
+repo-abc.9      [step]    outcome-check        blocked</code></pre>
+      </div>
+    </div>
+
+    <div class="moment">
+      <div class="moment-num">3</div>
+      <div class="moment-body">
+        <div class="moment-title">Next prompt: <code>mol_status_check</code> fires on SessionStart</div>
+        <pre><code>Active molecule: add-status-cmd  (Design phase)
+Current step: brainstorm  [ready]
+Next: run /brainstorm or /discovery to start.</code></pre>
+      </div>
+    </div>
+
+    <div class="moment">
+      <div class="moment-num">4</div>
+      <div class="moment-body">
+        <div class="moment-title">Artifacts accumulate as each step completes</div>
+        <pre><code>after discovery        openspec/changes/add-status-cmd/
+                         &#x251C;&#x2500; proposal.md
+                         &#x251C;&#x2500; design.md
+                         &#x251C;&#x2500; specs/{capability}.md
+                         &#x2514;&#x2500; tasks.md
+
+after work-breakdown   repo-abc.spec.*   bd spec issues (--acceptance)
+                       repo-abc.task.*   bd task issues (--spec-id linked)
+
+after execute-full     production code + passing tests
+                       all task issues closed</code></pre>
+      </div>
+    </div>
+
+    <div class="moment">
+      <div class="moment-num">5</div>
+      <div class="moment-body">
+        <div class="moment-title">Two gates pause for your approval</div>
+        <p>
+          <strong>review-discovery</strong> &mdash; design.md and specs are ready: approve, or revise?<br>
+          <strong>review-skeleton</strong> &mdash; walking skeleton validated the riskiest assumption: proceed to full build, or back to design?
+        </p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="slide-number">06</div>
   <h2>Six layers — adopt one, some, or all</h2>
   <div class="layer-grid">
     <div class="layer-card">
@@ -409,8 +501,8 @@
 </section>
 
 <!-- ============================================================== -->
-<section class="slide" id="s6">
-  <div class="slide-number">06</div>
+<section class="slide" id="s7">
+  <div class="slide-number">07</div>
   <h2>The skill stack</h2>
   <p>Eight skills. Each wraps a step of the workflow.</p>
   <ul class="item-list">
@@ -426,8 +518,8 @@
 </section>
 
 <!-- ============================================================== -->
-<section class="slide" id="s7">
-  <div class="slide-number">07</div>
+<section class="slide" id="s8">
+  <div class="slide-number">08</div>
   <h2>The rules — opinions, made explicit</h2>
   <ul class="item-list">
     <li><strong>planning-discipline.md</strong> — <span class="desc">pour <code>mol-feature</code> for any non-trivial work</span></li>
@@ -445,8 +537,8 @@
 </section>
 
 <!-- ============================================================== -->
-<section class="slide" id="s8">
-  <div class="slide-number">08</div>
+<section class="slide" id="s9">
+  <div class="slide-number">09</div>
   <h2>The hooks — what the rules can't enforce alone</h2>
 
   <div class="hook-group openspec">
@@ -503,8 +595,8 @@
 </section>
 
 <!-- ============================================================== -->
-<section class="slide" id="s9">
-  <div class="slide-number">09</div>
+<section class="slide" id="s10">
+  <div class="slide-number">10</div>
   <h2>What to borrow</h2>
   <p>Not interested in the whole stack? Here's the ordered shopping list.</p>
   <div class="borrow">
@@ -535,8 +627,8 @@
 </section>
 
 <!-- ============================================================== -->
-<section class="slide" id="s10">
-  <div class="slide-number">10</div>
+<section class="slide" id="s11">
+  <div class="slide-number">11</div>
   <h2>Warnings</h2>
 
   <div class="warn">
@@ -561,8 +653,8 @@
 </section>
 
 <!-- ============================================================== -->
-<section class="slide" id="s11">
-  <div class="slide-number">11</div>
+<section class="slide" id="s12">
+  <div class="slide-number">12</div>
   <h2>Try it</h2>
   <pre><code>git clone https://github.com/alexander-vyh/claude-workflow-setup ~/GitHub/claude-workflow-setup
 cd ~/GitHub/claude-workflow-setup
@@ -577,8 +669,8 @@ cd ~/GitHub/claude-workflow-setup
 </section>
 
 <!-- ============================================================== -->
-<section class="slide" id="s12">
-  <div class="slide-number">12</div>
+<section class="slide" id="s13">
+  <div class="slide-number">13</div>
   <h2>Credits</h2>
   <p>The substance comes from elsewhere; this repo is the glue.</p>
   <ul class="item-list">
