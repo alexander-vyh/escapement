@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "hooks": {
     "SessionStart": [
       {
@@ -16,6 +17,11 @@
             "type": "command",
             "command": "python3 ~/.claude/hooks/mol_status_check.py",
             "timeout": 10000
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/serena_onboarding_check.sh",
+            "timeout": 5000
           }
         ]
       }
@@ -27,6 +33,20 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/implementation_echo_test_gate.py",
+            "timeout": 10000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/oracle_downgrade_warning_gate.py",
+            "timeout": 10000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
           }
         ]
       },
@@ -110,7 +130,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/tdd-gate.py"
+            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "timeout": 5000
           }
         ]
       },
@@ -119,13 +145,83 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/tdd-gate.py"
+            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__serena__replace_symbol_body",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__serena__insert_after_symbol",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__serena__insert_before_symbol",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "timeout": 5000
           }
         ]
       },
       {
         "matcher": "Read",
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
+          },
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/context_burn_detector.py"
@@ -149,26 +245,6 @@
             "command": "python3 ~/.claude/hooks/context_burn_detector.py"
           }
         ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/hooks/external_comment_gate.py",
-            "statusMessage": "Checking for external comments..."
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__plugin_slack_slack__slack_send_message|mcp__plugin_slack_slack__slack_send_message_draft|mcp__plugin_slack_slack__slack_schedule_message|mcp__plugin_slack_slack__slack_create_canvas|mcp__plugin_slack_slack__slack_update_canvas|mcp__claude_ai_Gmail__gmail_create_draft",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/hooks/external_comment_gate.py",
-            "statusMessage": "Checking for external comments..."
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
@@ -181,38 +257,15 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/review_nudge.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/serena_preference_injection.py"
           }
         ]
       }
     ],
     "PostToolUse": [
-      {
-        "matcher": "Bash(gcloud run jobs execute:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "osascript -e 'display notification \"Cloud Run job completed\" with title \"Claude Code\"'"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(terraform apply:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "osascript -e 'display notification \"Terraform apply completed\" with title \"Claude Code\"'"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(gcloud run jobs executions:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "osascript -e 'display notification \"GCloud execution completed\" with title \"Claude Code\"'"
-          }
-        ]
-      },
       {
         "matcher": "Write",
         "hooks": [
@@ -240,16 +293,6 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/pre-compact-save.sh"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
@@ -260,9 +303,5 @@
         ]
       }
     ]
-  },
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "ANTHROPIC_CUSTOM_HEADERS": "anthropic-beta: context-1m-2025-08-07"
   }
 }

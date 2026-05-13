@@ -63,6 +63,7 @@ declare -a PLAN=(
   "claude/skills/brainstorming|$CLAUDE_DIR/skills/brainstorming"
   "claude/skills/build|$CLAUDE_DIR/skills/build"
   "claude/skills/beads-execution|$CLAUDE_DIR/skills/beads-execution"
+  "claude/skills/behavioral-test-oracle-review|$CLAUDE_DIR/skills/behavioral-test-oracle-review"
   "claude/skills/dispatching-parallel-agents|$CLAUDE_DIR/skills/dispatching-parallel-agents"
   "claude/skills/subagent-driven-development|$CLAUDE_DIR/skills/subagent-driven-development"
 
@@ -73,6 +74,8 @@ declare -a PLAN=(
   "claude/rules/agent-teams-default.md|$CLAUDE_DIR/rules/agent-teams-default.md"
   "claude/rules/outcome-ownership.md|$CLAUDE_DIR/rules/outcome-ownership.md"
   "claude/rules/beads-worktree-integration.md|$CLAUDE_DIR/rules/beads-worktree-integration.md"
+  "claude/rules/never-suppress.md|$CLAUDE_DIR/rules/never-suppress.md"
+  "claude/rules/serena-first.md|$CLAUDE_DIR/rules/serena-first.md"
 
   # Commands
   "claude/commands/discovery.md|$CLAUDE_DIR/commands/discovery.md"
@@ -90,11 +93,19 @@ declare -a PLAN=(
   "claude/hooks/spec_id_enforcement.py|$CLAUDE_DIR/hooks/spec_id_enforcement.py"
   "claude/hooks/enforce_named_agents.py|$CLAUDE_DIR/hooks/enforce_named_agents.py"
   "claude/hooks/tdd-gate.py|$CLAUDE_DIR/hooks/tdd-gate.py"
+  "claude/hooks/test_oracle_brief_gate.py|$CLAUDE_DIR/hooks/test_oracle_brief_gate.py"
+  "claude/hooks/test_reminder.py|$CLAUDE_DIR/hooks/test_reminder.py"
+  "claude/hooks/implementation_echo_test_gate.py|$CLAUDE_DIR/hooks/implementation_echo_test_gate.py"
+  "claude/hooks/oracle_downgrade_warning_gate.py|$CLAUDE_DIR/hooks/oracle_downgrade_warning_gate.py"
   "claude/hooks/outcome_assertion_gate.py|$CLAUDE_DIR/hooks/outcome_assertion_gate.py"
-  "claude/hooks/outcome-gate.sh|$CLAUDE_DIR/hooks/outcome-gate.sh"
   "claude/hooks/review_gate.py|$CLAUDE_DIR/hooks/review_gate.py"
   "claude/hooks/review_nudge.py|$CLAUDE_DIR/hooks/review_nudge.py"
   "claude/hooks/validate_no_shirking.py|$CLAUDE_DIR/hooks/validate_no_shirking.py"
+  "claude/hooks/context_burn_detector.py|$CLAUDE_DIR/hooks/context_burn_detector.py"
+  "claude/hooks/session_cleanup.py|$CLAUDE_DIR/hooks/session_cleanup.py"
+  "claude/hooks/serena_preference_gate.py|$CLAUDE_DIR/hooks/serena_preference_gate.py"
+  "claude/hooks/serena_preference_injection.py|$CLAUDE_DIR/hooks/serena_preference_injection.py"
+  "claude/hooks/serena_onboarding_check.sh|$CLAUDE_DIR/hooks/serena_onboarding_check.sh"
 
   # Bootstrap
   "scripts/project-bootstrap.sh|$CLAUDE_DIR/project-bootstrap.sh"
