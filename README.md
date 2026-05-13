@@ -141,11 +141,11 @@ Each step's `description` tells Claude what to do — often "run /discovery" or 
 build                              ← front-door router; pours the right molecule
   └─ brainstorming                 ← "should we build this at all?" pre-filter
        └─ discovery                ← adversarial wrapper on openspec CLI
-            └─ behavioral-test-oracle-review  ← test oracle brief, pre-impl
-                 └─ work-breakdown ← openspec → beads spec+task issues
-                      └─ beads-execution  ← dispatches agents for bd ready
-                           └─ dispatching-parallel-agents
-                           └─ subagent-driven-development
+            └─ work-breakdown      ← openspec → beads spec+task issues
+                 └─ beads-execution  ← dispatches agents for bd ready
+                      ├─ behavioral-test-oracle-review  ← brief before each code change
+                      ├─ dispatching-parallel-agents
+                      └─ subagent-driven-development
 ```
 
 ### The hooks (what the rules can't enforce alone)
