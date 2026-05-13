@@ -22,7 +22,7 @@ you say "build X"
         │
         ▼
 ┌───────────────────────────┐
-│ mol-feature (beads)       │  root epic + 10 step tasks + gates
+│ mol-feature (beads)       │  root epic + 9 step tasks (2 are gates)
 └──────────┬────────────────┘
            │ step: discovery
            ▼
@@ -121,7 +121,7 @@ If that flow happens end-to-end, everything is wired correctly.
 
 ### The molecule formula (`beads/formulas/mol-feature.formula.json`)
 
-Ten steps, two human gates, three phases (Design / Validate / Build / Learn):
+Nine steps, two human gates, four phases (Design / Validate / Build / Learn):
 
 ```
 brainstorm ──▶ discovery ──▶ [GATE: review-discovery] ──▶ work-breakdown
