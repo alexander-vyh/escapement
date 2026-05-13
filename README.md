@@ -1,11 +1,15 @@
 # Claude Workflow Setup
 
-An opinionated Claude Code workflow that wires together **OpenSpec** (design docs),
-**Beads** (task graph), and a **molecule formula** that orchestrates the full
-brainstorm → design → skeleton → build → retro lifecycle.
+A workflow built **on top of [OpenSpec](https://github.com/Fission-AI/OpenSpec)**, adding:
 
-This is a snapshot of one working setup. It is not a product, not maintained for
-general consumption, and not universally applicable. Read, adapt, cherry-pick.
+- **Adversarial overlays** on OpenSpec's discovery step (riskiest-assumption, pre-mortem, red/blue team, walking-skeleton sections injected as internal prompts — not visible in the output docs).
+- **A bridge to [Beads](https://github.com/steveyegge/beads)** so OpenSpec's `tasks.md` becomes a real task graph (`bd create --spec-id ...`) that agents can execute against.
+- **A molecule formula** (`mol-feature`) that orchestrates the full brainstorm → discovery → skeleton → build → retro lifecycle with two human gates.
+- **Claude Code hooks, rules, and skills** that enforce the workflow at the tool-call level: TDD-first, named-agent teams, outcome-verification, OpenSpec init checks, spec-ID linkage, never-suppress discipline, Serena-first navigation.
+
+**This does not replace OpenSpec — it uses it.** The `/discovery` skill calls `openspec init`, `openspec instructions`, and `openspec status` under the hood. The `proposal.md` / `design.md` / `specs/*.md` files written are standard OpenSpec artifacts. Engineers comfortable with bare OpenSpec can read the changes a teammate produced through this workflow with no extra context.
+
+> ⚠️ This is a snapshot of one working setup, not a product. Read, adapt, cherry-pick. The opinions are strong.
 
 ---
 
@@ -25,9 +29,9 @@ you say "build X"
 ┌───────────────────────────┐
 │ /discovery skill          │  adversarial overlay on OpenSpec CLI
 │   └─ writes ──────────────┼──▶ openspec/changes/{name}/
-│                           │     ├─ proposal.md
-│                           │     ├─ design.md
-│                           │     ├─ specs/*.md  (requirement IDs)
+│                           │     ├─ proposal.md   ← standard OpenSpec
+│                           │     ├─ design.md     ← + adversarial sections
+│                           │     ├─ specs/*.md    ← requirement IDs
 │                           │     └─ tasks.md
 └──────────┬────────────────┘
            │ step: work-breakdown
@@ -48,15 +52,13 @@ you say "build X"
 | Layer | Files | What it buys you |
 |------|------|------------------|
 | **1. Formulas** | `beads/formulas/*.json` | 10-step workflow definition for `bd mol pour` |
-| **2. Skills** | `claude/skills/*/` | The "how" for each step — discovery, work-breakdown, execution |
-| **3. Commands** | `claude/commands/*.md` | Slash-command shims (`/discovery`, `/work-breakdown`, etc.) |
-| **4. Rules** | `claude/rules/*.md` | Global instructions — TDD, agent teams, outcome ownership |
-| **5. Hooks** | `claude/hooks/*.py` | Enforcement (spec_id, openspec init, discovery gates) |
-| **6. Bootstrap** | `scripts/project-bootstrap.sh` | SessionStart hook auto-inits openspec/beads in new repos |
+| **2. Skills** | `claude/skills/*/` | The "how" for each step — discovery, work-breakdown, execution, oracle review |
+| **3. Commands** | `claude/commands/*.md` | Slash-command shims (`/discovery`, `/work-breakdown`, `/brainstorm`, `/review`) |
+| **4. Rules** | `claude/rules/*.md` | Global discipline — TDD, agent teams, outcome ownership, never-suppress, Serena-first |
+| **5. Hooks** | `claude/hooks/*.py` | Tool-call-level enforcement (see below) |
+| **6. Bootstrap** | `scripts/project-bootstrap.sh` | SessionStart hook auto-inits openspec/beads/serena per repo |
 
-Each layer adds value without requiring the ones above it. You can install just
-the skills. You can install skills + formulas but skip hooks. You can install
-everything. Start small.
+Each layer adds value without requiring the ones above. You can install just the skills, or skills + formulas without hooks. Start small.
 
 ---
 
@@ -64,39 +66,32 @@ everything. Start small.
 
 | Tool | Install | Verify |
 |------|---------|--------|
-| `openspec` | `brew install openspec` | `openspec --version` |
-| `bd` (beads) | [github.com/steveyegge/beads](https://github.com/steveyegge/beads) | `bd --version` (tested against v0.49.0) |
+| `openspec` | `brew install openspec` (or `npm i -g @fission-ai/openspec`) | `openspec --version` |
+| `bd` (beads) | [github.com/steveyegge/beads](https://github.com/steveyegge/beads) | `bd --version` |
 | `direnv` | `brew install direnv` | `direnv version` |
 | `python3` | usually present | `python3 --version` (3.9+) |
 | `jq` | `brew install jq` | `jq --version` |
 | `git`, `bash` | usually present | — |
 
-Claude Code itself must be installed and working.
+Claude Code itself must be installed and working. [Serena MCP](https://github.com/oraios/serena) is optional but the navigation hooks are silent unless `.serena/memories` exists in a project.
 
 ---
 
 ## Install
 
 ```bash
-git clone <this-repo> ~/GitHub/claude-workflow-setup
+git clone https://github.com/alexander-vyh/claude-workflow-setup ~/GitHub/claude-workflow-setup
 cd ~/GitHub/claude-workflow-setup
 ./INSTALL.sh
 ```
 
-`INSTALL.sh` creates **symlinks** from `~/.claude/` and `~/.beads/` into this
-repo — so `git pull` in this repo updates your live config.
-
-Existing files are moved to `<file>.backup-<timestamp>` before being replaced.
-Nothing is silently overwritten.
+`INSTALL.sh` creates **symlinks** from `~/.claude/` and `~/.beads/` into this repo — so `git pull` in this repo updates your live config. Existing files are moved to `<file>.backup-<timestamp>` before being replaced. Nothing is silently overwritten.
 
 ### Settings merge (you do this by hand)
 
-Your `~/.claude/settings.json` probably exists and contains your personal
-permissions and auth config. The installer does NOT overwrite it.
+Your `~/.claude/settings.json` likely exists and contains your personal permissions and auth config. The installer does NOT overwrite it.
 
-Instead, open `claude/settings.template.json` and manually merge the `hooks`
-and `env` blocks into your existing `~/.claude/settings.json`. Or if you have
-no existing settings, copy the template as a starting point:
+Open `claude/settings.template.json` and merge the `hooks` block into your existing `~/.claude/settings.json`. Or if you have no existing settings, copy the template as a starting point:
 
 ```bash
 cp claude/settings.template.json ~/.claude/settings.json
@@ -109,17 +104,14 @@ cp claude/settings.template.json ~/.claude/settings.json
 
 After installing and merging settings:
 
-1. Open Claude Code in a fresh git repo under `~/GitHub/` (the bootstrap script
-   is gated on that path — edit `scripts/project-bootstrap.sh:24-27` to widen).
-2. On SessionStart, the bootstrap script runs:
+1. Open Claude Code in a fresh git repo under `~/GitHub/` (the bootstrap script is gated on that path — edit `scripts/project-bootstrap.sh:24-27` to widen).
+2. On SessionStart, the bootstrap script runs (idempotent, fail-open):
    - `direnv allow` on any `.envrc`
    - `openspec init --tools claude` if `openspec/` is missing
    - `bd init --prefix <repo-name>` if `.beads/` is missing
-   - Prompts for serena onboarding (interactive)
-3. Say: *"let's build a small feature to validate the setup — add a /status
-   slash command"*
-4. Claude should respond by pouring `mol-feature` and walking you through:
-   brainstorm → discovery → review → breakdown → skeleton → build → retro.
+   - Prompts for Serena onboarding (interactive)
+3. Say: *"let's build a small feature to validate the setup — add a /status slash command"*
+4. Claude should respond by pouring `mol-feature` and walking you through: brainstorm → discovery → review → breakdown → skeleton → build → retro.
 
 If that flow happens end-to-end, everything is wired correctly.
 
@@ -141,32 +133,58 @@ brainstorm ──▶ discovery ──▶ [GATE: review-discovery] ──▶ work
                               execute-full ──▶ ceremony-retro ──▶ outcome-check
 ```
 
-Each step's `description` tells Claude what to do — often "run /discovery" or
-"dispatch named agents via TeamCreate". The formula is the script; the skills
-are the subroutines.
+Each step's `description` tells Claude what to do — often "run /discovery" or "dispatch named agents via TeamCreate". The formula is the script; the skills are the subroutines.
 
-### The skill stack
+### The skills
 
 ```
-build        ← front-door router; classifies the work, pours the right molecule
-  └─ brainstorming     ← "should we even build this?" pre-filter
-       └─ discovery    ← adversarial wrapper on openspec CLI; produces design doc
-            └─ work-breakdown  ← reads openspec, writes beads spec+task issues
-                 └─ beads-execution  ← dispatches parallel agents for bd ready tasks
-                      └─ dispatching-parallel-agents / subagent-driven-development
+build                              ← front-door router; pours the right molecule
+  └─ brainstorming                 ← "should we build this at all?" pre-filter
+       └─ discovery                ← adversarial wrapper on openspec CLI
+            └─ behavioral-test-oracle-review  ← test oracle brief, pre-impl
+                 └─ work-breakdown ← openspec → beads spec+task issues
+                      └─ beads-execution  ← dispatches agents for bd ready
+                           └─ dispatching-parallel-agents
+                           └─ subagent-driven-development
 ```
 
-### The hook stack (what the rules can't enforce alone)
+### The hooks (what the rules can't enforce alone)
 
-- **`openspec_init_guard.py`** — ensures `openspec init` runs before `openspec new change`
-- **`spec_id_enforcement.py`** — blocks `bd create --type task` without `--spec-id`
-- **`discovery-gate.py`** — blocks `bd create` on feature-scale work without discovery first
-- **`mol_status_check.py`** — SessionStart hook that surfaces active molecules
-- **`enforce_named_agents.py`** — blocks `Agent(...)` calls without `name` + `team_name`
-- **`tdd-gate.py`** — requires a failing test before implementation in test-capable repos
-- **`validate_no_shirking.py`** — catches premature "done" declarations
+Grouped by what they protect:
 
-See each file's top-of-file docstring for exact trigger logic.
+**OpenSpec workflow**
+- `openspec_init_guard.py` — blocks `openspec` commands when `openspec/` doesn't exist
+- `design_doc_location_guard.py` — warns when design docs go to `docs/plans/` instead of `openspec/changes/`
+- `discovery-gate.py` — blocks `bd create` of features/epics without a design doc
+- `discovery-nudge.py` — nudges `/discovery` when a prompt looks like feature work
+- `discovery-close-gate.py` — on `bd close`, surfaces proof-of-delivery + anti-metrics
+- `spec_id_enforcement.py` — blocks `bd create --type task` under `mol-feature` without `--spec-id`
+- `mol_status_check.py` — SessionStart, surfaces active molecules
+
+**TDD + test oracle discipline**
+- `tdd-gate.py` — requires test file modification before implementation
+- `test_oracle_brief_gate.py` — requires `.agent/runtime/test-oracle-brief.md` for behavioral code changes
+- `test_reminder.py` — PostToolUse nudge to run tests after edits
+- `implementation_echo_test_gate.py` — rejects tests that echo the implementation
+- `oracle_downgrade_warning_gate.py` — warns on test-oracle weakening in diffs
+- `outcome_assertion_gate.py` — on `gh pr create`, blocks tests with only structural assertions
+
+**Outcome verification + shirking**
+- `validate_no_shirking.py` — blocks "pre-existing failure" evasion at commit/PR/Stop
+- `review_gate.py` — soft gate on `bd close` if no review agent was dispatched
+- `review_nudge.py` — UserPromptSubmit, nudges `/review` on review-intent prompts
+
+**Agent discipline**
+- `enforce_named_agents.py` — blocks anonymous agents and multi-agent dispatch without `TeamCreate`
+- `context_burn_detector.py` — nudges agent dispatch after excessive inline research
+- `session_cleanup.py` — SessionStart, cleans /tmp state from the above
+
+**Serena navigation discipline** (silent unless `.serena/memories` exists)
+- `serena_preference_gate.py` — blocks full-file Read on code when Serena is available
+- `serena_preference_injection.py` — UserPromptSubmit, steers toward Serena symbol tools
+- `serena_onboarding_check.sh` — SessionStart, nudges Serena onboarding when missing
+
+Each hook's docstring at the top of the file is authoritative — read it before editing.
 
 ---
 
@@ -175,41 +193,36 @@ See each file's top-of-file docstring for exact trigger logic.
 ### This is opinionated
 
 The `rules/` directory encodes strong opinions:
+
 - **`planning-discipline.md`** — `mol-feature` on any non-trivial work
 - **`tdd-enforcement.md`** — failing test FIRST in any test-capable repo
-- **`agent-teams-default.md`** — default to `TeamCreate` + named agents for anything multi-step
+- **`agent-teams-default.md`** — `TeamCreate` + named agents for anything multi-step
 - **`outcome-ownership.md`** — done = verified end-to-end, not "my change compiles"
 - **`molecule-awareness.md`** — surface active molecules on every session start
+- **`beads-worktree-integration.md`** — `bd worktree create` instead of `git worktree add`
+- **`never-suppress.md`** — no `# noqa`, no `--no-verify`, no test downgrades — fix the underlying issue
+- **`serena-first.md`** — symbol tools over full-file Read when Serena is onboarded
 
-Read the rules BEFORE installing. Edit to match your philosophy. These are not
-universally applicable — the TDD rule in particular is load-bearing and will
-feel restrictive if your project has no test infrastructure.
+Read the rules BEFORE installing. Edit to match your philosophy. These are not universally applicable — the TDD and never-suppress rules in particular will feel restrictive if your project has no test infrastructure or relies on legacy suppression patterns.
 
 ### Hooks are load-bearing
 
-Skills produce guidance. Hooks produce enforcement. If you install skills
-without hooks, Claude can and will drift from the workflow. If you install
-hooks without skills, the hooks will block things without offering a path
-forward.
+Skills produce guidance. Hooks produce enforcement. If you install skills without hooks, Claude can and will drift from the workflow. If you install hooks without skills, the hooks will block things without offering a path forward.
 
 Install both, or neither.
 
 ### Path assumptions
 
-The bootstrap script (`scripts/project-bootstrap.sh:24-27`) is gated on
-`~/GitHub/*`. If your repos live elsewhere, edit that case statement or
-parameterize it.
+The bootstrap script (`scripts/project-bootstrap.sh:24-27`) is gated on `~/GitHub/*`. If your repos live elsewhere, edit that case statement or parameterize it.
 
-Some rules reference `~/GitHub/` paths directly — grep before installing if
-you're particular about that.
+Some rules reference `~/GitHub/` paths directly — `grep -r '~/GitHub' claude/rules/` before installing if you're particular about that.
 
 ### Not shared
 
 Deliberately excluded from this bundle:
-- `~/.claude/settings.json` (contains personal auth + permissions) — only the
-  `hooks` and `env` blocks are templated
-- `~/.claude/projects/*/memory/` (personal memory)
-- `~/.claude/hooks/` hooks unrelated to openspec/beads flow (statusline, etc.)
+- `~/.claude/settings.json` (personal auth + permissions) — only the `hooks` block is templated
+- `~/.claude/projects/*/memory/` (per-project memory)
+- General-utility hooks unrelated to the workflow (statusline, transcript backup, IDE wrappers, context injection)
 - `~/.beads/` databases
 
 ---
@@ -220,19 +233,18 @@ Deliberately excluded from this bundle:
 ./INSTALL.sh --uninstall
 ```
 
-Removes all symlinks. Your `.backup-<timestamp>` files are left alone — rename
-them back manually to restore your previous config.
+Removes all symlinks. Your `.backup-<timestamp>` files are left alone — rename them back manually to restore your previous config.
 
 ---
 
-## Credits and philosophy
+## Credits
 
-This setup synthesizes ideas from:
-- **OpenSpec** — structured change management for AI-assisted development
-- **Beads** — graph-based task tracker designed for AI agents
-- **Steven Gong's walking skeleton** — riskiest assumption first, 1-3 tasks, 30-60 min
-- **Manager Tools, Radical Candor, Playing to Win** — the rules' flavor
-- **Lencioni / Grove / Brené Brown** — outcome-ownership and psychological safety
+The substance comes from elsewhere; this repo is the glue.
 
-The glue — molecule formulas, skill overlays, hook enforcement — is my own
-iteration, not a product. Expect to modify.
+- **[OpenSpec](https://github.com/Fission-AI/OpenSpec)** — the structured change-management framework this workflow runs on top of. The discovery skill is an opinionated wrapper, not a replacement.
+- **[Beads](https://github.com/steveyegge/beads)** — graph-based task tracker designed for AI agents, with molecule formulas as a workflow templating layer.
+- **[Serena](https://github.com/oraios/serena)** — LSP-backed semantic code navigation; the Serena rule + hooks make it the default during the build phase.
+- **Walking-skeleton thinking** (Steven Gong et al.) — riskiest assumption first, 1–3 tasks, 30–60 min each.
+- **Manager Tools, Radical Candor, Playing to Win, Lencioni, Grove, Brené Brown** — the rules' flavor on outcome ownership, feedback, and psychological safety.
+
+The glue — molecule formulas, skill overlays, hook enforcement, settings template — is my own iteration, not a product. Expect to modify before adopting.
