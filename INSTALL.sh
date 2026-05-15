@@ -87,6 +87,7 @@ declare -a PLAN=(
   "claude/hooks/openspec_init_guard.py|$CLAUDE_DIR/hooks/openspec_init_guard.py"
   "claude/hooks/design_doc_location_guard.py|$CLAUDE_DIR/hooks/design_doc_location_guard.py"
   "claude/hooks/discovery-gate.py|$CLAUDE_DIR/hooks/discovery-gate.py"
+  "claude/hooks/discovery_input_gate.py|$CLAUDE_DIR/hooks/discovery_input_gate.py"
   "claude/hooks/discovery-nudge.py|$CLAUDE_DIR/hooks/discovery-nudge.py"
   "claude/hooks/discovery-close-gate.py|$CLAUDE_DIR/hooks/discovery-close-gate.py"
   "claude/hooks/mol_status_check.py|$CLAUDE_DIR/hooks/mol_status_check.py"

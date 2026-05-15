@@ -85,7 +85,106 @@ After cycling through all seven, start over. The point is never to stay in one f
 
 ---
 
-## Section 5: Terminal Routing
+## Section 5: Convergent Interview — Confirm the Problem Framing
+
+Sections 1-4 are **divergent** — they explore the space and fight premature
+convergence. This section is **convergent**: it narrows to ONE confirmed problem
+framing that downstream skills can trust without re-deriving it.
+
+It runs AFTER the user has picked a direction (post-Section 3 probe) and BEFORE
+terminal routing. Its length is set by how much shared understanding already
+exists — if Sections 1-4 already nailed the six fields below, this is a fast
+confirmation pass; if major fields are still fuzzy, it is a long branch-walking
+interview. Do not skip it because it feels redundant; confirm explicitly.
+
+### The interview
+
+Conduct a relentless, one-question-at-a-time interview. This is NOT a batch of
+questions — it is a branch-walking conversation where each answer shapes the
+next question.
+
+- **One question at a time.** Never present a batch. Ask, wait, hear the answer,
+  then form the next question from it.
+- **Every question carries your recommended answer.** Do not ask blanks. Propose:
+  "I'd assume [X] because [Y] — correct, or not?" The user reviews and corrects;
+  they do not author from scratch. Reviewing is faster than authoring.
+- **Walk the branches.** When an answer opens a dependency, follow it to its root
+  before moving on. ("We'd cap it culturally" → "who enforces the cultural norm?"
+  → "no one's named yet" → "then who owns the what-and-why here?")
+- **Verify, don't ask, when you can.** If a question can be answered by reading
+  the codebase or docs, do that instead of asking the user.
+- **Terminate on confirmed shared understanding, NOT on question count.** There
+  is no target number. The interview ends when all six fields are confirmed by
+  the user — not when you have asked "enough."
+- **Do NOT drift into solutioning.** This section narrows the *problem*, the
+  *why*, and the *riskiest assumption*. The moment you find yourself proposing
+  *how* to build it, stop — that is discovery's job, and moving it here just
+  relocates the over-permissiveness upstream.
+
+### The six fields — the interview is done when all six are confirmed
+
+Each field must be **confirmed by the user**, not inferred and assumed:
+
+1. **Problem** — the observable thing that is wrong. Not "what we'll build."
+2. **Why now** — the forcing reason this is worth doing now, not later or never.
+3. **Decision authority** — who owns the *what* and *why*. If there is no
+   distinct owner (a solo project, a personal tool), that is a valid answer:
+   record `none — [reason]` (e.g. "none — solo project, I own it"). What is NOT
+   acceptable is leaving it `TBD` or blank — that means the question was skipped,
+   not answered.
+4. **Behavioral population** — who must change their behavior for this to work.
+   If the work requires no behavior change from anyone (a library, a standalone
+   script), that is a valid answer: record `none — [reason]`. When there IS a
+   population, name it specifically — the most dangerous framing error is
+   describing the problem in terms of one group while the people who must
+   actually change are a different group.
+5. **Riskiest assumption + liveness** — "We are betting [X]. We will know we are
+   wrong when [Y]. We would discover that within ~2 weeks via [Z]." All three
+   blanks filled. If you cannot fill [Z], the assumption is not yet testable —
+   keep interviewing.
+6. **Success criteria** — the observable real-world outcome that means this
+   worked. Not "it ships," not "tests pass."
+
+### Forcing check on the riskiest assumption
+
+After the user confirms field 5, ask one more question before moving on:
+
+> "If this assumption turns out false two weeks from now — what would you do
+> differently? One sentence."
+
+If the user can answer that cold, the assumption is genuinely owned. If they
+cannot, it was approved, not understood — return to field 5 and keep
+interviewing. This costs nothing when the understanding is real; it only adds
+time when the framing is thin, which is exactly when the time is worth spending.
+A hook can check that the riskiest assumption field is *filled*; only this
+exchange checks that it is *owned*.
+
+### Output: the problem-framing artifact
+
+When all six fields are confirmed, write them to:
+
+```
+openspec/changes/{name}/problem-framing.md
+```
+
+Derive `{name}` as kebab-case from the feature. Create the directory if it does
+not exist. The file has one `##` section per field, each holding the *confirmed*
+answer — not the interview transcript, not the questions. This artifact is
+discovery's required input; discovery will refuse to draft solution artifacts
+without it.
+
+**Verify the write before announcing.** After writing the file, read it back and
+confirm all six `##` sections are present and non-empty. If the write did not
+land — wrong directory, IO error, partial write — do NOT announce success and do
+NOT route to discovery. Surface the failure to the user instead. "Problem framing
+confirmed" must mean the file actually exists on disk, or routing to discovery
+will loop (discovery's gate denies, sends the user back here).
+
+Once verified, announce briefly: "Problem framing confirmed for '{name}'."
+
+---
+
+## Section 6: Terminal Routing
 
 After the user approves a design direction, determine complexity and route accordingly.
 
@@ -101,19 +200,19 @@ The idea needs further design if ANY of these are true:
 
 > "This is complex enough to need discovery. Here's why: [specific reason from brainstorming]."
 
-Then immediately invoke the Skill tool:
+Section 5's convergent interview has already written
+`openspec/changes/{name}/problem-framing.md`. Then immediately invoke the Skill tool:
 ```
 Skill(skill="discovery", args="<feature-name>")
 ```
 
-Build the `args` string to include the brainstorming context that discovery needs:
-- **Problem statement** from brainstorming
-- **Chosen direction** and rejected alternatives (with reasons)
-- **Open questions** that brainstorming couldn't resolve
+Do NOT re-pass the framing through `args` — it lives in `problem-framing.md`.
+Discovery detects that artifact, treats it as its confirmed input, and proceeds
+directly to solution design. Discovery does NOT re-explore the problem space.
 
-Discovery should NOT re-explore the problem space. It should focus on the unresolved questions and fill in the 7 required sections using the brainstorming output as input.
-
-If brainstorming can't converge to specific open questions, it hasn't produced value — go back and sharpen the questions before routing.
+If Section 5 could not converge all six fields — most often because decision
+authority is unnamed — discovery is not unblocked yet. Do not route. Name the
+missing field as the blocker and stop here.
 
 ### Route B: Ready for Planning
 

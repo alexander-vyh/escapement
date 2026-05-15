@@ -3,9 +3,10 @@ name: discovery
 description: >
   Pre-design-doc discovery skill. Fills the gap between "we should build X"
   and "here is the design doc." Produces genuine thinking through adversarial
-  questions, not checkbox compliance. Draft-and-react interaction model —
-  zero questions upfront, one max mid-draft. Uses OpenSpec as the structured
-  engine underneath — output goes to openspec/changes/{name}/.
+  questions, not checkbox compliance. Requires a confirmed problem framing as
+  input (Input Gate) — then drafts solutions via a draft-and-react model.
+  Uses OpenSpec as the structured engine underneath — output goes to
+  openspec/changes/{name}/.
 ---
 
 # Discovery Skill
@@ -56,7 +57,86 @@ On first use in any project, before any other step:
    this session." Then proceed in Unstructured Fallback Mode.
    If directories need to be created (e.g., `openspec/changes/`), create them silently.
 
+## Input Gate
+
+Discovery designs **solutions**. It does not define problems. Before drafting any
+solution artifact (`proposal.md`, `design.md`, `specs/`, `tasks.md`), discovery
+requires a **confirmed problem framing** — the six fields below, each confirmed by
+the user, not inferred by you.
+
+**This gate is the precondition for the Draft-and-React model below.** Draft-and-
+react is appropriate *because* the input is confirmed. Given an unconfirmed input,
+draft-and-react fabricates — it fills framing gaps with plausible prose that reads
+like a real plan. The gate is what makes draft-and-react safe.
+
+**Scope:** this gate applies to `feature` and `epic` schemas. `rapid`-schema work
+(bug fix, config change, spike) is exempt — it uses the lighter Socratic probe in
+the Draft-and-React section instead.
+
+### Required input — the six framing fields
+
+1. **Problem** — the observable thing that is wrong
+2. **Why now** — the forcing reason this is worth doing now
+3. **Decision authority** — who owns the *what* and *why*; `none — [reason]` is a
+   valid answer (solo or personal work). `TBD` or blank is not.
+4. **Behavioral population** — who must change behavior for this to work;
+   `none — [reason]` is valid (a library, a standalone script). `TBD` or blank is not.
+5. **Riskiest assumption + liveness** — "betting [X]; wrong when [Y]; would know within ~2 weeks via [Z]"
+6. **Success criteria** — the observable real-world outcome
+
+### Two acceptable sources
+
+**Source A — `problem-framing.md` (preferred).** Brainstorming's convergent
+interview writes `openspec/changes/{name}/problem-framing.md`. On invocation,
+check for it. If it exists with all six fields present and non-TBD, use it as the
+confirmed input and proceed to drafting.
+
+**Source B — inline framing.** If there is no `problem-framing.md`, the user may
+supply the framing inline. Do NOT silently infer it. Run a SHORT confirmation
+pass — one field at a time, each carrying your recommended answer ("Decision
+authority: I'd assume this is you — correct?"). The user confirms or corrects
+each. This is the grill-me pattern compressed: review-don't-author. When all six
+are confirmed, write them to `problem-framing.md` yourself, then proceed.
+
+### Hard stops
+
+- **No framing, OR any of the six fields unfilled (missing, blank, or `TBD`)** →
+  do not draft. A field that genuinely does not apply is filled with
+  `none — [reason]`, not left blank — so an unfilled field means the question was
+  skipped, not answered. There is no "ask and proceed" path: complete the framing
+  or do not draft. Route back, naming the specific gap so the user is not sent to
+  a blank slate: "I can't design against an unconfirmed framing — [field(s)]
+  [is/are] unfilled. Run `/brainstorming` to complete the framing, or give me
+  [that field] and I'll confirm it with you." If invoked from a molecule and
+  `problem-framing.md` is simply absent, say so directly — do not just say "run
+  /brainstorming" in a way that loops.
+- **Behavioral population and Problem describe different groups** → flag before
+  drafting (this is a flag, not a gate — but raise it): "The problem is framed
+  around [group A], but the people who must change behavior are [group B]. Which
+  is the real subject?" No discovery rigor fixes a misidentified subject.
+
+### The hook is a floor, not a ceiling
+
+A PreToolUse hook (`discovery_input_gate.py`) mechanically blocks solution
+drafting when `problem-framing.md` is missing or has unfilled fields. But the
+hook can only check that fields are *filled* — it cannot judge whether the
+content is *good*. A riskiest assumption that reads only "we will succeed" passes
+the hook. Content quality is the interview's job (brainstorming's forcing check)
+and the human's job — never treat a passing hook as a confirmed-quality framing.
+
+### Echo-back before drafting
+
+Once the framing is confirmed, before writing any artifact, echo back the
+constraints you are treating as binding: "Designing against: [problem], owned by
+[authority], betting [riskiest assumption]. The skeleton will test that
+assumption. Proceeding." This makes a bad framing visible at the handoff, not at
+audit.
+
 ## Interaction Model: Draft-and-React
+
+**Precondition: the Input Gate has passed.** Draft-and-react operates on a
+*confirmed* framing. If you have not cleared the Input Gate, you are not in
+draft-and-react yet — you are in the gate.
 
 **NOT interrogation.** Be resourceful before asking (SOUL.md principle). Instead:
 
@@ -79,7 +159,7 @@ On first use in any project, before any other step:
    Stop output, ask the question, wait for the answer. Example: "I can draft everything
    except the riskiest assumption — that has to come from you. What are you most unsure
    about?"
-5. **Zero questions upfront, one max mid-draft.**
+6. **Zero questions upfront, one max mid-draft.**
 
 ## Modes
 
@@ -258,6 +338,33 @@ would expect to be in scope, and you are explicitly excluding. Each non-goal mus
 - Answer: "What does this choice lock in?" — every non-goal is also an irreversible commitment
 - Make at least one person uncomfortable
 
+### Strategic Alternatives (in design, feature/epic only — skip for rapid)
+
+> **"What are the structurally different paths — including not doing this?"**
+
+The "Embedded alternative" in Riskiest Assumption names a different way to *build
+the same thing*. This is different: name the alternatives to building it at all.
+
+List 2-3 strategic alternatives, each with a one-line reason it was rejected:
+- **Do nothing / defer** — what happens if this is simply not done, or done later?
+- **Solve the problem differently** — a structurally different approach, not a
+  different implementation of the same one
+- **Buy / outsource / adopt** — is there an existing thing that removes the need
+  to build?
+
+Each rejection reason must be specific. "We need this" is not a reason — it is the
+absence of one. If you cannot articulate why the chosen path beats doing nothing,
+you have not earned the work.
+
+If brainstorming ran first, this section captures and confirms the alternatives
+its adversarial probe already surfaced — record them, do not re-derive them. If
+discovery was invoked directly, generate the alternatives and confirm them with
+the user before recording.
+
+This is a **recorded** section in the design document — unlike the pre-mortem and
+red/blue team, whose output stays internal. The reader of the design should be
+able to see what was on the table and why it was set aside.
+
 ### Riskiest Assumption (in design, all schemas)
 
 > **"I am betting [X]. I will know I'm wrong when [Y]."**
@@ -378,6 +485,22 @@ outcome statement:
 Future increments are addressed after learning from the skeleton. Designing them now
 is waste.
 
+### Open Questions (in design, feature/epic)
+
+Open Questions are unknowns the design surfaced but did not resolve. Each one must
+be marked for whether it blocks the walking skeleton:
+
+> **[SKELETON-BLOCKING]** — the skeleton cannot execute, or cannot produce a
+> trustworthy signal, until this is resolved.
+> **[DEFERRABLE]** — the skeleton can run without it; resolve before the
+> increment that actually needs it.
+
+A `[SKELETON-BLOCKING]` open question is not really an open question — it is an
+unfinished prerequisite. **Discovery is NOT complete while one remains
+unresolved.** Resolve it now (ask the user, read the code) or the skeleton is
+designed around a gap. The vue3 discovery deferred two skeleton-blocking unknowns
+past completion; the skeleton's hardest step was then designed blind.
+
 ## Section Status Tags
 
 Mark each section with exactly one tag:
@@ -424,7 +547,12 @@ Discovery is COMPLETE when:
 - All artifacts in `applyRequires` show `status: "done"` (check via
   `openspec status --change "{name}" --json`)
 - Riskiest assumption passed the liveness test and has a test plan
+- Strategic Alternatives section exists (feature/epic) — at least 2, each with a
+  specific rejection reason
 - Walking skeleton tasks exist (in tasks.md for feature/epic, inline in design.md for rapid)
+- Walking skeleton has at most 3 tasks (rapid: exactly 1) — an enforced gate, not
+  an aspiration. If the skeleton exceeds it, re-cut before completing.
+- No `[SKELETON-BLOCKING]` open question remains unresolved
 - User has approved the draft
 - Done signal has been announced to the user
 
