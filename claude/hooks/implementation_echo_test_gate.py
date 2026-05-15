@@ -358,7 +358,32 @@ def find_shared_generated_literals(source_files: dict[str, str], test_files: dic
     return issues
 
 
+_TRIPLE_DQ_RE = re.compile(r'""".*?"""', re.DOTALL)
+_TRIPLE_SQ_RE = re.compile(r"'''.*?'''", re.DOTALL)
+_LINE_DQ_RE = re.compile(r'"(?:\\.|[^"\\\n])*"')
+_LINE_SQ_RE = re.compile(r"'(?:\\.|[^'\\\n])*'")
+
+
+def blank_string_literals(text: str) -> str:
+    """Replace string-literal spans with same-shaped blanks (newlines kept,
+    every other char -> space).
+
+    Line-based scanners must not mistake code embedded in a string literal —
+    e.g. a `def test_...` fixture inside a pattern-detector's own test file —
+    for real code. Triple-quoted strings are blanked first so the single-line
+    passes cannot re-match their now-blank interiors. Length is preserved, so
+    indentation-based logic downstream is unaffected.
+    """
+    def _blank(m: "re.Match[str]") -> str:
+        return "".join("\n" if c == "\n" else " " for c in m.group(0))
+
+    for pat in (_TRIPLE_DQ_RE, _TRIPLE_SQ_RE, _LINE_DQ_RE, _LINE_SQ_RE):
+        text = pat.sub(_blank, text)
+    return text
+
+
 def extract_python_test_functions(text: str) -> list[tuple[str, str]]:
+    text = blank_string_literals(text)
     functions: list[tuple[str, str]] = []
     current_name: str | None = None
     current_indent = 0

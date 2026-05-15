@@ -10,3 +10,8 @@ Thumbs.db
 .idea/
 *.swp
 *~
+
+# Python test artifacts
+__pycache__/
+.pytest_cache/
+*.pyc

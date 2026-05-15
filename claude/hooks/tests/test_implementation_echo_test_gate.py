@@ -1,0 +1,172 @@
+import importlib.util
+import io
+import json
+import subprocess
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+
+TEST_DIR = Path(__file__).resolve().parent
+HOOK_PATH = TEST_DIR / "implementation_echo_test_gate.py"
+if not HOOK_PATH.exists():
+    HOOK_PATH = TEST_DIR.parent / "implementation_echo_test_gate.py"
+spec = importlib.util.spec_from_file_location("implementation_echo_test_gate", HOOK_PATH)
+gate = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+sys.modules["implementation_echo_test_gate"] = gate
+spec.loader.exec_module(gate)
+
+
+def init_repo(tmp_path: Path) -> Path:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    return tmp_path
+
+
+def run_hook(payload: dict) -> tuple[int, dict | None]:
+    stdout = io.StringIO()
+    with patch("sys.stdin", io.StringIO(json.dumps(payload))):
+        with patch("sys.stdout", stdout):
+            code = gate.main()
+    output = stdout.getvalue().strip()
+    return code, json.loads(output) if output else None
+
+
+def test_shared_generated_literal_detected():
+    source = {"src/app.py": "MEDIA_RECORD_TYPE_ID = '0124p000000ABCDEF1'\n"}
+    tests = {"tests/test_app.py": "def test_media():\n    assert id == '0124p000000ABCDEF1'\n"}
+
+    issues = gate.find_shared_generated_literals(source, tests)
+
+    assert len(issues) == 1
+    assert issues[0].kind == "shared-generated-literal"
+
+
+def test_shared_semantic_literal_not_detected():
+    source = {"src/app.py": "MEDIA = 'Media'\n"}
+    tests = {"tests/test_app.py": "def test_media():\n    assert row.type == 'Media'\n"}
+
+    assert gate.find_shared_generated_literals(source, tests) == []
+
+
+def test_python_mock_only_test_detected():
+    text = """
+def test_sync_calls_client(client):
+    sync(client)
+    client.send.assert_called_once_with('abc')
+"""
+
+    issues = gate.find_python_mock_only_tests("tests/test_sync.py", text)
+
+    assert len(issues) == 1
+    assert issues[0].kind == "mock-only-test"
+
+
+def test_python_mock_plus_outcome_allowed():
+    text = """
+def test_sync_persists_status(client, repo):
+    sync(client, repo)
+    client.send.assert_called_once()
+    assert repo.status == 'synced'
+"""
+
+    assert gate.find_python_mock_only_tests("tests/test_sync.py", text) == []
+
+
+def test_python_def_inside_string_literal_not_flagged():
+    """A test-shaped pattern inside a string literal is a fixture, not a test.
+
+    Pattern-detector hooks have test files whose whole job is to feed example
+    bad-test code (as string fixtures) to the detector. The gate must not
+    mistake those fixtures for real tests in the file being scanned.
+    """
+    text = '''
+EXAMPLE_BAD_TEST = """
+def test_sync_calls_client(client):
+    sync(client)
+    client.send.assert_called_once_with('abc')
+"""
+
+
+def test_real_one():
+    result = compute(2)
+    assert result == 4
+'''
+
+    # Only test_real_one is a real function, and it has an outcome assertion.
+    # The mock-only pattern lives inside EXAMPLE_BAD_TEST and must be ignored.
+    assert gate.find_python_mock_only_tests("tests/test_thing.py", text) == []
+
+
+def test_js_mock_only_test_detected():
+    text = """
+it('sends the event', () => {
+  const send = vi.fn()
+  run(send)
+  expect(send).toHaveBeenCalledWith('event')
+})
+"""
+
+    issues = gate.find_js_mock_only_tests("src/app.test.ts", text)
+
+    assert len(issues) == 1
+    assert issues[0].kind == "mock-only-test"
+
+
+def test_js_mock_plus_outcome_allowed():
+    text = """
+it('saves the event', () => {
+  const send = vi.fn()
+  const result = run(send)
+  expect(send).toHaveBeenCalledWith('event')
+  expect(result.status).toBe('saved')
+})
+"""
+
+    assert gate.find_js_mock_only_tests("src/app.test.ts", text) == []
+
+
+def test_commit_blocks_shared_generated_literal(tmp_path):
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "src" / "app.py").write_text("MEDIA_RECORD_TYPE_ID = '0124p000000ABCDEF1'\n", encoding="utf-8")
+    (repo / "tests" / "test_app.py").write_text(
+        "def test_media_filter():\n    assert record_type_id == '0124p000000ABCDEF1'\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": "git commit -m change"},
+    }
+
+    code, output = run_hook(payload)
+
+    assert code == 2
+    reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "IMPLEMENTATION-ECHO TEST GATE" in reason
+    assert "shared-generated-literal" in reason
+
+
+def test_non_finishing_command_allows_even_with_issue(tmp_path):
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "src" / "app.py").write_text("MEDIA_RECORD_TYPE_ID = '0124p000000ABCDEF1'\n", encoding="utf-8")
+    (repo / "tests" / "test_app.py").write_text(
+        "def test_media_filter():\n    assert record_type_id == '0124p000000ABCDEF1'\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": "pytest"},
+    }
+
+    code, output = run_hook(payload)
+
+    assert code == 0
+    assert output is None
