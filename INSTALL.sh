@@ -73,6 +73,7 @@ declare -a PLAN=(
   "claude/rules/tdd-enforcement.md|$CLAUDE_DIR/rules/tdd-enforcement.md"
   "claude/rules/agent-teams-default.md|$CLAUDE_DIR/rules/agent-teams-default.md"
   "claude/rules/outcome-ownership.md|$CLAUDE_DIR/rules/outcome-ownership.md"
+  "claude/rules/evidence-provenance.md|$CLAUDE_DIR/rules/evidence-provenance.md"
   "claude/rules/beads-worktree-integration.md|$CLAUDE_DIR/rules/beads-worktree-integration.md"
   "claude/rules/never-suppress.md|$CLAUDE_DIR/rules/never-suppress.md"
   "claude/rules/serena-first.md|$CLAUDE_DIR/rules/serena-first.md"

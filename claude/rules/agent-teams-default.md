@@ -88,6 +88,62 @@ The QA agent writes tests that the implementer must pass. The tests catch the ga
 between what the spec says and what the code does — because the tester never saw
 the code.
 
+The QA agent must write tests from the success criteria, business outcome,
+independent oracle, solution constraints, and invalid solution classes. The QA
+agent should not depend on the implementer's chosen code approach.
+
+The QA agent must produce:
+1. Behavioral tests for the outcome
+2. Positive and negative controls
+3. Contract, architecture, or static checks when invalid implementations could
+   otherwise pass
+4. A statement of which bad implementations the tests reject
+
+### Mutation Challenger Pattern
+
+For non-trivial behavior changes, dispatch a mutation-challenger before
+implementation. The mutation challenger does not write production code.
+
+The mutation challenger must:
+1. Read the Test Oracle Brief and proposed tests.
+2. Invent 2-5 plausible bad implementations.
+3. Include the known tempting shortcut.
+4. For each bad implementation, answer:
+   - Would the current tests/checks fail it?
+   - If not, what test/check must be strengthened?
+5. Block implementation until the named fragile implementation fails at least
+   one behavioral, fixture, contract, architecture, or static check.
+
+Common bad implementation classes:
+- Hardcoded generated IDs instead of semantic business keys
+- Filtering at the wrong layer
+- Testing only an intermediate artifact when the user cares about final output
+- Status code correct but persisted state wrong
+- Permission check mocked but real endpoint still allows access
+- Snapshot updated but interaction/accessibility behavior broken
+- Job stops crashing but output is incomplete or duplicated
+
+### Outcome Verifier
+
+After implementation and code review, dispatch an outcome-verifier. The
+outcome-verifier verifies the actual result the user cares about, not just test
+status or code quality.
+
+Examples:
+- Report task: run the report/query and inspect returned rows or metrics
+- API task: call the public endpoint and verify state, response, and permissions
+- UI task: exercise the user flow, not just component internals
+- Data task: verify the final fact/report, not only intermediate models
+- Sync job: verify target data is correct, complete, and in the expected location
+
+The outcome-verifier must not accept:
+- "Tests pass" as sufficient proof
+- "Implementation looks correct"
+- "Intermediate model is fixed" when the user cares about downstream output
+
+Tests pass only counts as outcome verification when those tests exercise the
+actual desired outcome and reject known fragile implementations.
+
 ### When to Pair
 
 - **Always pair** for feature/epic work with behavioral specs

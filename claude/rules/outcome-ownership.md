@@ -57,6 +57,23 @@ Before declaring done, answer honestly:
 
 If any answer is "no" — keep working.
 
+## Outcome Verification Is Not Test Passing
+
+Tests pass only counts as outcome verification when those tests exercise the
+actual desired user/business outcome and reject known fragile implementations.
+
+When the user cares about a report, API, UI flow, data model, sync job, or
+workflow, verify that final surface directly where possible:
+- Report: run the report/query and inspect returned rows or metrics
+- API: call the public endpoint and verify response, state, and permissions
+- UI: exercise the user flow, not just component internals
+- Data: verify the final fact/report, not only intermediate models
+- Sync job: verify target data is correct, complete, and in the expected location
+
+Do not accept "tests pass", "implementation looks correct", or "the intermediate
+artifact is fixed" as sufficient proof when the requested outcome lives
+downstream.
+
 ## When You May Actually Stop
 
 - You've verified the outcome works end-to-end — by RUNNING the actual workflow, not by reading code
