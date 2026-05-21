@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://claude-workflow-setup/harness/schemas/scheduled.schema.json",
+  "title": "ScheduledWakeups",
+  "description": "Per-thread durable wakeup entries. Array; multiple wakeups may coexist for the same thread.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["wake_at", "prompt", "thread_id", "created_by", "crash_count"],
+    "properties": {
+      "wake_at": {
+        "type": "string",
+        "format": "date-time",
+        "description": "ISO-8601 timestamp; gate counts only future-dated entries."
+      },
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Text injected as first user message on resume."
+      },
+      "thread_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "created_by": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Tool or process that registered this entry (e.g., 'ScheduleWakeup', 'adapter-fallback')."
+      },
+      "crash_count": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 0,
+        "description": "Incremented if a wakeup fires while a prior re-spawn for this thread is still active. Crash budget enforcement is v0.1+."
+      }
+    }
+  }
+}

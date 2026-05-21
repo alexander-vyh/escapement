@@ -1,0 +1,9 @@
+# Runtime state — per-machine, per-session; never committed.
+threads/
+incidents.jsonl
+shadow.jsonl
+baseline-*.json
+shadow-report-*.md
+skeleton-verdict-*.md
+__pycache__/
+*.pyc
