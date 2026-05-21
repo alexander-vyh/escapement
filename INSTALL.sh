@@ -76,6 +76,7 @@ declare -a PLAN=(
   "claude/rules/beads-worktree-integration.md|$CLAUDE_DIR/rules/beads-worktree-integration.md"
   "claude/rules/never-suppress.md|$CLAUDE_DIR/rules/never-suppress.md"
   "claude/rules/serena-first.md|$CLAUDE_DIR/rules/serena-first.md"
+  "claude/rules/continuation-harness.md|$CLAUDE_DIR/rules/continuation-harness.md"
 
   # Commands
   "claude/commands/discovery.md|$CLAUDE_DIR/commands/discovery.md"
