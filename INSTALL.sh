@@ -52,7 +52,7 @@ for tool in openspec bd direnv python3 jq git bash; do
   fi
 done
 
-run "mkdir -p '$CLAUDE_DIR'/{skills,rules,commands,hooks} '$BEADS_DIR'/formulas"
+run "mkdir -p '$CLAUDE_DIR'/{skills,rules,commands,hooks,harness} '$CLAUDE_DIR'/harness/threads '$BEADS_DIR'/formulas"
 
 # --- Symlink plan: (source_relative_to_repo, dest_absolute) ---
 # Preserves directory structure. For skill directories, symlink the whole dir.
@@ -110,6 +110,13 @@ declare -a PLAN=(
   "claude/hooks/serena_preference_injection.py|$CLAUDE_DIR/hooks/serena_preference_injection.py"
   "claude/hooks/serena_onboarding_check.sh|$CLAUDE_DIR/hooks/serena_onboarding_check.sh"
   "claude/hooks/tests|$CLAUDE_DIR/hooks/tests"
+
+  # Continuation harness — code symlinked into ~/.claude/harness; runtime state
+  # (threads/, incidents.jsonl) lives in ~/.claude/harness too (NOT the repo) and
+  # is created by the mkdir below, so concurrent agents in any repo never write
+  # into a project working tree.
+  "harness/bin|$CLAUDE_DIR/harness/bin"
+  "harness/schemas|$CLAUDE_DIR/harness/schemas"
 
   # Bootstrap
   "scripts/project-bootstrap.sh|$CLAUDE_DIR/project-bootstrap.sh"

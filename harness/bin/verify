@@ -13,7 +13,8 @@
 
 set -u
 
-HARNESS_ROOT="${HARNESS_ROOT:-$HOME/GitHub/claude-workflow-setup/harness}"
+# Standard per-user state root (env-overridable); never a repo path.
+HARNESS_ROOT="${HARNESS_ROOT:-${CONTINUATION_HARNESS_HOME:-$HOME/.claude/harness}}"
 if [[ -n "${HARNESS_THREAD_DIR:-}" ]]; then
   THREAD_DIR="$HARNESS_THREAD_DIR"
 elif [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then

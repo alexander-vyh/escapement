@@ -24,7 +24,22 @@ import re
 import sys
 from typing import Optional, Tuple
 
-DEFAULT_HARNESS_ROOT = pathlib.Path.home() / "GitHub" / "claude-workflow-setup" / "harness"
+# State root: where contracts / wakeups / incidents live. Standard per-user
+# location, independent of where the harness CODE is installed or invoked from,
+# so concurrent sessions in any repo share one state dir and NOTHING is ever
+# written into a project working tree. Override with CONTINUATION_HARNESS_HOME
+# (or legacy HARNESS_ROOT). NO author-specific / repo-specific path is baked in.
+DEFAULT_HARNESS_ROOT = pathlib.Path(
+    os.environ.get(
+        "CONTINUATION_HARNESS_HOME",
+        pathlib.Path.home() / ".claude" / "harness",
+    )
+)
+
+
+def harness_home() -> pathlib.Path:
+    """The state root (env-overridable). Single source of truth for all tools."""
+    return pathlib.Path(os.environ.get("HARNESS_ROOT", DEFAULT_HARNESS_ROOT))
 
 EXPLICIT_STOP_SET = frozenset({
     "stop",

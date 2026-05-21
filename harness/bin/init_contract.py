@@ -19,7 +19,7 @@ import sys
 import uuid
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from would_block_stop import thread_dir_for_session, sanitize_session_id  # noqa: E402
+from would_block_stop import thread_dir_for_session, sanitize_session_id, harness_home  # noqa: E402
 
 
 def main(argv: list[str]) -> int:
@@ -31,7 +31,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--thread-id", default=None)
     args = parser.parse_args(argv)
 
-    harness_root = pathlib.Path(os.environ.get("HARNESS_ROOT", pathlib.Path.home() / "GitHub" / "claude-workflow-setup" / "harness"))
+    harness_root = harness_home()
     # Resolve the per-session thread dir the same way the Stop hook and verify do,
     # so a session's contract lands where its own Stop hook will look for it.
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID")

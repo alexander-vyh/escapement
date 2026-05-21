@@ -2,30 +2,30 @@
 
 Deterministic Stop-gate harness for Claude Code (and, via adapters, other agent CLIs). Targets the stall classes diagnosed in the 14-day session-miner analysis (May 2026): announced-poll-then-waited, narrate-then-stop, phase-complete-then-stop.
 
-Design lives in `../openspec/changes/continuation-harness/`. This directory is the v0 implementation.
+Design lives in `../openspec/changes/continuation-harness/`.
 
-## Layout
+## Source vs. runtime state (the install model)
+
+This directory is **source only** — code, schemas, tests. `INSTALL.sh` symlinks `bin/` and `schemas/` into `~/.claude/harness/`, and runtime state lives there too. **Nothing is ever written into a repo working tree**, and the code carries **no hardcoded clone path** (it self-locates and reads state from `~/.claude/harness`, overridable via `CONTINUATION_HARNESS_HOME`). So you can clone this repo to any path, run `INSTALL.sh`, and every Claude session in any repo uses the same decoupled harness.
 
 ```
+# Source (this repo — symlinked into ~/.claude/harness by INSTALL.sh):
 harness/
 ├── bin/
-│   ├── would_block_stop.py     # pure gate function — block or allow
+│   ├── would_block_stop.py     # pure gate fn + thread_dir_for_session + harness_home
 │   ├── verify                  # agent affordance — runs verification_command, writes last_run
-│   ├── stop_hook.py            # Claude Code Stop-hook adapter
-│   └── init_contract.py        # helper for agents to scaffold a contract
-├── schemas/
-│   ├── contract.schema.json    # JSON Schema for contract.json
-│   └── scheduled.schema.json   # JSON Schema for scheduled.json
-├── threads/
-│   └── current/                # the active thread directory (v0 — single active thread)
-│       ├── contract.json       # agent-declared outcome contract
-│       └── scheduled.json      # array of durable wakeup entries
-├── tests/
-│   ├── contract-schema.test.json
-│   ├── scheduled-schema.test.json
-│   └── test_gate.py            # sanity-test for would_block_stop
-├── incidents.jsonl             # append-only log of every gate decision
-└── baseline-{date}.json        # captured baseline metrics
+│   ├── stop_hook.py            # Claude Code Stop-hook adapter (self-locating)
+│   ├── init_contract.py        # scaffold a contract
+│   └── baseline.py             # baseline metrics scanner
+├── schemas/{contract,scheduled}.schema.json
+└── tests/test_gate.py          # gate + session-isolation + portability tests
+
+# Runtime state (~/.claude/harness — real dirs, NOT this repo, NOT symlinked):
+~/.claude/harness/
+├── bin -> <repo>/harness/bin           # symlink (code)
+├── schemas -> <repo>/harness/schemas   # symlink (code)
+├── threads/{session_id}/               # per-session contract.json + scheduled.json
+└── incidents.jsonl                     # append-only gate-decision log
 ```
 
 ## How it works (v0)

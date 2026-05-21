@@ -6,8 +6,8 @@ A new deterministic Stop gate runs alongside `validate_no_shirking.py`. Both can
 
 You may Stop iff one of these is true:
 
-1. **Verification passed this turn.** You ran `~/GitHub/claude-workflow-setup/harness/bin/verify`, it exited 0, and the run happened within the last 5 minutes.
-2. **Wakeup registered.** You called `ScheduleWakeup` for a future-dated check-in. The wakeup entry exists in `harness/threads/current/scheduled.json`.
+1. **Verification passed this turn.** You ran `~/.claude/harness/bin/verify`, it exited 0, and the run happened within the last 5 minutes.
+2. **Wakeup registered.** You called `ScheduleWakeup` for a future-dated check-in. The wakeup entry exists in your session's thread dir (`~/.claude/harness/threads/{session_id}/scheduled.json`, keyed by `CLAUDE_CODE_SESSION_ID`).
 3. **User released.** The user typed `stop`, `end here`, `done for now`, `that's enough`, `we're done`, `halt`, etc.
 
 If none of these holds, Stop is blocked with a constructive resumption prompt. The block is *noise, not work-halting* — your turn ends, the user sees the prompt, and the conversation continues. But repeated blocks on the same turn waste tokens and user attention.
@@ -17,7 +17,7 @@ If none of these holds, Stop is blocked with a constructive resumption prompt. T
 Before your first implementation tool call on any non-trivial task, scaffold a contract:
 
 ```bash
-python3 ~/GitHub/claude-workflow-setup/harness/bin/init_contract.py \
+python3 ~/.claude/harness/bin/init_contract.py \
   --goal "<one sentence: what 'done' means for the user>" \
   --verify "<shell command whose exit 0 proves done>"
 ```
@@ -43,7 +43,7 @@ If the real behavior can only be observed after merge (platform semantics, no sa
 When you consider the task done:
 
 ```bash
-~/GitHub/claude-workflow-setup/harness/bin/verify
+~/.claude/harness/bin/verify
 ```
 
 The script runs your contract's `verification_command`, captures the result back to `contract.json#/last_run`, and exits with the same code. If exit 0 and within the current-turn window, the gate allows Stop next time. If it fails, you fix the underlying issue or file a blocker bead documenting why you cannot — *documented failure is also an outcome*. Don't keep flailing.
@@ -58,4 +58,4 @@ If you are not done and not scheduled to return, you are not stopping. Action wi
 
 ## Status
 
-This rule is paired with the v0 deployment of the continuation-harness, May 2026. The full spec lives at `~/GitHub/claude-workflow-setup/openspec/changes/continuation-harness/`. v0 scope is a single active thread (`harness/threads/current/`); multi-agent state isolation, full 57-stall regression test, the launchd waker that actually fires scheduled wakeups, bead-derived contracts, and the supervisor daemon are v0.1+.
+This rule is paired with the continuation-harness (May 2026). Code installs to `~/.claude/harness/bin/` (deployed by `INSTALL.sh` from the repo's `harness/` source); runtime state lives in `~/.claude/harness/` and is keyed per session (`threads/{session_id}/`) so concurrent agents never clobber each other. The full spec lives in the repo at `openspec/changes/continuation-harness/`. Still v0.1+: full 57-stall regression test, the launchd waker that actually fires scheduled wakeups, bead-derived contracts, and the supervisor daemon.

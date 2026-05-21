@@ -24,10 +24,18 @@ import pathlib
 import re
 import sys
 
+import os
+
 WINDOW_DAYS = 14
 HOME = pathlib.Path.home()
 PROJECTS_ROOT = HOME / ".claude" / "projects"
-OUT_DIR = HOME / "GitHub" / "claude-workflow-setup" / "harness"
+# Standard per-user state location (env-overridable); not the repo tree.
+OUT_DIR = pathlib.Path(
+    os.environ.get(
+        "HARNESS_ROOT",
+        os.environ.get("CONTINUATION_HARNESS_HOME", HOME / ".claude" / "harness"),
+    )
+)
 
 # Short-prod pattern derived from session-miner. Lowercased, stripped of
 # punctuation before match.

@@ -20,21 +20,27 @@ import pathlib
 import sys
 import time
 
-HARNESS_ROOT = pathlib.Path.home() / "GitHub" / "claude-workflow-setup" / "harness"
-sys.path.insert(0, str(HARNESS_ROOT / "bin"))
+# Self-locate for the sibling import — works whether this script lives in the
+# repo source tree or is installed to ~/.claude/harness/bin. No hardcoded path.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from would_block_stop import (  # noqa: E402
     would_block_stop,
     load_thread_state,
     thread_dir_for_session,
+    harness_home,
 )
 
+# State root is the standard per-user location (env-overridable), NOT relative
+# to where this code is installed — so dev-copy and installed-copy share state
+# and nothing is written into a repo working tree.
+HARNESS_ROOT = harness_home()
 INCIDENTS_LOG = HARNESS_ROOT / "incidents.jsonl"
 
 RESUMPTION_PROMPT = (
     "continuation-harness: {reason}. "
     "To allow Stop next turn, do one of: "
-    "(1) run `~/GitHub/claude-workflow-setup/harness/bin/verify` and have it exit 0 "
+    "(1) run `~/.claude/harness/bin/verify` and have it exit 0 "
     "(declare a contract via init_contract.py first if you haven't); "
     "(2) call the ScheduleWakeup tool to register a future check-in; "
     "(3) ask the user to release with 'stop' or 'end here'. "
