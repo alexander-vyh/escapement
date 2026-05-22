@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "claude_workflow_setup",
+  "project_id": "f12fc9f4-c9e5-4b92-8568-a5b9ee567303"
+}
