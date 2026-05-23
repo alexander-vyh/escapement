@@ -47,6 +47,11 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/harness/bin/task_mode_entry.py",
+            "timeout": 5000
           }
         ]
       },

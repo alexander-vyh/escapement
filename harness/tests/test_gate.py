@@ -131,6 +131,12 @@ CASES = [
         "state": {"contract": _contract()},
         "expect": ("block", "no_completion_or_resumption_proof"),
     },
+    # user_released takes priority over an unverified contract (B1 oracle).
+    {
+        "name": "user_released with unverified contract present",
+        "state": {"contract": _contract(), "recent_user_message": "stop"},
+        "expect": ("allow", "user_released"),
+    },
     # Invariant: wakeup outranks absent contract.
     {
         "name": "wakeup wins over absent contract",
@@ -324,8 +330,264 @@ def run_portability() -> int:
     return 0 if failed == 0 else 1
 
 
+import subprocess as _subprocess  # noqa: E402
+
+
+def run_stop_hook() -> int:
+    """Integration tests for stop_hook.py — B1 (transcript reading) and B2 (no-contract allow).
+
+    These call the hook as a subprocess, controlling HARNESS_THREAD_DIR, so
+    they test the full adapter path rather than would_block_stop in isolation.
+    """
+    results = []
+    bin_path = HARNESS_ROOT / "bin" / "stop_hook.py"
+
+    def call_hook(payload: dict, thread_dir: pathlib.Path) -> "dict | None":
+        env = {**_os.environ, "HARNESS_THREAD_DIR": str(thread_dir)}
+        r = _subprocess.run(
+            [sys.executable, str(bin_path)],
+            input=json.dumps(payload),
+            capture_output=True, text=True, env=env,
+        )
+        if r.stdout.strip():
+            try:
+                return json.loads(r.stdout)
+            except json.JSONDecodeError:
+                return {"raw": r.stdout}
+        return None  # allow: hook exited 0 with no output
+
+    import shutil as _shutil
+    import tempfile as _tf
+    tmp = pathlib.Path(_tf.mkdtemp(prefix="harness-hook-"))
+    try:
+        # B2: no contract.json → allow stop (conversational session, no gate).
+        td = tmp / "no-contract"
+        td.mkdir(parents=True)
+        out = call_hook({"session_id": "x", "transcript_path": ""}, td)
+        _assert(out is None, "B2: no contract.json → allow (no block output)", results)
+
+        # B2 negative: malformed contract.json → block (fail safe, not silently allow).
+        td = tmp / "malformed"
+        td.mkdir(parents=True)
+        (td / "contract.json").write_text("not valid json {{{")
+        out = call_hook({"session_id": "x", "transcript_path": ""}, td)
+        _assert(
+            out is not None and out.get("decision") == "block",
+            "B2 negative: malformed contract.json → block (fail safe)",
+            results,
+        )
+
+        # B1: user says 'stop' in transcript → allow even with unverified contract.
+        td = tmp / "b1-user-release"
+        td.mkdir(parents=True)
+        contract = {
+            "goal": "test", "verification_command": "false", "expected_exit": 0,
+            "source": "agent-declared", "thread_id": "x",
+            "created_at": _now_iso(), "last_run": None,
+        }
+        (td / "contract.json").write_text(json.dumps(contract))
+        transcript = tmp / "transcript-stop.jsonl"
+        transcript.write_text(
+            json.dumps({"message": {"role": "user", "content": [{"type": "text", "text": "stop"}]}}) + "\n"
+        )
+        out = call_hook({"session_id": "x", "transcript_path": str(transcript)}, td)
+        _assert(out is None, "B1: transcript 'stop' with unverified contract → allow (user_released)", results)
+
+        # B1 negative: non-release transcript message + unverified contract → block.
+        td = tmp / "b1-non-release"
+        td.mkdir(parents=True)
+        (td / "contract.json").write_text(json.dumps(contract))
+        transcript2 = tmp / "transcript-question.jsonl"
+        transcript2.write_text(
+            json.dumps({"message": {"role": "user", "content": [{"type": "text", "text": "what's the status?"}]}}) + "\n"
+        )
+        out = call_hook({"session_id": "x", "transcript_path": str(transcript2)}, td)
+        _assert(
+            out is not None and out.get("decision") == "block",
+            "B1 negative: non-release message + unverified contract → block",
+            results,
+        )
+    finally:
+        _shutil.rmtree(tmp, ignore_errors=True)
+
+    passed = sum(1 for ok, _ in results if ok)
+    failed = sum(1 for ok, _ in results if not ok)
+    print(f"\n[stop_hook] {passed} passed, {failed} failed")
+    return 0 if failed == 0 else 1
+
+
+def run_task_mode() -> int:
+    """Integration tests for session-mode (task mode entry + queue-drain gate).
+
+    Uses fake 'bd' scripts in a temp bin dir to control bd ready / bd list output
+    without needing a real beads database.
+    """
+    results = []
+    bin_path = HARNESS_ROOT / "bin" / "stop_hook.py"
+    entry_path = HARNESS_ROOT / "bin" / "task_mode_entry.py"
+
+    import shutil as _shutil
+    import tempfile as _tf
+
+    def call_hook(payload: dict, thread_dir: pathlib.Path, env_extra=None) -> "dict | None":
+        env = {**_os.environ, "HARNESS_THREAD_DIR": str(thread_dir), **(env_extra or {})}
+        r = _subprocess.run(
+            [sys.executable, str(bin_path)],
+            input=json.dumps(payload),
+            capture_output=True, text=True, env=env,
+        )
+        if r.stdout.strip():
+            try:
+                return json.loads(r.stdout)
+            except json.JSONDecodeError:
+                return {"raw": r.stdout}
+        return None
+
+    def call_entry(payload: dict, thread_dir: pathlib.Path) -> int:
+        env = {**_os.environ, "HARNESS_THREAD_DIR": str(thread_dir)}
+        r = _subprocess.run(
+            [sys.executable, str(entry_path)],
+            input=json.dumps(payload),
+            capture_output=True, text=True, env=env,
+        )
+        return r.returncode
+
+    def make_fake_bd(tmp: pathlib.Path, ready_items: int, list_items: int) -> pathlib.Path:
+        """Write a fake 'bd' script returning JSON arrays of controlled length."""
+        bin_dir = tmp / "fakebin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        script = bin_dir / "bd"
+        ready_json = json.dumps([{"id": f"t-{i}"} for i in range(ready_items)])
+        list_json = json.dumps([{"id": f"t-{i}"} for i in range(list_items)])
+        script.write_text(
+            "#!/bin/sh\n"
+            f'if echo "$*" | grep -q "^ready"; then echo \'{ready_json}\'; exit 0; fi\n'
+            f'if echo "$*" | grep -q "^list"; then echo \'{list_json}\'; exit 0; fi\n'
+            "exit 0\n"
+        )
+        script.chmod(0o755)
+        return bin_dir
+
+    tmp = pathlib.Path(_tf.mkdtemp(prefix="harness-task-mode-"))
+    try:
+        # --- Pre-tool hook (task_mode_entry.py) ---
+
+        # Claim command → writes session_mode.json.
+        td = tmp / "entry-claim"
+        td.mkdir(parents=True)
+        rc = call_entry(
+            {"session_id": "x", "tool_name": "Bash",
+             "tool_input": {"command": "bd update cake-123 --claim"}},
+            td,
+        )
+        mode = json.loads((td / "session_mode.json").read_text()) if (td / "session_mode.json").exists() else None
+        _assert(rc == 0 and mode is not None and mode.get("mode") == "task",
+                "entry: claim command writes session_mode.json with mode=task", results)
+
+        # Non-claim bd command → no session_mode.json.
+        td = tmp / "entry-no-claim"
+        td.mkdir(parents=True)
+        call_entry(
+            {"session_id": "x", "tool_name": "Bash",
+             "tool_input": {"command": "bd list"}},
+            td,
+        )
+        _assert(not (td / "session_mode.json").exists(),
+                "entry: non-claim command does not write session_mode.json", results)
+
+        # Non-Bash tool → no session_mode.json.
+        td = tmp / "entry-non-bash"
+        td.mkdir(parents=True)
+        call_entry(
+            {"session_id": "x", "tool_name": "Read",
+             "tool_input": {"file_path": "/tmp/x"}},
+            td,
+        )
+        _assert(not (td / "session_mode.json").exists(),
+                "entry: non-Bash tool does not write session_mode.json", results)
+
+        # First-claim-wins: second claim does not overwrite.
+        td = tmp / "entry-first-wins"
+        td.mkdir(parents=True)
+        call_entry({"session_id": "x", "tool_name": "Bash",
+                    "tool_input": {"command": "bd update cake-1 --claim"}}, td)
+        first_ctime = (td / "session_mode.json").read_text()
+        call_entry({"session_id": "x", "tool_name": "Bash",
+                    "tool_input": {"command": "bd update cake-2 --claim"}}, td)
+        second_ctime = (td / "session_mode.json").read_text()
+        _assert(first_ctime == second_ctime,
+                "entry: first-claim-wins — second claim does not overwrite session_mode.json", results)
+
+        # --- Stop hook task mode queue-drain gate ---
+
+        # Task mode + ready items → block (tasks remain).
+        td = tmp / "queue-has-items"
+        td.mkdir(parents=True)
+        fake_beads = td / ".beads"
+        fake_beads.mkdir()
+        mode_rec = {"mode": "task", "repo_cwd": str(td), "parent_id": None,
+                    "entered_at": _now_iso(), "session_id": "x"}
+        (td / "session_mode.json").write_text(json.dumps(mode_rec))
+        fakebin = make_fake_bd(tmp / "bin1", ready_items=1, list_items=1)
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(out is not None and out.get("decision") == "block",
+                "task mode: bd ready non-empty → block (tasks remain)", results)
+
+        # Task mode + empty ready + open tasks → block (all blocked, register wakeup).
+        td = tmp / "queue-empty-but-open"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        (td / "session_mode.json").write_text(json.dumps({**mode_rec, "repo_cwd": str(td)}))
+        fakebin = make_fake_bd(tmp / "bin2", ready_items=0, list_items=1)
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(
+            out is not None and out.get("decision") == "block"
+            and "all_remaining_tasks_blocked" in out.get("reason", ""),
+            "task mode: bd ready empty + open tasks → block (all blocked, reason in display)",
+            results,
+        )
+
+        # Task mode + empty ready + no open tasks → allow (queue drained).
+        td = tmp / "queue-drained"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        (td / "session_mode.json").write_text(json.dumps({**mode_rec, "repo_cwd": str(td)}))
+        fakebin = make_fake_bd(tmp / "bin3", ready_items=0, list_items=0)
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(out is None,
+                "task mode: bd ready empty + no open tasks → allow (queue drained)", results)
+
+        # Task mode + user says 'stop' → allow (universal override).
+        td = tmp / "task-mode-user-release"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        (td / "session_mode.json").write_text(json.dumps({**mode_rec, "repo_cwd": str(td)}))
+        transcript = tmp / "transcript-task-stop.jsonl"
+        transcript.write_text(
+            json.dumps({"message": {"role": "user", "content": [{"type": "text", "text": "stop"}]}}) + "\n"
+        )
+        fakebin = make_fake_bd(tmp / "bin4", ready_items=1, list_items=1)
+        out = call_hook({"session_id": "x", "transcript_path": str(transcript)},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(out is None,
+                "task mode: user 'stop' overrides queue-drain gate → allow", results)
+
+    finally:
+        _shutil.rmtree(tmp, ignore_errors=True)
+
+    passed = sum(1 for ok, _ in results if ok)
+    failed = sum(1 for ok, _ in results if not ok)
+    print(f"\n[task_mode] {passed} passed, {failed} failed")
+    return 0 if failed == 0 else 1
+
+
 if __name__ == "__main__":
     rc_gate = run()
     rc_iso = run_isolation()
     rc_port = run_portability()
-    sys.exit(rc_gate or rc_iso or rc_port)
+    rc_hook = run_stop_hook()
+    rc_task = run_task_mode()
+    sys.exit(rc_gate or rc_iso or rc_port or rc_hook or rc_task)

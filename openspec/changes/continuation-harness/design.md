@@ -102,13 +102,72 @@ This is done when the enforcing Stop gate is live in `~/.claude/settings.json`, 
 - **Anthropic Managed Agents subsumes the layer** → Accept. Keep the design small enough that migration cost is bounded; identity layer `(team_id, agent_name)` maps cleanly onto Managed Agents' persistent-filesystem model.
 - **Shadow phase produces ambiguous data** → Pre-commit the replay test (skeleton task 1) as a baseline; if shadow data is ambiguous, the replay test is the tiebreaker.
 
-## Future Increments [PLACEHOLDER]
+## Session-Mode System (v0.2 — implemented 2026-05-22)
+
+Session-mode differentiation addresses the "say the word, or stop" anti-pattern where agents complete one task and wait for manual prompting rather than draining the queue. Queue-drain gating eliminates ~80-90% of inter-task interruptions (attention-coach analysis).
+
+### Design Decisions
+
+**Mode model:** Two modes — no-mode (default, conversational/exploratory) and task-mode (queue-drain gated). No-mode uses existing controls (no-shirking hook) but does NOT run queue-drain gating. Task-mode is entered automatically; exits only by machine-deterministic queue check or user release.
+
+**Entry signal:** A PreToolUse Bash hook (`task_mode_entry.py`) detects `bd update --claim`, `bd update -s in_progress`, or `bd ready --claim`. On first claim, writes `session_mode.json` to the session thread dir with `{mode, repo_cwd, parent_id}`. First-claim-wins: subsequent claims in the same session do not overwrite.
+
+**Queue-drain gate:** Stop hook reads `session_mode.json`. If task-mode:
+1. User release and wakeup remain universal overrides.
+2. `bd ready [--parent id]` non-empty → block ("tasks_remain_in_queue").
+3. `bd ready` empty AND `bd list` non-empty → block ("all_remaining_tasks_blocked") — agent must register a ScheduleWakeup.
+4. Both empty → allow ("queue_drained"). **Critical**: empty `bd ready` ≠ done; must also check `bd list` to distinguish "all closed" from "all blocked".
+
+**Parent scoping:** `task_mode_entry.py` extracts the task ID from `bd update <id> --claim` and runs `bd show <id> --json` to record `parent_id`. Stop hook uses `bd ready --parent <id>` when parent is known, bare `bd ready` when not. First-claim-wins: the first claimed task's parent scopes the entire session. `bd ready --claim` (no explicit task ID) leaves parent_id as None for now.
+
+**Stale cwd guard:** If `repo_cwd` no longer contains `.beads/`, the gate degrades gracefully (allow stop) rather than blocking permanently or crashing.
+
+**Mode transitions:** Agents auto-enter task-mode; cannot self-exit. Exit requires machine-deterministic queue drain or user action. No mode change without user approval except the automatic entry.
+
+### Known Gaps (Post-MVP)
+
+- **Blocker bead loop:** If an increment ships that creates a new bead to document a blocked task, that bead appears as a new `bd ready` item under the parent, potentially trapping the agent in a loop. Guard needed before "write blocker beads on documented failures" ships.
+- **Multi-agent TOCTOU:** Two agents in task-mode in the same repo can race on `bd ready`. Both see the same task before either claims it. `bd update --claim` is atomic (Dolt write), but there is a window between "query ready" and "execute claim." Dolt atomics mitigate; the TOCTOU window persists.
+- **No-shirking + stop hook shared state:** `validate_no_shirking.py` and the harness stop hook run in parallel with no shared state. Both can block; their decisions can diverge. If `validate_no_shirking.py` fires a false positive on technical discussion but the harness would allow stop (queue drained), the agent is blocked unnecessarily. Resolution: see existing non-goal about improving `validate_no_shirking.py` using harness session state.
+- **`bd ready --claim` parent scoping:** Agents using `bd ready --claim` (atomic claim without specifying a task ID) do not get parent scoping. A PostToolUse hook that parses the claimed task ID from stdout and retroactively updates `parent_id` in `session_mode.json` would close this gap.
+
+## Prior Art and Conceptual Lineage
+
+The design converged independently on several patterns that have prior art worth naming. This section documents the alignment — both to credit the antecedents and to sharpen what is genuinely novel here.
+
+### rigour (rigour-labs/rigour)
+
+The closest prior art found. rigour independently implemented a completion-promise gate: agents must declare a `goal` and a `verify_command`; Stop is blocked unless the command exits 0. The vocabulary differs ("Ralph Loop", "Completion Promise") but the mechanical shape is identical to this harness's `contract.json` + `verify` path.
+
+Key alignment points:
+- **Declare before acting, verify before stopping** — same invariant.
+- **Commit-delimited sessions** — rigour treats each session as resumable from a handoff payload; this harness's `scheduled.json` + wakeup is the same pattern.
+- **Unreliable self-assessment** — both projects start from the observation that agents sincerely report done when they are not. rigour cites this as "delusional exit"; this design doc calls it "announced-poll-then-waited."
+
+Key divergence:
+- rigour is goal-scoped (one contract per session). This harness is session-mode-scoped: task-mode sessions can span many tasks under a single queue-drain criterion. The session-scope boundary is novel.
+
+### Conceptual Vocabulary
+
+**Level-triggered vs edge-triggered.** Borrowed from Kubernetes reconciler architecture. An edge-triggered gate fires once on the transition (task closed → allow); it is bypassable by missing the edge. A level-triggered gate re-evaluates state on every Stop attempt — the queue is either empty or it is not, regardless of when it became empty. The harness stop hook is level-triggered: it queries `bd ready` at every Stop call, not just on the "done" event. This is why there is no "already verified this turn" race — the gate is stateless and idempotent.
+
+**Erlang OTP supervisor strategies.** The three wakeup/resumption paths map onto OTP restart strategies: verification-passed → temporary (job finished, no restart needed); user-released → transient (normal exit by external signal); neither → permanent (must restart on any exit). The session-mode exit rules enforce the permanent strategy until machine-deterministic drain fires.
+
+**Liveness vs Safety (Lamport).** Safety: the gate never allows a bad stop (false positive). Liveness: a good stop is always eventually allowed (false negative rate). MVP prioritizes safety (zero FP target) over liveness (queue-drain may occasionally block when a task is unexpectedly stale). This trade is explicit: the kill criterion in Proof of Delivery gates on FPs, not on liveness.
+
+### What Is Novel Here
+
+**Queue-drain as session-scope stopping criterion** — no prior art found in any reviewed project. rigour and related completion-promise gates scope their criterion to a single declared goal per session. The extension to "session does not end until all beads tasks in the queue are claimed or drained" and specifically the two-step check (`bd ready` AND `bd list` to distinguish done from blocked) appears to be original.
+
+**Automatic mode entry from tool-call shape.** The PreToolUse hook detecting `bd update --claim` and writing `session_mode.json` without user action is not present in any reviewed project. rigour requires explicit goal declaration; this harness infers it from the first claim.
+
+**Additive enforcement layers.** Running a prose-pattern hook (`validate_no_shirking.py`) and a deterministic structural hook (this harness) in parallel, where both can block independently and their decision logic is complementary rather than overlapping, is not a pattern observed in prior art. The documented coordination gap (§ Known Gaps: "No-shirking + stop hook shared state") is a post-MVP concern.
+
+## Future Increments
 
 Options purchased by validating the riskiest assumption:
 
-- **queue-drain check** — extend the Stop barrier to inspect `bd ready` across molecule/epic scope; addresses the 9% phase-complete-then-stop class.
 - **subagent-coverage clause** — auto-register a fallback wakeup whenever the agent dispatches subagents; addresses the parent-sits-for-hours pattern explicitly.
-- **bead-chain continuation** — explicit support for "closed one bead, claim the next" as a Stop-barrier clause, not just a rule-layer expectation.
 - **reviewer-not-author subagent Stop hook** (Layer 3) — only if FP count > 0 in MVP, or if a stall class emerges that purely-deterministic checks cannot catch.
 - **Codex adapter** — when portability is exercised (vendor change, exploration, or specific Codex strengths warrant it).
 - **pi.dev adapter** — same trigger; lightest implementation given pi's TS extension model and native JSONL.
