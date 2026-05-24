@@ -15,6 +15,11 @@
           },
           {
             "type": "command",
+            "command": "python3 ~/.claude/hooks/session_status.py",
+            "timeout": 10000
+          },
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/mol_status_check.py",
             "timeout": 10000
           },
