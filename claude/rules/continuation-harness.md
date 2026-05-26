@@ -52,6 +52,23 @@ The script runs your contract's `verification_command`, captures the result back
 
 If your work is genuinely waiting on something external (CI, merge queue, DAG run, an external agent), use the `ScheduleWakeup` tool. Don't write "I'll check back" as prose and end the turn — prose-as-polling is the largest measured stall class (30%) and is exactly what this gate exists to prevent.
 
+### Task-mode gate + external-event wait: use ScheduleWakeup, not task pickup
+
+When the task-mode gate blocks with `tasks_remain_in_queue` but your **session goal** is blocked on an external event (CI finishing, a merge completing, a scheduled dbt/DAG run, an external agent completing its work), the correct response is:
+
+```
+ScheduleWakeup(delaySeconds=<when the event will complete>, reason="<what you're waiting for>", prompt="<same loop prompt>")
+```
+
+Do **not** pick up unrelated ready tasks from `bd ready` to drain the queue and satisfy the gate. That is scope creep, not progress — you are doing work the user did not ask for in this session, and the session's actual outcome remains unverified.
+
+The three release paths from a task-mode block are:
+1. **Finish the actual session work** — drain the tasks that belong to this session's goal, verify the outcome.
+2. **ScheduleWakeup** — register a future check-in for when the external blocker clears.
+3. **User release** — the user says `stop` or `end here`.
+
+Picking up unrelated backlog items is not a fourth path. If `bd ready` shows tasks outside the current session's scope, ignore them — they belong to a different session.
+
 ## Rule: outcome-bias
 
 If you are not done and not scheduled to return, you are not stopping. Action without outcomes (more tool calls, more subagent dispatches, more bead-claims) does not substitute for proof of completion or proof of resumption. See `feedback/outcome-bias-over-action-bias` memory for the underlying principle.

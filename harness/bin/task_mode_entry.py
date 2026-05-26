@@ -100,6 +100,7 @@ def main() -> int:
         mode_file.write_text(json.dumps({
             "mode": "task",
             "repo_cwd": os.getcwd(),
+            "task_id": task_id,
             "parent_id": parent_id,
             "entered_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "session_id": session_id,

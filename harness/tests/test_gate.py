@@ -575,6 +575,59 @@ def run_task_mode() -> int:
         _assert(out is None,
                 "task mode: user 'stop' overrides queue-drain gate → allow", results)
 
+        # --- Scoping fix: task_id as fallback when parent_id is null ---
+        # Regression for session 1d6db846: standalone task claimed, parent_id=null,
+        # bd ready (unscoped) found unrelated backlog → agent derailed into those tasks.
+        # Fix: use task_id as --parent scope. bd ready --parent <leaf-id> returns []
+        # for a leaf task → gate allows Stop once the session task is closed.
+
+        def make_fake_bd_scoped(tmp_base: pathlib.Path, task_id: str) -> pathlib.Path:
+            """Fake bd: returns [] when called with --parent task_id, else returns items."""
+            bin_dir = tmp_base / "fakescoped"
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            script = bin_dir / "bd"
+            unrelated = json.dumps([{"id": "unrelated-1"}, {"id": "unrelated-2"}])
+            script.write_text(
+                "#!/bin/sh\n"
+                # When scoped to the leaf task, no children exist → empty
+                f'if echo "$*" | grep -q -- "--parent {task_id}"; then echo "[]"; exit 0; fi\n'
+                # Without scoping (regression case), returns unrelated items
+                f'echo \'{unrelated}\'\n'
+                "exit 0\n"
+            )
+            script.chmod(0o755)
+            return bin_dir
+
+        claimed_task = "cake-standalone-42"
+
+        # task_id set, parent_id null, scoped bd returns [] → allow (leaf task closed).
+        td = tmp / "taskid-scope-allow"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        scoped_mode = {"mode": "task", "repo_cwd": str(td), "task_id": claimed_task,
+                       "parent_id": None, "entered_at": _now_iso(), "session_id": "x"}
+        (td / "session_mode.json").write_text(json.dumps(scoped_mode))
+        fakebin = make_fake_bd_scoped(tmp / "bin-scoped", claimed_task)
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(out is None,
+                "task_id scoping: standalone task with no children → allow (leaf task closed)",
+                results)
+
+        # Without scoping (regression baseline): parent_id=null and task_id=null →
+        # bd ready (unscoped) returns unrelated items → gate blocks.
+        td = tmp / "taskid-scope-block"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        unscoped_mode = {"mode": "task", "repo_cwd": str(td), "task_id": None,
+                         "parent_id": None, "entered_at": _now_iso(), "session_id": "x"}
+        (td / "session_mode.json").write_text(json.dumps(unscoped_mode))
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(out is not None and out.get("decision") == "block",
+                "task_id scoping: no task_id and no parent_id (pre-fix regression case) → block",
+                results)
+
     finally:
         _shutil.rmtree(tmp, ignore_errors=True)
 

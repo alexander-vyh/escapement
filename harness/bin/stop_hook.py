@@ -129,7 +129,13 @@ def _check_task_mode_queue(session_mode: dict) -> Tuple[str, str]:
     gracefully rather than permanently trapping the agent.
     """
     repo_cwd = session_mode.get("repo_cwd", "")
-    parent_id = session_mode.get("parent_id")  # None in v1; v2 will extract from claim
+    # Scope priority: parent_id (molecule root) > task_id (standalone task) > unscoped.
+    # parent_id is set when the claimed task has a parent (e.g., a molecule step).
+    # task_id is the fallback for standalone/leaf tasks: bd ready --parent <leaf-id>
+    # returns [] since leaf tasks have no children, so the gate allows Stop once
+    # the leaf task is closed — which is correct. Without scoping, bd ready returns
+    # the entire repo backlog, causing derailment into unrelated tasks.
+    parent_id = session_mode.get("parent_id") or session_mode.get("task_id")
 
     if not repo_cwd:
         return ("block", "task_mode_no_cwd")
