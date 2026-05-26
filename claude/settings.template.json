@@ -254,6 +254,24 @@
         ]
       },
       {
+        "matcher": "mcp__claude_ai_Slack__slack_send_message",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__claude_ai_Slack__slack_schedule_message",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+          }
+        ]
+      },
+      {
         "matcher": "Read",
         "hooks": [
           {
