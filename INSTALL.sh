@@ -103,6 +103,7 @@ declare -a PLAN=(
   "claude/hooks/outcome_assertion_gate.py|$CLAUDE_DIR/hooks/outcome_assertion_gate.py"
   "claude/hooks/review_gate.py|$CLAUDE_DIR/hooks/review_gate.py"
   "claude/hooks/review_nudge.py|$CLAUDE_DIR/hooks/review_nudge.py"
+  "claude/hooks/no_direct_send_guard.py|$CLAUDE_DIR/hooks/no_direct_send_guard.py"
   "claude/hooks/validate_no_shirking.py|$CLAUDE_DIR/hooks/validate_no_shirking.py"
   "claude/hooks/context_burn_detector.py|$CLAUDE_DIR/hooks/context_burn_detector.py"
   "claude/hooks/session_cleanup.py|$CLAUDE_DIR/hooks/session_cleanup.py"
