@@ -16,6 +16,7 @@ both can block. Additive coverage.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -166,6 +167,61 @@ def _check_task_mode_queue(session_mode: dict) -> Tuple[str, str]:
     return ("allow", "queue_drained")
 
 
+_IMPLICIT_QUEUE_DISPLAY = (
+    "continuation-harness: verification passed for declared contract, but bd has "
+    "unfinished work in this repo (in-progress or ready tasks exist). "
+    "Close active tasks, drain the queue, or ask the user to release with 'stop' or 'end here'. "
+    "Hint: bd list --status=in_progress to see what is still claimed."
+)
+
+
+def _check_bd_queue_implicit(cwd: str) -> Tuple[str, str]:
+    """Check bd queue in cwd without requiring session_mode.json.
+
+    Covers the case where task-mode was not entered via the PreToolUse hook
+    (e.g., bd claims made inside subagents) but bd work is still in-flight.
+
+    Returns (decision, reason) — same contract as _check_task_mode_queue.
+    Degrades gracefully to allow on any bd failure so the gate never permanently traps.
+    """
+    if not cwd:
+        return ("allow", "implicit_queue_no_cwd")
+
+    repo_path = pathlib.Path(cwd)
+    if not (repo_path / ".beads").exists():
+        return ("allow", "implicit_queue_no_beads")
+
+    import json as _json
+
+    def run_bd(args: list[str]) -> Optional[list]:
+        try:
+            r = subprocess.run(
+                ["bd"] + args + ["--json"],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            return _json.loads(r.stdout)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
+                _json.JSONDecodeError, ValueError):
+            return None
+
+    in_progress = run_bd(["list", "--status=in_progress"])
+    if in_progress is None:
+        return ("allow", "implicit_queue_bd_failed")
+    if len(in_progress) > 0:
+        return ("block", "implicit_queue_in_progress")
+
+    ready = run_bd(["ready"])
+    if ready is None:
+        return ("allow", "implicit_queue_bd_failed")
+    if len(ready) > 0:
+        return ("block", "implicit_queue_ready_items")
+
+    return ("allow", "implicit_queue_drained")
+
+
 def _log_incident(record: dict) -> None:
     try:
         INCIDENTS_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -246,20 +302,35 @@ def main() -> int:
     state = load_thread_state(thread_dir, recent_user_message=recent_user_message)
     decision, reason = would_block_stop(state)
 
+    # B3 fix: after verification_passed, check bd queue in cwd.
+    # Catches sessions where task-mode was not entered via the PreToolUse hook
+    # (e.g., bd claims made inside subagents) but bd work is still in-flight.
+    # Universal overrides (user_released, wakeup_registered) bypass this check.
+    if decision == "allow" and reason == "verification_passed":
+        try:
+            cwd = os.getcwd()
+        except OSError:
+            cwd = ""
+        bd_decision, bd_reason = _check_bd_queue_implicit(cwd)
+        if bd_decision == "block":
+            decision, reason = bd_decision, bd_reason
+
     _log_incident({
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "session_id": session_id,
         "decision": decision,
         "reason": reason,
         "was_correct": None,
-        "notes": "",
+        "notes": "implicit_queue_check" if reason.startswith("implicit_queue_") else "",
     })
 
     if decision == "block":
-        out = {
-            "decision": "block",
-            "reason": RESUMPTION_PROMPT.format(reason=reason),
-        }
+        display = (
+            _IMPLICIT_QUEUE_DISPLAY
+            if reason.startswith("implicit_queue_")
+            else RESUMPTION_PROMPT.format(reason=reason)
+        )
+        out = {"decision": "block", "reason": display}
         print(json.dumps(out))
         return 0
 

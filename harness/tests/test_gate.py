@@ -584,10 +584,190 @@ def run_task_mode() -> int:
     return 0 if failed == 0 else 1
 
 
+def run_implicit_queue() -> int:
+    """Integration tests for B3 fix: implicit bd queue check after verification_passed.
+
+    Covers the subagent-claim gap: when task-mode was not entered via the PreToolUse
+    hook but bd work is still in-flight, the stop hook should block.
+    """
+    results = []
+    bin_path = HARNESS_ROOT / "bin" / "stop_hook.py"
+
+    import shutil as _shutil
+    import tempfile as _tf
+
+    def _passing_contract(thread_id: str) -> dict:
+        """A contract whose last_run is fresh and exit_code 0 — would_block_stop returns allow."""
+        return {
+            "goal": "test outcome",
+            "verification_command": "true",
+            "expected_exit": 0,
+            "source": "agent-declared",
+            "thread_id": thread_id,
+            "created_at": _now_iso(),
+            "last_run": {
+                "exit_code": 0,
+                "timestamp": _now_iso(),
+                "output_excerpt": "",
+            },
+        }
+
+    def make_fake_bd_implicit(
+        bin_dir: pathlib.Path,
+        in_progress_items: int,
+        ready_items: int,
+    ) -> pathlib.Path:
+        """Fake bd distinguishing in_progress (list --status=in_progress) from ready."""
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        script = bin_dir / "bd"
+        ip_json = json.dumps([{"id": f"t-{i}", "title": f"task {i}"} for i in range(in_progress_items)])
+        ready_json = json.dumps([{"id": f"t-{i}", "title": f"task {i}"} for i in range(ready_items)])
+        script.write_text(
+            "#!/bin/sh\n"
+            f"if echo \"$*\" | grep -q 'in_progress'; then echo '{ip_json}'; exit 0; fi\n"
+            f"if echo \"$*\" | grep -q '^ready'; then echo '{ready_json}'; exit 0; fi\n"
+            "echo '[]'; exit 0\n"
+        )
+        script.chmod(0o755)
+        return bin_dir
+
+    def call_hook(
+        payload: dict,
+        thread_dir: pathlib.Path,
+        project_dir: pathlib.Path,
+        env_extra: "dict | None" = None,
+    ) -> "dict | None":
+        """Run stop_hook.py from project_dir so os.getcwd() returns the project."""
+        env = {**_os.environ, "HARNESS_THREAD_DIR": str(thread_dir), **(env_extra or {})}
+        r = _subprocess.run(
+            [sys.executable, str(bin_path)],
+            input=json.dumps(payload),
+            capture_output=True, text=True, env=env,
+            cwd=str(project_dir),
+        )
+        if r.stdout.strip():
+            try:
+                return json.loads(r.stdout)
+            except json.JSONDecodeError:
+                return {"raw": r.stdout}
+        return None
+
+    tmp = pathlib.Path(_tf.mkdtemp(prefix="harness-implicit-"))
+    try:
+        # Test 1: verify passes, no .beads/ in cwd → allow (no bd project, skip check).
+        td = tmp / "no-beads"
+        td.mkdir()
+        project_dir = tmp / "project-no-beads"
+        project_dir.mkdir()
+        (td / "contract.json").write_text(json.dumps(_passing_contract("no-beads")))
+        out = call_hook({"session_id": "no-beads", "transcript_path": ""}, td, project_dir)
+        _assert(
+            out is None,
+            "implicit: verify passes, no .beads/ → allow (no implicit check)",
+            results,
+        )
+
+        # Test 2: verify passes, in-progress items in .beads/ repo → block.
+        td = tmp / "in-progress-block"
+        td.mkdir()
+        project_dir = tmp / "project-in-progress"
+        project_dir.mkdir()
+        (project_dir / ".beads").mkdir()
+        (td / "contract.json").write_text(json.dumps(_passing_contract("in-progress")))
+        fakebin = make_fake_bd_implicit(tmp / "bin-ip", in_progress_items=1, ready_items=0)
+        out = call_hook(
+            {"session_id": "in-progress", "transcript_path": ""},
+            td, project_dir,
+            {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"},
+        )
+        _assert(
+            out is not None and out.get("decision") == "block"
+            and "unfinished work" in out.get("reason", ""),
+            "implicit: verify passes, in-progress items → block (implicit_queue_in_progress)",
+            results,
+        )
+
+        # Test 3: verify passes, ready items (no in-progress) → block.
+        td = tmp / "ready-block"
+        td.mkdir()
+        project_dir = tmp / "project-ready"
+        project_dir.mkdir()
+        (project_dir / ".beads").mkdir()
+        (td / "contract.json").write_text(json.dumps(_passing_contract("ready")))
+        fakebin = make_fake_bd_implicit(tmp / "bin-ready", in_progress_items=0, ready_items=2)
+        out = call_hook(
+            {"session_id": "ready", "transcript_path": ""},
+            td, project_dir,
+            {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"},
+        )
+        _assert(
+            out is not None and out.get("decision") == "block",
+            "implicit: verify passes, ready items (no in-progress) → block (implicit_queue_ready_items)",
+            results,
+        )
+
+        # Test 4: verify passes, queue empty → allow.
+        td = tmp / "queue-empty"
+        td.mkdir()
+        project_dir = tmp / "project-empty"
+        project_dir.mkdir()
+        (project_dir / ".beads").mkdir()
+        (td / "contract.json").write_text(json.dumps(_passing_contract("empty")))
+        fakebin = make_fake_bd_implicit(tmp / "bin-empty", in_progress_items=0, ready_items=0)
+        out = call_hook(
+            {"session_id": "empty", "transcript_path": ""},
+            td, project_dir,
+            {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"},
+        )
+        _assert(
+            out is None,
+            "implicit: verify passes, queue empty → allow (implicit_queue_drained)",
+            results,
+        )
+
+        # Test 5: user_released bypasses implicit check even with in-progress items.
+        td = tmp / "user-release-bypass"
+        td.mkdir()
+        project_dir = tmp / "project-user-release"
+        project_dir.mkdir()
+        (project_dir / ".beads").mkdir()
+        # Contract is NOT passing (last_run=None) — but user says stop.
+        unverified_contract = {
+            "goal": "test", "verification_command": "false", "expected_exit": 0,
+            "source": "agent-declared", "thread_id": "user-release",
+            "created_at": _now_iso(), "last_run": None,
+        }
+        (td / "contract.json").write_text(json.dumps(unverified_contract))
+        transcript = tmp / "transcript-user-release.jsonl"
+        transcript.write_text(
+            json.dumps({"message": {"role": "user", "content": [{"type": "text", "text": "stop"}]}}) + "\n"
+        )
+        fakebin = make_fake_bd_implicit(tmp / "bin-urel", in_progress_items=3, ready_items=5)
+        out = call_hook(
+            {"session_id": "user-release", "transcript_path": str(transcript)},
+            td, project_dir,
+            {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"},
+        )
+        _assert(
+            out is None,
+            "implicit: user_released bypasses implicit queue check even with bd work",
+            results,
+        )
+
+    finally:
+        _shutil.rmtree(tmp, ignore_errors=True)
+
+    passed = sum(1 for ok, _ in results if ok)
+    failed = sum(1 for ok, _ in results if not ok)
+    print(f"\n[implicit_queue] {passed} passed, {failed} failed")
+    return 0 if failed == 0 else 1
+
+
 if __name__ == "__main__":
     rc_gate = run()
     rc_iso = run_isolation()
     rc_port = run_portability()
     rc_hook = run_stop_hook()
     rc_task = run_task_mode()
-    sys.exit(rc_gate or rc_iso or rc_port or rc_hook or rc_task)
+    rc_implicit = run_implicit_queue()
+    sys.exit(rc_gate or rc_iso or rc_port or rc_hook or rc_task or rc_implicit)
