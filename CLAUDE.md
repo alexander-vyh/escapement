@@ -51,6 +51,23 @@ bd close <id>         # Complete work
 <!-- END BEADS INTEGRATION -->
 
 
+## Guiding Principle: This Repo IS a Bureaucracy
+
+This repo's hooks, skills, rules, and harnesses are a structured set of routines
+that turn problem-solving successes into reusable practice. That makes the repo
+a *bureaucracy* in Schwartz's sense — and bureaucracies decay in predictable
+directions (bloated, petrified, coercive, mock) unless designed to stay
+**lean, learning, and enabling**.
+
+Every gate, hook, rule, and skill in this repo must pass the four Adler & Borys
+(1996) design tests: **repair**, **internal transparency**, **global
+transparency**, **flexibility**. A gate that fails one of these tests is
+designed for compliance, not for the work the compliance is supposed to enable.
+
+See `claude/rules/delicate-art-of-bureaucracy.md` for the full rule, the four
+operational tests, the four failure modes, and the citation lineage. This is a
+load-bearing principle for every design decision in this repo.
+
 ## Build & Test
 
 _Add your build and test commands here_
