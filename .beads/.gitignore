@@ -60,6 +60,10 @@ backup/
 # per-machine, accumulates over time, not a versioned artifact)
 .gate-signal.jsonl
 
+# Spec index (built per-machine by claude/bin/spec_index_build.py; contains
+# 384-dim embeddings × N requirements, ~200KB+, per-machine runtime artifact)
+.spec-index.json
+
 # Legacy files (from pre-Dolt versions)
 *.db
 *.db?*
