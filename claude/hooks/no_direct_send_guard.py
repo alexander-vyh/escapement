@@ -28,7 +28,16 @@ Exit codes:
 
 import json
 import sys
+from pathlib import Path
 from typing import NoReturn
+
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
 
 _DRAFT_HINT: dict[str, str] = {
     "mcp__plugin_slack_slack__slack_send_message": (
@@ -68,6 +77,12 @@ def main() -> int:
         return 0  # fail-open
 
     tool_name = data.get("tool_name", "")
+    _record_signal(
+        gate_name="no_direct_send_guard",
+        decision="deny",
+        reason="direct Slack send redirected to draft",
+        tool=tool_name,
+    )
     deny(tool_name)
     return 0  # unreachable
 

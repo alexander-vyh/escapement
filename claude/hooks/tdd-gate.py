@@ -23,6 +23,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # File classification
@@ -236,11 +244,24 @@ def main() -> int:
     modified_files = get_modified_files(repo_root)
     has_test_changes = any(is_test_file(f) for f in modified_files)
 
+    rel_path = os.path.relpath(filepath, repo_root)
+
     if has_test_changes:
+        _record_signal(
+            gate_name="tdd_gate",
+            decision="allow",
+            reason="test files already modified in working tree",
+            file=rel_path,
+        )
         return allow()
 
     # No test files modified — nudge toward TDD
-    rel_path = os.path.relpath(filepath, repo_root)
+    _record_signal(
+        gate_name="tdd_gate",
+        decision="ask",
+        reason="writing impl file with no test changes in working tree",
+        file=rel_path,
+    )
     return ask(
         hook_event,
         f"TDD: writing to '{rel_path}' but no test files have been modified yet. "

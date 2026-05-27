@@ -28,6 +28,14 @@ import re
 import sys
 from pathlib import Path
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -198,6 +206,13 @@ def _handle_read(tool_input: dict, cwd: Path) -> int:
     except ValueError:
         rel_path = str(file_path)
 
+    _record_signal(
+        gate_name="serena_preference_gate",
+        decision="deny",
+        reason="full-file Read on source while Serena active",
+        path=rel_path,
+        surface="Read",
+    )
     return _deny(_BLOCK_MESSAGE.format(rel_path=rel_path))
 
 
@@ -253,6 +268,14 @@ def _handle_bash(tool_input: dict, cwd: Path) -> int:
     except ValueError:
         rel_path = str(target_path)
 
+    _record_signal(
+        gate_name="serena_preference_gate",
+        decision="deny",
+        reason=f"full-file Bash {cmd_name} on source while Serena active",
+        path=rel_path,
+        surface="Bash",
+        cmd=cmd_name,
+    )
     return _deny(
         "Blocked: full-file shell read ({cmd}) on source code while Serena is "
         "active. Use Serena's symbol tools instead — see Read block message for "
