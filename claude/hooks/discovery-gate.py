@@ -25,6 +25,14 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Type parsing
@@ -172,6 +180,12 @@ def main() -> int:
         docs = find_design_docs(openspec_changes_dir)
 
         if not docs:
+            _record_signal(
+                gate_name="discovery_gate",
+                decision="deny",
+                reason="no design doc found in openspec/changes/",
+                story_type=story_type,
+            )
             deny(
                 hook_event,
                 "No design doc found in openspec/changes/{name}/design.md. "
@@ -184,6 +198,13 @@ def main() -> int:
         # and are correctly skipped, since they describe bug/chore work the gate
         # is not concerned with.
         if any(not check_design_doc_sections(d) for d in docs):
+            _record_signal(
+                gate_name="discovery_gate",
+                decision="allow",
+                reason="valid design doc found",
+                story_type=story_type,
+                doc_count=len(docs),
+            )
             return allow()
 
         # No valid feature-schema design doc — ask, showing what's missing on the
@@ -191,6 +212,13 @@ def main() -> int:
         docs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         best_doc = docs[0]
         missing_list = ", ".join(check_design_doc_sections(best_doc))
+        _record_signal(
+            gate_name="discovery_gate",
+            decision="ask",
+            reason=f"design doc missing sections: {missing_list}",
+            story_type=story_type,
+            doc=str(best_doc.relative_to(project_dir)),
+        )
         return ask(
             hook_event,
             f"No design doc with required sections found. "
