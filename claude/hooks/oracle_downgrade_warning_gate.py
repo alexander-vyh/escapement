@@ -21,6 +21,21 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
+
+# Test Oracle Brief location (matches test_oracle_brief_gate.py BRIEF_RELATIVE_PATH).
+# Used to verify the "Test Oracle Brief has been updated" claim mechanically
+# rather than as an honor-system assertion.
+_BRIEF_RELATIVE_PATH = Path(".agent/runtime/test-oracle-brief.md")
+_BRIEF_RECENT_WINDOW_SEC = 24 * 60 * 60  # 24 hours
+
 
 FINISHING_COMMANDS = (
     ("git", "commit"),
@@ -344,17 +359,53 @@ def analyze(repo_root: Path) -> list[Issue]:
     return issues
 
 
-def build_message(issues: list[Issue]) -> str:
+def _brief_recently_modified(repo_root: Path) -> bool:
+    """Check whether the Test Oracle Brief was modified in the last 24h.
+
+    Per gate-design.md Rule 3 (validate the value, not just the presence):
+    the prior text "Proceed only if the Test Oracle Brief has been updated"
+    was an unverifiable honor system. This check turns the claim into a
+    mechanically-testable assertion.
+    """
+    brief_path = repo_root / _BRIEF_RELATIVE_PATH
+    if not brief_path.is_file():
+        return False
+    try:
+        import time
+        return (time.time() - brief_path.stat().st_mtime) <= _BRIEF_RECENT_WINDOW_SEC
+    except OSError:
+        return False
+
+
+def build_message(issues: list[Issue], brief_was_updated: bool) -> str:
     listed = "\n".join(
         f"  - {issue.filepath}: {issue.kind}: {issue.detail}" for issue in issues[:12]
     )
     if len(issues) > 12:
         listed += f"\n  - ... {len(issues) - 12} more"
+
+    if brief_was_updated:
+        # The mechanical check passed; the warning is now informational —
+        # the user has acknowledged this class of change in the brief.
+        return (
+            "ORACLE DOWNGRADE NOTICE: changed tests may weaken what the oracle "
+            "proves. The Test Oracle Brief was updated within the last 24 hours, "
+            "so this is informational only — confirm the brief reflects the new "
+            "oracle, then proceed.\n\n"
+            f"{listed}"
+        )
+
+    # No recent brief update — the prior honor-system text becomes an explicit
+    # ask, with the brief-update path named as a verifiable next step.
     return (
         "ORACLE DOWNGRADE WARNING: changed tests may weaken what the oracle proves.\n\n"
         f"{listed}\n\n"
-        "This is a warning, not a hard block. Proceed only if the Test Oracle Brief "
-        "has been updated or the replacement test is an equal-or-stronger oracle."
+        "This is a warning, not a hard block. To proceed cleanly:\n"
+        f"  - Update {_BRIEF_RELATIVE_PATH} to reflect the new oracle, OR\n"
+        "  - Confirm the replacement test is an equal-or-stronger oracle by\n"
+        "    saying 'proceed' (your decision is captured in the signal log).\n\n"
+        "Either way, name *why* this change is safe — the captured rationale "
+        "becomes labeled training data for future revisions of this gate."
     )
 
 
@@ -379,8 +430,26 @@ def main() -> int:
 
     issues = analyze(repo_root)
     if not issues:
+        _record_signal(
+            gate_name="oracle_downgrade_warning_gate",
+            decision="allow",
+            reason="no oracle-downgrade signals in changed tests",
+        )
         return allow()
-    return ask(build_message(issues))
+
+    brief_updated = _brief_recently_modified(repo_root)
+    _record_signal(
+        gate_name="oracle_downgrade_warning_gate",
+        decision="ask",
+        reason=(
+            f"{len(issues)} oracle-downgrade signal(s); "
+            f"brief_updated_recently={brief_updated}"
+        ),
+        issue_count=len(issues),
+        brief_recently_updated=brief_updated,
+        issue_kinds=sorted({i.kind for i in issues}),
+    )
+    return ask(build_message(issues, brief_updated))
 
 
 if __name__ == "__main__":
