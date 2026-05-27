@@ -26,49 +26,84 @@ import json
 import os
 import re
 import sys
-import time
 from pathlib import Path
 from typing import Optional
 
-
-NINETY_DAYS = 90 * 24 * 60 * 60
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Locating the design
 # ---------------------------------------------------------------------------
+#
+# No mtime cutoff. The 90-day-cutoff this hook previously carried is the same
+# oracle-downgrade pattern the kaizen 3f8d37b removed from discovery-gate.py:
+# filesystem mtime is the wrong oracle for "is this design still authoritative."
+# A 91-day-old design that's still load-bearing should still appear; staleness
+# is a content question, not a filesystem-attribute one.
 
-def find_recent_openspec_changes(changes_dir: Path) -> list:
-    """Return change directories under openspec/changes/ touched in the last 90
-    days. Skips the `archive/` directory."""
+def find_openspec_changes(changes_dir: Path) -> list:
+    """Return change directories under openspec/changes/, skipping archive/."""
     if not changes_dir.is_dir():
         return []
-    cutoff = time.time() - NINETY_DAYS
     out = []
     for d in changes_dir.iterdir():
-        if not d.is_dir() or d.name == "archive":
-            continue
-        try:
-            if d.stat().st_mtime >= cutoff:
-                out.append(d)
-        except OSError:
-            continue
+        if d.is_dir() and d.name != "archive":
+            out.append(d)
     return out
 
 
-def find_recent_design_docs(plans_dir: Path) -> list:
-    """Return *.md files in docs/plans/ modified within the last 90 days (legacy)."""
+def find_design_docs(plans_dir: Path) -> list:
+    """Return *.md files in docs/plans/ (legacy fallback)."""
     if not plans_dir.is_dir():
         return []
-    cutoff = time.time() - NINETY_DAYS
-    docs = []
-    for f in plans_dir.glob("*.md"):
-        try:
-            if f.is_file() and f.stat().st_mtime >= cutoff:
-                docs.append(f)
-        except OSError:
-            continue
-    return docs
+    return [f for f in plans_dir.glob("*.md") if f.is_file()]
+
+
+# ---------------------------------------------------------------------------
+# Within-session deduplication
+# ---------------------------------------------------------------------------
+#
+# Repeated bd close calls against the same design produce the same prompts.
+# Habituation → mock bureaucracy (the user says 'yes' reflexively, treating
+# the question as friction not signal). Track which design's prompts have
+# already fired this session; skip silent re-prompts on the same design.
+
+def _dedup_state_file(session_id: str) -> Path:
+    return Path(f"/tmp/discovery_close_gate_{session_id}.json")
+
+
+def _already_prompted(session_id: str, design_path: str) -> bool:
+    if not session_id:
+        return False
+    path = _dedup_state_file(session_id)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        return design_path in state.get("prompted", [])
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def _mark_prompted(session_id: str, design_path: str) -> None:
+    if not session_id:
+        return
+    path = _dedup_state_file(session_id)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {"prompted": []}
+    if design_path not in state["prompted"]:
+        state["prompted"].append(design_path)
+    try:
+        path.write_text(json.dumps(state), encoding="utf-8")
+    except OSError:
+        pass  # dedup is best-effort; failure just means the next close re-asks
 
 
 # ---------------------------------------------------------------------------
@@ -205,12 +240,14 @@ def main() -> int:
         return 0
 
     project_dir = data.get("cwd", "") or data.get("workingDirectory", "") or os.getcwd()
+    session_id = data.get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
 
     # --- Locate the design: openspec/changes/ first, docs/plans/ as fallback ---
     design_content: Optional[str] = None
     change_dir: Optional[Path] = None
+    design_source: Optional[Path] = None  # path used for the dedup key
 
-    changes = find_recent_openspec_changes(Path(project_dir) / "openspec" / "changes")
+    changes = find_openspec_changes(Path(project_dir) / "openspec" / "changes")
     if changes:
         changes.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         change_dir = changes[0]
@@ -218,15 +255,17 @@ def main() -> int:
         if design_md.is_file():
             try:
                 design_content = design_md.read_text(encoding="utf-8", errors="replace")
+                design_source = design_md
             except OSError:
                 design_content = None
     else:
-        docs = find_recent_design_docs(Path(project_dir) / "docs" / "plans")
+        docs = find_design_docs(Path(project_dir) / "docs" / "plans")
         if docs:
             docs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
             for doc in docs:
                 try:
                     design_content = doc.read_text(encoding="utf-8", errors="replace")
+                    design_source = doc
                     break
                 except OSError:
                     continue
@@ -272,9 +311,44 @@ def main() -> int:
                 )
 
     if not parts:
+        _record_signal(
+            gate_name="discovery_close_gate",
+            decision="allow",
+            reason="design checks passed; no questions to surface",
+            design=str(design_source) if design_source else None,
+        )
         return allow()
 
-    return ask(hook_event, "\n\n".join(parts))
+    # Within-session dedup: don't re-ask the same questions on consecutive
+    # closes against the same design. Habituation breeds mock compliance.
+    design_path_str = str(design_source) if design_source else "_unknown_"
+    if _already_prompted(session_id, design_path_str):
+        _record_signal(
+            gate_name="discovery_close_gate",
+            decision="allow",
+            reason="prompts already shown for this design this session (dedup)",
+            design=design_path_str,
+        )
+        return allow()
+
+    # Global transparency: name the design path so the agent sees where
+    # these questions came from rather than treating them as anonymous.
+    rel_design = design_path_str
+    try:
+        rel_design = str(Path(design_source).relative_to(project_dir))
+    except (ValueError, TypeError):
+        pass
+    header = f"From your design at `{rel_design}`:\n\n"
+
+    _record_signal(
+        gate_name="discovery_close_gate",
+        decision="ask",
+        reason=f"surfacing {len(parts)} design-doc question(s) before close",
+        design=design_path_str,
+        question_count=len(parts),
+    )
+    _mark_prompted(session_id, design_path_str)
+    return ask(hook_event, header + "\n\n".join(parts))
 
 
 if __name__ == "__main__":
