@@ -27,6 +27,14 @@ import os
 import sys
 from pathlib import Path
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -174,6 +182,14 @@ def main() -> int:
     _write_state(state_path, state)
 
     if should_nudge:
+        _record_signal(
+            gate_name="context_burn_detector",
+            decision="nudge",
+            reason=f"context burn cost {state['count']} crossed threshold {threshold}",
+            count=state["count"],
+            threshold=threshold,
+            tool_name=tool_name,
+        )
         json.dump({"systemMessage": _NUDGE_MESSAGE.format(count=state["count"])}, sys.stdout)
 
     return 0

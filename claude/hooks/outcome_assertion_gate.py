@@ -21,6 +21,15 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +368,11 @@ def main() -> int:
         all_issues.extend(issues)
 
     if not all_issues:
+        _record_signal(
+            gate_name="outcome_assertion_gate",
+            decision="allow",
+            reason="all test functions have outcome assertions",
+        )
         return allow()
 
     # Build the ask message
@@ -371,6 +385,13 @@ def main() -> int:
         f"outcome, or say 'proceed' to create the PR anyway."
     )
 
+    _record_signal(
+        gate_name="outcome_assertion_gate",
+        decision="ask",
+        reason=f"{len(all_issues)} test functions have structural-only assertions",
+        issue_count=len(all_issues),
+        issues=all_issues[:10],  # cap for log size
+    )
     return ask(message)
 
 
