@@ -23,10 +23,12 @@ Exit codes:
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import NoReturn
 
 
@@ -150,6 +152,88 @@ def is_mol_feature_parent(parent_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# spec-id value validation
+# ---------------------------------------------------------------------------
+
+_PLACEHOLDER_VALUES = {
+    "none", "tbd", "todo", "wip", "n/a", "na", "fixme", "xxx", "?", "??", "???",
+}
+
+
+def validate_spec_id(spec_id: str, project_dir: Path) -> tuple[bool, str]:
+    """Validate that a --spec-id value points to a real spec requirement.
+
+    Closes the mock-bureaucracy hole: presence of --spec-id alone is not
+    enough; the value must resolve. Per delicate-art-of-bureaucracy.md:
+    a gate that checks symbolic compliance without checking the underlying
+    behavior produces mock bureaucracy by the rule's own definition.
+
+    Validation:
+      1. Reject placeholder strings (none/tbd/todo/wip/etc.)
+      2. The path part (before '#') must resolve to a real file under
+         openspec/changes/<change>/specs/ or openspec/specs/.
+      3. If an anchor is present, it should match a `### Requirement: <name>`
+         heading in the file (kebab-case or space-separated form).
+
+    Returns (is_valid, error_message). error_message is empty on valid.
+    """
+    if not spec_id or spec_id.strip().lower() in _PLACEHOLDER_VALUES:
+        return False, (
+            f"value '{spec_id}' is a placeholder, not a real reference. "
+            f"Link to an actual spec requirement."
+        )
+
+    # Parse path#anchor
+    if "#" in spec_id:
+        path_part, anchor = spec_id.split("#", 1)
+    else:
+        path_part, anchor = spec_id, ""
+
+    # Reject non-openspec paths — the convention is openspec/changes/*/specs/
+    # or openspec/specs/. Tolerate either absolute-from-project or relative.
+    spec_path = (project_dir / path_part).resolve()
+    if not spec_path.is_file():
+        return False, (
+            f"path '{path_part}' does not resolve to a file. "
+            f"Expected under openspec/changes/<change>/specs/ or openspec/specs/."
+        )
+
+    # If an anchor is present, verify it matches a Requirement heading.
+    # Match either the literal anchor or a kebab→space-separated form.
+    if anchor:
+        try:
+            content = spec_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False, f"path '{path_part}' exists but cannot be read."
+
+        anchor_spaced = anchor.replace("-", " ").lower()
+        requirement_headers = [
+            line[len("### Requirement:"):].strip().lower()
+            for line in content.splitlines()
+            if line.startswith("### Requirement:")
+        ]
+        if not requirement_headers:
+            return False, (
+                f"spec file '{path_part}' contains no '### Requirement: ...' "
+                f"headings to anchor to."
+            )
+
+        matched = any(
+            header == anchor.lower() or header == anchor_spaced
+            for header in requirement_headers
+        )
+        if not matched:
+            return False, (
+                f"anchor '#{anchor}' does not match any '### Requirement: ...' "
+                f"heading in '{path_part}'. Available: "
+                f"{', '.join(sorted(requirement_headers)[:3])}"
+                f"{'...' if len(requirement_headers) > 3 else ''}"
+            )
+
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
 
@@ -195,10 +279,6 @@ def main() -> int:
     if "bd create" not in command:
         return 0
 
-    # Fast-path: already has --spec-id
-    if has_flag(command, "spec-id"):
-        return allow()
-
     # Only enforce when creating under a parent
     parent_id = parse_flag(command, "parent")
     if not parent_id:
@@ -208,13 +288,40 @@ def main() -> int:
     if not is_mol_feature_parent(parent_id):
         return allow()
 
-    # Parent is mol-feature and no --spec-id — block
+    # Parent IS mol-feature. Now check spec-id.
+    spec_id = parse_flag(command, "spec-id")
+    if not spec_id:
+        # Missing entirely — block
+        deny(
+            "This bd create is under a mol-feature molecule but is missing --spec-id. "
+            "Add --spec-id <spec-identifier> to link this task to its specification. "
+            "Example: bd create \"my task\" --parent {parent} "
+            "--spec-id openspec/changes/<change-name>/specs/<capability>.md#<requirement-name>"
+            .format(parent=parent_id)
+        )
+
+    # spec-id is present — validate the value resolves to a real spec.
+    # Closes the mock-bureaucracy hole flagged by the bureaucracy-principle
+    # audit (delicate-art-of-bureaucracy.md): a gate that checks presence
+    # but not resolution lets agents satisfy it symbolically with values
+    # like --spec-id none.
+    project_dir_str = (
+        data.get("cwd", "")
+        or data.get("workingDirectory", "")
+        or os.getcwd()
+    )
+    project_dir = Path(project_dir_str)
+    valid, error = validate_spec_id(spec_id, project_dir)
+    if valid:
+        return allow()
+
+    # spec-id is invalid — block with the specific resolution error
     deny(
-        "This bd create is under a mol-feature molecule but is missing --spec-id. "
-        "Add --spec-id <spec-identifier> to link this task to its specification. "
-        "Example: bd create \"my task\" --parent {parent} "
-        "--spec-id openspec/changes/<change-name>/specs/<capability>.md#<requirement-name>"
-        .format(parent=parent_id)
+        f"--spec-id '{spec_id}' does not resolve to a real spec requirement: "
+        f"{error}\n"
+        f"Expected format: openspec/changes/<change-name>/specs/"
+        f"<capability>.md#<requirement-name>. The path must point at a real "
+        f"file; the anchor must match a '### Requirement: ...' heading in it."
     )
 
     return 0  # unreachable, but keeps type checkers happy
