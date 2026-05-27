@@ -22,6 +22,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 _LOG_FILE = Path.home() / ".claude" / "hooks" / "agent-dispatch.log"
 _TRACKER_PREFIX = "agent-team-tracker-"
 _TRACKER_DIR = Path("/tmp")
@@ -115,7 +123,12 @@ Multi-agent team (agents that talk to each other):
   Agent(name="explorer-1", team_name="research", description="...", prompt="...")
   Agent(name="explorer-2", team_name="research", description="...", prompt="...")
 
-There is NEVER a reason to dispatch an anonymous agent.\
+There is almost never a reason to dispatch an anonymous agent. The
+two legitimate cases — a one-off lookup, or an explicit user-requested
+anonymous probe — are still served by giving the agent a name (even
+something throwaway like name="oneoff" or name="probe"). The cost of
+naming is one keyword arg; the cost of leaving it off is that the
+agent cannot be addressed, paired, or coordinated with.\
 """
 
 _BLOCK_MULTI_NO_TEAM = """\
@@ -171,6 +184,11 @@ def main() -> int:
     # HARD BLOCK: no name
     if not agent_name:
         _log("BLOCKED — no name")
+        _record_signal(
+            gate_name="enforce_named_agents",
+            decision="deny",
+            reason="agent dispatched without name parameter",
+        )
         result = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -189,6 +207,13 @@ def main() -> int:
         if recent_count > 0:
             # Second+ teamless agent in window — HARD BLOCK
             _log(f"BLOCKED — multi-agent without team ({recent_count + 1} in {_WINDOW_SECONDS}s)")
+            _record_signal(
+                gate_name="enforce_named_agents",
+                decision="deny",
+                reason=f"second teamless agent within {_WINDOW_SECONDS}s window",
+                name=agent_name,
+                recent_count=recent_count,
+            )
             result = {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -203,6 +228,12 @@ def main() -> int:
 
         # First teamless agent in window — SOFT NUDGE
         _log("NUDGED — no team_name (first in window)")
+        _record_signal(
+            gate_name="enforce_named_agents",
+            decision="nudge",
+            reason="first teamless agent in window — second within 30s will block",
+            name=agent_name,
+        )
         result = {
             "systemMessage": _NUDGE_NO_TEAM.format(name=agent_name),
         }
@@ -210,6 +241,13 @@ def main() -> int:
         return 0
 
     _log("ALLOWED — named agent on team")
+    _record_signal(
+        gate_name="enforce_named_agents",
+        decision="allow",
+        reason="named agent on team",
+        name=agent_name,
+        team=team_name,
+    )
     return 0
 
 
