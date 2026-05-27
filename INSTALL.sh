@@ -78,6 +78,8 @@ declare -a PLAN=(
   "claude/rules/never-suppress.md|$CLAUDE_DIR/rules/never-suppress.md"
   "claude/rules/serena-first.md|$CLAUDE_DIR/rules/serena-first.md"
   "claude/rules/continuation-harness.md|$CLAUDE_DIR/rules/continuation-harness.md"
+  "claude/rules/delicate-art-of-bureaucracy.md|$CLAUDE_DIR/rules/delicate-art-of-bureaucracy.md"
+  "claude/rules/gate-design.md|$CLAUDE_DIR/rules/gate-design.md"
 
   # Commands
   "claude/commands/discovery.md|$CLAUDE_DIR/commands/discovery.md"
@@ -111,7 +113,11 @@ declare -a PLAN=(
   "claude/hooks/serena_preference_gate.py|$CLAUDE_DIR/hooks/serena_preference_gate.py"
   "claude/hooks/serena_preference_injection.py|$CLAUDE_DIR/hooks/serena_preference_injection.py"
   "claude/hooks/serena_onboarding_check.sh|$CLAUDE_DIR/hooks/serena_onboarding_check.sh"
+  "claude/hooks/_gate_signal.py|$CLAUDE_DIR/hooks/_gate_signal.py"
   "claude/hooks/tests|$CLAUDE_DIR/hooks/tests"
+
+  # Bin scripts (invokable from any repo cwd; resolve their own project root)
+  "claude/bin|$CLAUDE_DIR/bin"
 
   # Continuation harness — code symlinked into ~/.claude/harness; runtime state
   # (threads/, incidents.jsonl) lives in ~/.claude/harness too (NOT the repo) and
