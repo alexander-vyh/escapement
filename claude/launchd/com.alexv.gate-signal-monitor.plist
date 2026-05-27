@@ -55,6 +55,14 @@
         <string>/Users/alexandervyhmeister/.claude/bin/gate_signal_monitor.py</string>
         <string>--since</string>
         <string>7d</string>
+        <!--
+          --file-beads opens a bd issue in claude-workflow-setup for each
+          concerning pattern (mock-bureaucracy risk, FP-heavy shirking
+          category). Deduped against existing open `[gate-monitor]`-tagged
+          issues, so re-running the same week doesn't pile on duplicates.
+          The user sees these in `bd ready` next time they open the repo.
+        -->
+        <string>--file-beads</string>
     </array>
 
     <key>StartCalendarInterval</key>

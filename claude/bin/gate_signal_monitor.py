@@ -32,11 +32,23 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+
+# Beads-issue title prefix for monitor-filed issues. Used for dedup —
+# the monitor checks `bd list` for open issues whose title starts with
+# this prefix + the specific pattern, and skips re-filing.
+_BEAD_TITLE_PREFIX = "[gate-monitor]"
+
+# Repo where monitor-filed beads land. The monitor IS the workflow
+# tooling; concerning patterns surface in this repo's bd queue rather
+# than wherever the signal happened to be captured.
+_BEAD_TARGET_REPO = Path(os.path.expanduser("~/GitHub/claude-workflow-setup"))
 
 
 _DEFAULT_KNOWN_GATES = [
@@ -193,6 +205,146 @@ def analyze(
     }
 
 
+def _list_open_monitor_beads(repo: Path) -> list[dict[str, Any]]:
+    """Return open bd issues in repo whose title starts with the monitor prefix.
+
+    Used for dedup — we only file a new bead if no existing open one
+    covers the same pattern. Best-effort: returns [] on any error.
+    """
+    try:
+        result = subprocess.run(
+            ["bd", "list", "--status=open", "--json"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return []
+        data = json.loads(result.stdout)
+        if not isinstance(data, list):
+            return []
+        return [
+            entry for entry in data
+            if isinstance(entry, dict)
+            and isinstance(entry.get("title"), str)
+            and entry["title"].startswith(_BEAD_TITLE_PREFIX)
+        ]
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
+        return []
+
+
+def _file_bead(
+    repo: Path, title: str, description: str, priority: int = 2,
+) -> str | None:
+    """Create a bd issue in repo. Returns the new bead id on success."""
+    try:
+        result = subprocess.run(
+            [
+                "bd", "create",
+                "--type=task",
+                f"--priority={priority}",
+                f"--title={title}",
+                f"--description={description}",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+        # Parse "Created issue: <id> — <title>" from stdout
+        for line in result.stdout.splitlines():
+            if "Created issue:" in line:
+                return line.split("Created issue:")[1].split("—")[0].strip()
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def file_concerning_patterns(
+    summary: dict[str, Any], repo: Path, window_text: str,
+) -> list[dict[str, Any]]:
+    """Open bd issues for each concerning pattern in summary.
+
+    Returns a list of {title, action: 'filed' | 'deduped', id?} records.
+    """
+    existing = _list_open_monitor_beads(repo)
+    existing_titles = {b.get("title", "") for b in existing}
+
+    actions: list[dict[str, Any]] = []
+
+    # Mock-bureaucracy risk per gate
+    for m in summary.get("mock_bureaucracy_risk", []):
+        title = f"{_BEAD_TITLE_PREFIX} mock-bureaucracy risk: {m['gate']}"
+        if title in existing_titles:
+            actions.append({"title": title, "action": "deduped"})
+            continue
+        description = (
+            f"Gate `{m['gate']}` shows mock-bureaucracy risk in the last "
+            f"{window_text}: {m['waivers']} waivers vs {m['denies']} denies "
+            f"(ratio {m['ratio']}).\n\n"
+            f"Per `claude/rules/gate-design.md` Rule 3 (validate the value, "
+            f"not just the presence) and the Wiesche et al. (2013) finding "
+            f"that both coercive AND enabling designs can produce mock "
+            f"bureaucracy: this ratio suggests symbolic compliance is "
+            f"taking over from real enforcement.\n\n"
+            f"## What to check\n\n"
+            f"1. Read the captured waiver reasons:\n"
+            f"   `python3 ~/.claude/bin/gate_signal_query.py "
+            f"--gate {m['gate']} --decision waiver-accepted --since 30d`\n"
+            f"2. If the reasons cluster on a specific pattern, the gate's "
+            f"heuristic is too aggressive — prune or refine.\n"
+            f"3. If the reasons are diverse / ad-hoc, the gate may be "
+            f"firing correctly and the user is overriding for context "
+            f"reasons; consider whether the gate's denial message could "
+            f"better explain *why* the rule applies in this case.\n\n"
+            f"This bead was filed automatically by the weekly gate-signal "
+            f"monitor. Filed once; subsequent weeks dedup against this "
+            f"open issue. Close after acting on the finding."
+        )
+        new_id = _file_bead(repo, title, description, priority=2)
+        actions.append({"title": title, "action": "filed", "id": new_id})
+
+    # validate_no_shirking FP-heavy categories
+    for c in summary.get("shirking_fp_heavy", []):
+        title = (
+            f"{_BEAD_TITLE_PREFIX} validate_no_shirking FP-heavy: "
+            f"{c['category']}"
+        )
+        if title in existing_titles:
+            actions.append({"title": title, "action": "deduped"})
+            continue
+        description = (
+            f"`validate_no_shirking` category `{c['category']}` is "
+            f"false-positive-heavy in the last {window_text}: "
+            f"{c['waivers']} waivers vs {c['denies']} denies "
+            f"(ratio {c['ratio']}).\n\n"
+            f"Per `claude/rules/gate-design.md` Operating Rule 1 (every "
+            f"rule has a half-life), patterns in this category are "
+            f"firing on legitimate prose the user keeps overriding. "
+            f"Candidates for pruning in the next quarterly review — "
+            f"or sooner if the ratio stays elevated.\n\n"
+            f"## What to check\n\n"
+            f"1. Read the matched phrases:\n"
+            f"   `python3 ~/.claude/bin/gate_signal_query.py "
+            f"--gate validate_no_shirking --decision waiver-accepted "
+            f"--since 30d`\n"
+            f"2. Look for false-positive phrasings: legitimate uses of "
+            f"language that incidentally match a shirking pattern. The "
+            f"patterns are listed by category in "
+            f"`claude/hooks/validate_no_shirking.py` `_CATEGORIZED_PATTERNS`.\n"
+            f"3. Prune or tighten the offending pattern(s); commit the "
+            f"revision; close this bead.\n\n"
+            f"Filed by the weekly gate-signal monitor."
+        )
+        new_id = _file_bead(repo, title, description, priority=2)
+        actions.append({"title": title, "action": "filed", "id": new_id})
+
+    return actions
+
+
 def render_human(summary: dict[str, Any], since_text: str) -> str:
     lines: list[str] = []
     lines.append(f"Gate-signal monitor — last {since_text}")
@@ -261,6 +413,21 @@ def main() -> int:
         default=",".join(_DEFAULT_KNOWN_GATES),
         help="comma-separated gate names used to detect 'silent' gates",
     )
+    p.add_argument(
+        "--file-beads",
+        action="store_true",
+        help=(
+            "Open bd issues in claude-workflow-setup for concerning patterns "
+            "(mock-bureaucracy risk, FP-heavy shirking categories). Deduped "
+            "against existing open `[gate-monitor]`-tagged issues."
+        ),
+    )
+    p.add_argument(
+        "--beads-repo",
+        type=Path,
+        default=_BEAD_TARGET_REPO,
+        help=f"Repo to file monitor beads in (default: {_BEAD_TARGET_REPO})",
+    )
     args = p.parse_args()
 
     try:
@@ -287,10 +454,22 @@ def main() -> int:
     summary["logs_scanned"] = len(logs)
     summary["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+    bead_actions: list[dict[str, Any]] = []
+    if args.file_beads:
+        bead_actions = file_concerning_patterns(summary, args.beads_repo, args.since)
+        summary["bead_actions"] = bead_actions
+
     if args.json:
         print(json.dumps(summary, indent=2, ensure_ascii=False))
     else:
         print(render_human(summary, args.since))
+        if bead_actions:
+            print()
+            print("Bead actions (--file-beads):")
+            for a in bead_actions:
+                tag = a["action"].upper()
+                bid = f" → {a['id']}" if a.get("id") else ""
+                print(f"  [{tag}] {a['title']}{bid}")
 
     return 0
 
