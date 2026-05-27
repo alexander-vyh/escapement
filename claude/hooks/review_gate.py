@@ -21,6 +21,14 @@ import re
 import sys
 from pathlib import Path
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 _STATE_DIR = Path("/tmp/claude-review-gate")
 
 # Agent types that structurally count as review agents. A dispatch with one
@@ -96,7 +104,17 @@ def _is_close_command(command: str) -> bool:
 
 _WARN_NO_REVIEW = (
     "No review agent was dispatched before closing this task. "
-    "Consider dispatching a code-reviewer or adversarial-reviewer agent first."
+    "Review catches drift between spec and implementation, oracle "
+    "downgrades, and missed regressions — the kind of failures that "
+    "the implementer's own context makes invisible.\n\n"
+    "Consider dispatching a code-reviewer or adversarial-reviewer "
+    "agent first. The gate is satisfied by either:\n"
+    "  (1) subagent_type contains 'reviewer' (e.g. code-reviewer, "
+    "adversarial-reviewer, test-quality-reviewer), OR\n"
+    "  (2) the agent's name/description/prompt contains a review-word "
+    "(review, audit, critique, etc.).\n\n"
+    "If you've already reviewed manually or this work doesn't need "
+    "review, say 'proceed' to close anyway."
 )
 
 
@@ -131,9 +149,20 @@ def main() -> int:
         state = _read_state(session_id)
         if state["reviews"]:
             # Review agent was dispatched — allow silently
+            _record_signal(
+                gate_name="review_gate",
+                decision="allow",
+                reason=f"{len(state['reviews'])} review agent(s) dispatched this session",
+                reviewers=state["reviews"][:5],
+            )
             return 0
 
         # No review agent — soft warning
+        _record_signal(
+            gate_name="review_gate",
+            decision="nudge",
+            reason="no review agent dispatched this session before bd close",
+        )
         result = {
             "systemMessage": _WARN_NO_REVIEW,
         }
