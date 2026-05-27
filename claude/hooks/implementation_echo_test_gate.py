@@ -21,6 +21,24 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
+
+# Per-file oracle override: an `# oracle: <reason>` or `// oracle: <reason>`
+# comment anywhere in a test file marks that file as having an explicit
+# (human-attested) independent oracle. The heuristic is high-confidence but
+# not infallible; this is the escape path per gate-design.md Rule 1.
+_ORACLE_OVERRIDE_RE = re.compile(
+    r"(?:^|\s)(?:#|//)\s*oracle:\s*(.+?)(?:\n|$)",
+    re.MULTILINE,
+)
+
 
 FINISHING_COMMANDS = (
     ("git", "commit"),
@@ -486,11 +504,30 @@ def find_mock_only_tests(test_files: dict[str, str]) -> list[Issue]:
     return issues
 
 
-def analyze(repo_root: Path, files: list[str]) -> list[Issue]:
+def find_oracle_overrides(test_files: dict[str, str]) -> dict[str, list[str]]:
+    """Return {filepath: [override_reason, ...]} for files containing an
+    `# oracle: <reason>` or `// oracle: <reason>` comment. The reason text
+    becomes labeled training data captured via the signal store — if specific
+    override reasons recur across many files, the heuristic that flagged them
+    is wrong and should be tuned.
+    """
+    overrides: dict[str, list[str]] = {}
+    for filepath, text in test_files.items():
+        reasons = [m.group(1).strip() for m in _ORACLE_OVERRIDE_RE.finditer(text)]
+        reasons = [r for r in reasons if r]
+        if reasons:
+            overrides[filepath] = reasons
+    return overrides
+
+
+def analyze(repo_root: Path, files: list[str]) -> tuple[list[Issue], dict[str, str]]:
+    """Return (issues, test_files). test_files is returned so callers can find
+    oracle overrides without re-reading the disk.
+    """
     source_paths = [path for path in files if is_source_file(path)]
     test_paths = [path for path in files if is_test_file(path)]
     if not test_paths:
-        return []
+        return [], {}
 
     source_files = {path: read_file(repo_root, path) for path in source_paths}
     test_files = {path: read_file(repo_root, path) for path in test_paths}
@@ -498,7 +535,7 @@ def analyze(repo_root: Path, files: list[str]) -> list[Issue]:
     issues: list[Issue] = []
     issues.extend(find_shared_generated_literals(source_files, test_files))
     issues.extend(find_mock_only_tests(test_files))
-    return issues
+    return issues, test_files
 
 
 def build_message(issues: list[Issue]) -> str:
@@ -511,9 +548,21 @@ def build_message(issues: list[Issue]) -> str:
         "IMPLEMENTATION-ECHO TEST GATE: changed tests contain high-confidence "
         "implementation-echo patterns.\n\n"
         f"{listed}\n\n"
-        "Rewrite the tests so they prove observable business/user behavior using "
-        "an independent oracle. Do not repeat generated IDs, opaque constants, "
-        "or mock/private call structure from the implementation as the oracle."
+        "Two paths forward:\n\n"
+        "  (1) **Rewrite the tests** so they prove observable business/user "
+        "behavior using an independent oracle. Do not repeat generated IDs, "
+        "opaque constants, or mock/private call structure from the "
+        "implementation as the oracle.\n\n"
+        "  (2) **Override the detection per file**: if the flagged constant or "
+        "mock interaction IS the correct oracle for that test, add a comment "
+        "anywhere in the file:\n"
+        "       # oracle: <one sentence why this constant/mock is the real oracle>\n"
+        "       // oracle: <same, for JS/TS>\n"
+        "     The override reason is captured as labeled training data — if "
+        "many files end up needing it for the same heuristic, the heuristic "
+        "is wrong and needs tuning.\n\n"
+        "If neither path applies (truly exempt context), say 'proceed' to "
+        "override — also captured."
     )
 
 
@@ -537,10 +586,57 @@ def main() -> int:
     if repo_root is None:
         return allow()
 
-    issues = analyze(repo_root, changed_files(repo_root))
+    issues, test_files = analyze(repo_root, changed_files(repo_root))
     if not issues:
+        _record_signal(
+            gate_name="implementation_echo_test_gate",
+            decision="allow",
+            reason="no implementation-echo patterns detected",
+        )
         return allow()
-    return deny(build_message(issues))
+
+    # Apply per-file # oracle: <reason> overrides
+    overrides = find_oracle_overrides(test_files)
+    files_overridden = set(overrides.keys())
+
+    remaining_issues = [i for i in issues if i.filepath not in files_overridden]
+    skipped_count = len(issues) - len(remaining_issues)
+
+    if overrides:
+        # Capture the override reasons as labeled training data
+        _record_signal(
+            gate_name="implementation_echo_test_gate",
+            decision="override-applied",
+            reason=f"{skipped_count} issue(s) overridden by oracle: comments",
+            override_reasons={fp: reasons for fp, reasons in overrides.items()},
+            skipped_issue_count=skipped_count,
+        )
+
+    if not remaining_issues:
+        # All issues were overridden — allow with the override capture above
+        return allow()
+
+    # Issues remain — convert from hard deny to ask so the agent has a
+    # documented escape ('proceed') beyond the per-file override.
+    _record_signal(
+        gate_name="implementation_echo_test_gate",
+        decision="ask",
+        reason=f"{len(remaining_issues)} implementation-echo issue(s) remaining after overrides",
+        issue_count=len(remaining_issues),
+        issue_kinds=sorted({i.kind for i in remaining_issues}),
+    )
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "ask",
+                    "permissionDecisionReason": build_message(remaining_issues),
+                }
+            }
+        )
+    )
+    return 0
 
 
 if __name__ == "__main__":
