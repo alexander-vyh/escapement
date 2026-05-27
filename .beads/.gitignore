@@ -56,6 +56,10 @@ backup/
 # Per-project environment file (Dolt connection config, GH#2520)
 .env
 
+# Gate signal log (runtime decisions written by claude/hooks/_gate_signal.py;
+# per-machine, accumulates over time, not a versioned artifact)
+.gate-signal.jsonl
+
 # Legacy files (from pre-Dolt versions)
 *.db
 *.db?*

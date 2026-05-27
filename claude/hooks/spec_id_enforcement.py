@@ -31,6 +31,16 @@ import time
 from pathlib import Path
 from typing import NoReturn
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+# Import is best-effort; if the module is unavailable we silently skip
+# logging so the gate never breaks because of its observer.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -291,7 +301,13 @@ def main() -> int:
     # Parent IS mol-feature. Now check spec-id.
     spec_id = parse_flag(command, "spec-id")
     if not spec_id:
-        # Missing entirely — block
+        # Missing entirely — block, recording the signal first
+        _record_signal(
+            gate_name="spec_id_enforcement",
+            decision="deny",
+            reason="missing --spec-id under mol-feature parent",
+            parent_id=parent_id,
+        )
         deny(
             "This bd create is under a mol-feature molecule but is missing --spec-id. "
             "Add --spec-id <spec-identifier> to link this task to its specification. "
@@ -313,9 +329,23 @@ def main() -> int:
     project_dir = Path(project_dir_str)
     valid, error = validate_spec_id(spec_id, project_dir)
     if valid:
+        _record_signal(
+            gate_name="spec_id_enforcement",
+            decision="allow",
+            reason="spec_id resolved",
+            parent_id=parent_id,
+            spec_id=spec_id,
+        )
         return allow()
 
     # spec-id is invalid — block with the specific resolution error
+    _record_signal(
+        gate_name="spec_id_enforcement",
+        decision="deny",
+        reason=f"invalid spec_id: {error}",
+        parent_id=parent_id,
+        spec_id=spec_id,
+    )
     deny(
         f"--spec-id '{spec_id}' does not resolve to a real spec requirement: "
         f"{error}\n"
