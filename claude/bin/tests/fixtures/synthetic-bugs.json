@@ -1,0 +1,54 @@
+[
+  {
+    "bug_id": "synth-1",
+    "title": "Index includes archived change records as spec'd area",
+    "body": "The spec index builder is picking up requirements from openspec/changes/archive/ and treating closed features as still under active spec guard. Need to exclude archive subdirectory.",
+    "expected_classification": "in",
+    "expected_requirement_ids": ["spec-area-classifier.exclude-the-archive-directory"],
+    "_note": "Tests paraphrase: the bug uses 'archived change records' / 'archive subdirectory' against a requirement that talks about 'exclude the archive directory'. Low keyword overlap, high semantic overlap."
+  },
+  {
+    "bug_id": "synth-2",
+    "title": "Same input yields different similarity scores on rerun",
+    "body": "Two consecutive runs of classify_bugs.py on the same corpus produce different output JSON bytes. The cosine similarity scoring isn't reproducible.",
+    "expected_classification": "in",
+    "expected_requirement_ids": ["spec-area-classifier.score-a-beads-issue-against-the-index-deterministically"],
+    "_note": "Tests cross-vocab: 'cosine similarity scoring isn't reproducible' against the requirement's 'Score ... deterministically'."
+  },
+  {
+    "bug_id": "synth-3",
+    "title": "Stop hook lets agent stop without verification or wakeup",
+    "body": "The continuation harness stop barrier should require either verification_passed, wakeup_registered, or user_released. Currently the gate fails to block on no-completion-no-resumption.",
+    "expected_classification": "in",
+    "expected_requirement_ids": [
+      "verification-gate.no-completion-or-resumption-proof-blocks-stop",
+      "stop-barrier-supervisor.three-stop-permission-paths",
+      "adapter-claude-code.shadow-mode-stop-hook"
+    ],
+    "_note": "Multiple plausible matches — passing if any of the three is hit."
+  },
+  {
+    "bug_id": "synth-4",
+    "title": "Add dark mode toggle to settings panel",
+    "body": "User can toggle between light and dark themes. Persist preference in localStorage.",
+    "expected_classification": "out",
+    "expected_requirement_ids": [],
+    "_note": "Pure UI feature — no overlap with continuation-harness or staleness specs."
+  },
+  {
+    "bug_id": "synth-5",
+    "title": "Update CSS variable for primary button hover",
+    "body": "Change --button-primary-hover from #0066cc to #0055aa. Visual tweak only.",
+    "expected_classification": "out",
+    "expected_requirement_ids": [],
+    "_note": "Cosmetic change — should classify as 'out' with no requirements matching above threshold."
+  },
+  {
+    "bug_id": "synth-6",
+    "title": "Build the embedding index from spec markdown files",
+    "body": "Need a script that walks openspec/changes/ and parses Requirement blocks, producing vector embeddings for each requirement.",
+    "expected_classification": "in",
+    "expected_requirement_ids": ["spec-area-classifier.index-spec-corpus-from-openspec-directories"],
+    "_note": "Direct keyword match — the easy case."
+  }
+]
