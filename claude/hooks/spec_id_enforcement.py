@@ -212,7 +212,8 @@ def main() -> int:
     deny(
         "This bd create is under a mol-feature molecule but is missing --spec-id. "
         "Add --spec-id <spec-identifier> to link this task to its specification. "
-        "Example: bd create \"my task\" --parent {parent} --spec-id docs/plans/my-design.md"
+        "Example: bd create \"my task\" --parent {parent} "
+        "--spec-id openspec/changes/<change-name>/specs/<capability>.md#<requirement-name>"
         .format(parent=parent_id)
     )
 

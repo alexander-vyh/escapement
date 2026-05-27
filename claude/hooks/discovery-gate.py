@@ -3,7 +3,8 @@
 
 Fires as PreToolUse on Bash commands containing `bd create`.
 
-For features and epics, requires a design doc in docs/plans/ with:
+For features and epics, requires a design doc at
+openspec/changes/{name}/design.md (excluding archive/) with:
   - ## Problem Statement
   - ## Non-Goals
   - ## Riskiest Assumption
@@ -21,7 +22,6 @@ import json
 import os
 import re
 import sys
-import time
 from pathlib import Path
 from typing import NoReturn
 
@@ -67,19 +67,21 @@ REQUIRED_SECTIONS = [
     "## Riskiest Assumption",
 ]
 
-THIRTY_DAYS = 30 * 24 * 60 * 60
 
-
-def find_recent_design_docs(plans_dir: Path) -> list[Path]:
-    """Return *.md files in plans_dir modified within the last 30 days."""
-    if not plans_dir.is_dir():
+def find_design_docs(openspec_changes_dir: Path) -> list[Path]:
+    """Return design.md files under openspec/changes/{name}/, excluding archive."""
+    if not openspec_changes_dir.is_dir():
         return []
 
-    cutoff = time.time() - THIRTY_DAYS
     docs = []
-    for f in plans_dir.glob("*.md"):
-        if f.is_file() and f.stat().st_mtime >= cutoff:
-            docs.append(f)
+    for change_dir in openspec_changes_dir.iterdir():
+        if not change_dir.is_dir():
+            continue
+        if change_dir.name == "archive":
+            continue
+        design = change_dir / "design.md"
+        if design.is_file():
+            docs.append(design)
     return docs
 
 
@@ -166,25 +168,33 @@ def main() -> int:
         # Claude Code passes the working directory as "cwd" in the hook JSON.
         # Fall back to os.getcwd() as a last resort.
         project_dir = data.get("cwd", "") or data.get("workingDirectory", "") or os.getcwd()
-        plans_dir = Path(project_dir) / "docs" / "plans"
-        docs = find_recent_design_docs(plans_dir)
+        openspec_changes_dir = Path(project_dir) / "openspec" / "changes"
+        docs = find_design_docs(openspec_changes_dir)
 
         if not docs:
-            deny(hook_event, "No design doc found. Run /discovery first.")
+            deny(
+                hook_event,
+                "No design doc found in openspec/changes/{name}/design.md. "
+                "Run /discovery to create one, or use --type=bug|chore if this "
+                "isn't feature work.",
+            )
 
-        # Check the best doc (most recently modified) for required sections
-        docs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        best_doc = docs[0]
-        missing = check_design_doc_sections(best_doc)
-
-        if not missing:
+        # Any design doc with all required sections is enough — rapid-schema docs
+        # (with ## Problem rather than ## Problem Statement) naturally won't match
+        # and are correctly skipped, since they describe bug/chore work the gate
+        # is not concerned with.
+        if any(not check_design_doc_sections(d) for d in docs):
             return allow()
 
-        # Some sections missing — ask, listing what's missing
-        missing_list = ", ".join(missing)
+        # No valid feature-schema design doc — ask, showing what's missing on the
+        # most recent partial doc.
+        docs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        best_doc = docs[0]
+        missing_list = ", ".join(check_design_doc_sections(best_doc))
         return ask(
             hook_event,
-            f"Design doc '{best_doc.name}' is missing required sections: "
+            f"No design doc with required sections found. "
+            f"Most recent doc '{best_doc.relative_to(project_dir)}' is missing: "
             f"{missing_list}. Add them or say 'proceed' to continue anyway.",
         )
 

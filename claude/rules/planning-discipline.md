@@ -40,7 +40,7 @@ If found, resume rather than start fresh.
 
 | Question | Source of truth |
 |----------|----------------|
-| Why are we building this? What's the riskiest assumption? | `openspec/changes/{name}/design.md` or `docs/plans/` |
+| Why are we building this? What's the riskiest assumption? | `openspec/changes/{name}/design.md` |
 | What does component X do in state Y? | `openspec/changes/{name}/specs/` |
 | What tasks exist? What's unblocked? | beads (`bd ready`) |
 
