@@ -40,6 +40,14 @@ import sys
 from pathlib import Path
 from typing import NoReturn, Optional
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -205,6 +213,13 @@ def main() -> int:
     artifact_name = Path(file_path).name
 
     if not result["exists"]:
+        _record_signal(
+            gate_name="discovery_input_gate",
+            decision="deny",
+            reason="no problem-framing.md",
+            artifact=artifact_name,
+            change_dir=change_dir,
+        )
         deny(
             hook_event,
             f"No confirmed problem framing. Discovery requires problem-framing.md "
@@ -216,6 +231,14 @@ def main() -> int:
     if result["bad"]:
         fields = ", ".join(result["bad"])
         plural = "fields" if len(result["bad"]) > 1 else "field"
+        _record_signal(
+            gate_name="discovery_input_gate",
+            decision="deny",
+            reason=f"framing has unfilled fields: {fields}",
+            artifact=artifact_name,
+            change_dir=change_dir,
+            unfilled_fields=result["bad"],
+        )
         deny(
             hook_event,
             f"problem-framing.md has unfilled {plural}: {fields}. A field that "
@@ -223,6 +246,13 @@ def main() -> int:
             f"blank or TBD. Complete the framing before drafting {artifact_name}.",
         )
 
+    _record_signal(
+        gate_name="discovery_input_gate",
+        decision="allow",
+        reason="all six framing fields filled",
+        artifact=artifact_name,
+        change_dir=change_dir,
+    )
     return 0  # all six fields filled — allow
 
 
