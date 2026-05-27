@@ -22,6 +22,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 
 BRIEF_RELATIVE_PATH = Path(".agent/runtime/test-oracle-brief.md")
 
@@ -190,19 +198,31 @@ def allow() -> int:
     return 0
 
 
-def deny(reason: str) -> int:
+def ask(reason: str) -> int:
+    """Ask the user to confirm. The user can satisfy the gate by creating the
+    brief OR by saying 'proceed' to override. Per gate-design.md Rule 1:
+    every gate must have a first-class escape path, and an 'ask' with an
+    explicit 'proceed' override is the standard convention in this repo
+    (tdd-gate, outcome_assertion_gate, discovery-gate, discovery-close-gate
+    all use it).
+    """
     print(
         json.dumps(
             {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
+                    "permissionDecision": "ask",
                     "permissionDecisionReason": reason,
                 }
             }
         )
     )
-    return 2
+    return 0
+
+
+# Legacy alias preserved for any external callers; new code should call ask().
+def deny(reason: str) -> int:
+    return ask(reason)
 
 
 def normalize_heading(value: str) -> str:
@@ -317,6 +337,10 @@ def block_message(reason: str, repo_root: Path, files: list[str]) -> str:
         + "\n\n"
         "Relevant changed/target files:\n"
         + (sample_files if sample_files else "  - unknown")
+        + "\n\nIf this work is genuinely exempt (one-off fix, scripts/, "
+        "spike/, no real behavior change), say 'proceed' to skip the "
+        "brief for this change. The override is captured; if it gets "
+        "used often, the gate's heuristic needs tuning."
     )
 
 
@@ -351,8 +375,20 @@ def handle_edit_gate(data: dict) -> int:
 
     ok, reason = brief_status(repo_root)
     if ok:
+        _record_signal(
+            gate_name="test_oracle_brief_gate",
+            decision="allow",
+            reason="oracle brief present and valid",
+            target=rel_target,
+        )
         return allow()
-    return deny(block_message(reason or "Invalid Test Oracle Brief.", repo_root, [rel_target]))
+    _record_signal(
+        gate_name="test_oracle_brief_gate",
+        decision="ask",
+        reason=reason or "Invalid Test Oracle Brief.",
+        target=rel_target,
+    )
+    return ask(block_message(reason or "Invalid Test Oracle Brief.", repo_root, [rel_target]))
 
 
 def command_from(data: dict) -> str:
@@ -453,8 +489,22 @@ def handle_bash_landing_gate(data: dict) -> int:
 
     ok, reason = brief_status(repo_root)
     if ok:
+        _record_signal(
+            gate_name="test_oracle_brief_gate",
+            decision="allow",
+            reason="oracle brief present and valid",
+            surface="finishing-command",
+            file_count=len(relevant),
+        )
         return allow()
-    return deny(block_message(reason or "Invalid Test Oracle Brief.", repo_root, relevant))
+    _record_signal(
+        gate_name="test_oracle_brief_gate",
+        decision="ask",
+        reason=reason or "Invalid Test Oracle Brief.",
+        surface="finishing-command",
+        file_count=len(relevant),
+    )
+    return ask(block_message(reason or "Invalid Test Oracle Brief.", repo_root, relevant))
 
 
 def main() -> int:
