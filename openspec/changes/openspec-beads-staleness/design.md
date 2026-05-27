@@ -225,12 +225,15 @@ specific decision before the gate ever blocks them.
    calibrate from observed FP rate. Then flip to enforcing. Per Shook
    2010: behavior precedes belief — ship the observer first.
 
-5. **Waiver requires a reason with substance, not a checkbox.** Per the
-   principle file's Flexibility feature: reasoned exceptions are
-   first-class. `--spec-waiver "<reason>"` requires ≥20 characters and
-   rejects null patterns ("TBD", "n/a", whitespace-only, bead-title
-   echo). Reason text becomes labeled training data fed back into the
-   classifier.
+5. **Waiver follows the standard convention in
+   `claude/rules/gate-design.md` Rule 1.** Flag shape `--spec-waiver
+   "<reason>"`, reason required ≥20 characters, null patterns rejected
+   (`TBD`, `n/a`, whitespace-only, bead-title echo). Reason text
+   persists to `.beads/.gate-signal.jsonl` via the shared signal store
+   (change `gate-signal-persistence-foundation`), where it accumulates
+   as labeled training data for the learning loop. This change does
+   NOT define a private waiver convention — it adopts the standard
+   one so the user can grep one file instead of N.
 
 6. **Commits-without-beads is sumo-wrestler-shaped, not coercive.** Per
    principle file Operating Rule 5: "coercion is a smell, not a
@@ -246,11 +249,18 @@ specific decision before the gate ever blocks them.
    IDs, (b) the classifier's confidence score, (c) two paths forward
    (link or waive), and (d) the exact commands to take each path.
 
-8. **Depends on `fix-discovery-gate-directory` (shipped 2026-05-26,
-   commit `3f8d37b`).** Without that change, the forward-flow gate
-   denied every `bd create --type=feature` in this repo regardless of
-   reverse-flow behavior. The kaizen unblocked the forward flow; this
-   change addresses the reverse.
+8. **Depends on two prerequisite changes.**
+   - `fix-discovery-gate-directory` (shipped 2026-05-26, commit
+     `3f8d37b`) — unblocks the forward-flow gate that was previously
+     denying every `bd create --type=feature` in this repo.
+   - `gate-signal-persistence-foundation` (in flight, openspec change
+     of same name) — provides the `.beads/.gate-signal.jsonl` store
+     and the `_gate_signal.record()` API the learning-loop future
+     increment consumes. The walking skeleton of this change does not
+     depend on it (it just tests classifier accuracy on a hand-labeled
+     corpus); the post-skeleton increments (reverse-flow gate, waiver
+     mechanism, learning loop) all do. Build order: signal-persistence
+     foundation ships first, then this change's increments adopt it.
 
 ## Risks & Trade-offs
 

@@ -29,6 +29,37 @@ that meets all four of these conditions:
   out the hook" are not escapes; they are the gate failing the
   never-suppress rule.
 
+### Standard waiver convention
+
+When a gate's escape path takes the shape of a waiver — the agent
+asserts a reasoned exception — every gate in this repo uses the same
+convention so the waiver corpus is uniform and the user can grep one
+file instead of N:
+
+- **Flag shape:** `--<gate-name>-waiver "<reason>"` on the relevant
+  command (e.g., `--spec-waiver`, `--brief-waiver`,
+  `--echo-test-waiver`). Per-gate naming so a single command can
+  satisfy or fail to satisfy multiple gates without ambiguity.
+- **Reason is required free-text, not a checkbox.** Minimum 20
+  characters. Null patterns rejected: `tbd`, `n/a`, `todo`, `wip`,
+  `?`, `??`, `???`, whitespace-only, and reasons that echo the
+  source artifact verbatim (bead title, file path).
+- **Reason persists to the signal store** (`.beads/.gate-signal.jsonl`
+  via `claude/hooks/_gate_signal.py` per Rule 2). The persisted
+  record carries the gate name, the decision (waiver-accepted), the
+  reason text, and the command excerpt. The corpus is the labeled
+  training data for future revisions of the gate.
+- **Reasons accumulate, not evaporate.** A waiver entry never expires
+  from the log. The half-life review (Operating Rule 1 from the
+  bureaucracy principle) looks at *which reasons recur* to decide
+  whether the gate's heuristic should be updated or the rule itself
+  revised.
+
+If a gate cannot use the standard convention (e.g., it fires on a
+context where additional flags can't be parsed), the design.md or
+commit message MUST state the reason and document the alternative
+escape — the gate cannot silently omit a waiver path.
+
 ### Reference designs (audit-validated 2026-05-26)
 
 - **`discovery_input_gate.py`** — `schema: rapid` is a first-class
