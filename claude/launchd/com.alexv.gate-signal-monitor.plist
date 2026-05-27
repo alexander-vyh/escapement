@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Weekly gate-signal monitor — macOS launchd job.
+
+  Runs claude/bin/gate_signal_monitor.py every Monday at 09:17 local.
+  Scans ~/GitHub/* for .beads/.gate-signal.jsonl, aggregates the last
+  7 days of decisions, writes the report to ~/.claude/logs/.
+
+  ## Install
+
+      cp claude/launchd/com.alexv.gate-signal-monitor.plist \
+         ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.alexv.gate-signal-monitor.plist
+
+  ## Verify it's loaded
+
+      launchctl list | grep gate-signal-monitor
+      # Should show the job by label
+
+  ## Trigger a test run NOW (without waiting for Monday)
+
+      launchctl kickstart -k gui/$(id -u)/com.alexv.gate-signal-monitor
+      cat ~/.claude/logs/gate-signal-weekly.log
+
+  ## Uninstall
+
+      launchctl unload ~/Library/LaunchAgents/com.alexv.gate-signal-monitor.plist
+      rm ~/Library/LaunchAgents/com.alexv.gate-signal-monitor.plist
+
+  ## Output
+
+  Stdout → ~/.claude/logs/gate-signal-weekly.log (rewritten each run)
+  Stderr → ~/.claude/logs/gate-signal-weekly.err (rewritten each run)
+
+  Read the log when you remember to. If a week passes silently and the
+  log is empty, either no gates fired in real work (unlikely) or the
+  deployment broke (check: ls -la ~/.claude/hooks/_gate_signal.py).
+
+  ## Why 09:17 and not 09:00
+
+  Per CronCreate's off-minute principle: every cron at minute 0 across
+  the planet fires simultaneously. 09:17 keeps this off the busiest
+  schedule slots. Adjust to taste; the Minute/Hour keys below are local
+  time, no UTC math needed.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.alexv.gate-signal-monitor</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>python3</string>
+        <string>/Users/alexandervyhmeister/.claude/bin/gate_signal_monitor.py</string>
+        <string>--since</string>
+        <string>7d</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer> <!-- Monday -->
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>17</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/alexandervyhmeister/.claude/logs/gate-signal-weekly.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/alexandervyhmeister/.claude/logs/gate-signal-weekly.err</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
