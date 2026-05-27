@@ -5,9 +5,7 @@ description: Use when executing implementation plans with independent tasks in t
 
 # Subagent-Driven Development
 
-This skill wraps the superpowers subagent-driven-development skill with mandatory TeamCreate + named-agent dispatch. All subagents MUST be on a team so they can communicate via SendMessage.
-
-Execute plan by dispatching fresh **named team** subagents per task, with two-stage review after each: spec compliance review first, then code quality review.
+Execute a plan by dispatching fresh **named team** subagents per task, with two-stage review after each: spec compliance review first, then code quality review.
 
 **Why teams:** Named subagents on a team can receive follow-up instructions via `SendMessage` without losing their context. Isolated subagents are fire-and-forget — if the reviewer finds issues, you have to dispatch an entirely new agent. Team subagents allow iterative review loops with the same agent.
 
@@ -82,7 +80,6 @@ Agent(
 Agent(
   name="spec-reviewer-task1",
   team_name="impl-session",
-  subagent_type="superpowers:code-reviewer",
   description="Review spec compliance for task 1",
   prompt="Review the implementation by impl-task1 against this spec:
     [Full spec text]
@@ -90,25 +87,29 @@ Agent(
     Check: Does the code match the spec exactly?
     - Missing requirements?
     - Extra features not in spec?
-    - Incorrect behavior?"
+    - Incorrect behavior?
+    Report: ✅ Spec compliant OR ❌ with a numbered list of specific failures."
 )
 ```
 
 ### Code quality reviewer dispatch:
 
+Use the `adversarial-reviewer` agent type for quality review — it is hostile, expert, and personally motivated to find failures.
+
 ```
 Agent(
   name="quality-reviewer-task1",
   team_name="impl-session",
-  subagent_type="superpowers:code-reviewer",
+  subagent_type="adversarial-reviewer",
   description="Review code quality for task 1",
   prompt="Review code quality for the commits by impl-task1.
-    [Git SHAs for the relevant commits]
+    [Git SHAs or file paths for the relevant changes]
     Before reviewing any file path, verify it exists with Glob or Read. Never assume a path exists based on convention.
     Check: Is the code well-written?
     - Test coverage adequate?
     - Clean, readable code?
-    - Following project patterns?"
+    - Following project patterns?
+    Report: ✅ Approved OR ❌ with a numbered list of specific issues."
 )
 ```
 
@@ -167,14 +168,14 @@ Task 1: Hook installation script
 Agent(name="impl-hooks", team_name="feature-hooks", prompt="[full task text]")
 
 impl-hooks via SendMessage: "Should hooks install at user or system level?"
-You: SendMessage(to="impl-hooks", message="User level (~/.config/superpowers/hooks/)")
+You: SendMessage(to="impl-hooks", message="User level (~/.config/myapp/hooks/)")
 
 impl-hooks: DONE — implemented, 5/5 tests passing, committed
 
 Agent(name="spec-review-hooks", team_name="feature-hooks", prompt="Review against spec...")
 spec-review-hooks: ✅ Spec compliant
 
-Agent(name="quality-review-hooks", team_name="feature-hooks", prompt="Review quality...")
+Agent(name="quality-review-hooks", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
 quality-review-hooks: ✅ Approved
 
 [Mark Task 1 complete. If beads: bd close <task-id>]
@@ -193,7 +194,7 @@ impl-recovery: Fixed, committed
 Agent(name="spec-review-recovery-2", team_name="feature-hooks", prompt="Re-review...")
 spec-review-recovery-2: ✅ Spec compliant
 
-Agent(name="quality-review-recovery", team_name="feature-hooks", prompt="Review quality...")
+Agent(name="quality-review-recovery", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
 quality-review-recovery: Issue: magic number (100)
 
 SendMessage(to="impl-recovery", message="Extract PROGRESS_INTERVAL constant")
@@ -202,7 +203,7 @@ impl-recovery: Done, committed
 [Mark Task 2 complete]
 
 [After all tasks]
-Agent(name="final-reviewer", team_name="feature-hooks", prompt="Final review...")
+Agent(name="final-reviewer", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Final review...")
 final-reviewer: All requirements met, ready to merge
 
 [Shutdown team]
@@ -253,11 +254,17 @@ confirms the outcome end-to-end. Anything short of that is not done.
 
 ## Integration
 
-**Required workflow skills:**
-- **superpowers:using-git-worktrees** — isolated workspace before starting
-- **superpowers:writing-plans** — creates the plan this skill executes
-- **superpowers:requesting-code-review** — review template for quality gate
-- **superpowers:finishing-a-development-branch** — complete development after all tasks
+**Before starting:**
+- Have a plan. For new features, use `/discovery` to produce a design doc and walking skeleton tasks. For bugs and chores, a task list or notes are sufficient.
+- Work on a feature branch, not main: `git checkout -b <branch-name>`
 
-**Beads-managed projects:**
+**Final code review:**
+- After all tasks pass, run `/code-review` for a diff-level pass, or dispatch an `adversarial-reviewer` agent against the branch as the final gate before merge.
+
+**Merging:**
+- Push the branch: `git push -u origin <branch-name>`
+- Open a PR: `gh pr create --fill`
+- Merge when CI passes and review is clean.
+
+**With beads:**
 - Use `/beads-execution` which wraps this skill with `bd` status tracking. TeamCreate + named agents are still required.
