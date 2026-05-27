@@ -24,6 +24,14 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+# Shared signal capture per claude/rules/gate-design.md Rule 2.
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from _gate_signal import record as _record_signal
+except ImportError:  # pragma: no cover
+    def _record_signal(*_args, **_kwargs) -> None:
+        return None
+
 # ---------------------------------------------------------------------------
 # Shirking patterns — all case-insensitive
 # ---------------------------------------------------------------------------
@@ -76,6 +84,67 @@ _PATTERNS: list[str] = [
     r"(?:it'?s|that'?s|this\s+is|just)\s+(?:an?\s+)?(?:flaky|intermittent|transient|sporadic)\s+(?:test|failure|check|build)",
     r"(?:this\s+is|that'?s|it'?s)\s+a\s+(?:known|existing|tracked)\s+(?:issue|bug|problem)",
 ]
+
+# Categories aligned by index with _PATTERNS. Used by the denial to name
+# *which kind* of shirking matched and by gate_signal_query.py to count
+# fire frequency per category (the half-life mechanism per gate-design.md
+# Operating Rule 1: query the signal log to see which patterns fire most
+# and prune the dead ones).
+_CATEGORIES: list[str] = [
+    "pre-existing",            # pre-existing failure/issue/bug...
+    "pre-existing",            # appears to be a pre-existing
+    "pre-existing",            # checking if this is pre-existing
+    "attribution-deflection",  # not in anything I changed
+    "attribution-deflection",  # not in the files I changed
+    "unrelated",               # unrelated to this/my/our
+    "unrelated",               # not related to ...
+    "unrelated",               # not related/relevant to our changes
+    "unrelated",               # not caused by our changes
+    "pre-existing",            # was already failing/broken
+    "pre-existing",            # failing before our changes
+    "pre-existing",            # failing prior to my
+    "unrelated",               # completely different problem
+    "unrelated",               # separate issue from/to/than
+    "attribution-deflection",  # I didn't change/touch ...
+    "attribution-deflection",  # didn't touch ...
+    "unrelated",               # test failure is unrelated
+    "attribution-deflection",  # not my/our problem/issue/...
+    "unrelated",               # that's a separate/different/unrelated bug
+    "acceptance-evasion",      # note this and move on
+    "acceptance-evasion",      # just accept the errors
+    "acceptance-evasion",      # accept the errors until
+    "infrastructure-blame",    # CI issue/problem/...
+    "infrastructure-blame",    # infra/pipeline/build/environment issue
+    "infrastructure-blame",    # CI/pipeline/build/runner is broken/flaky
+    "infrastructure-blame",    # works locally
+    "infrastructure-blame",    # passes locally
+    "deferral",                # needs separate investigation/fix/...
+    "deferral",                # will be fixed later/separately
+    "deferral",                # leaving this for now / as-is
+    "scope-limitation",        # outside/beyond/out of scope
+    "dismissal",               # it's a flaky test/failure
+    "dismissal",               # this is a known/existing/tracked issue
+]
+
+# Sanity check: categories must align with patterns. This is a startup
+# assertion — if someone edits one list without the other, the hook
+# fails loudly rather than silently miscategorizing.
+assert len(_CATEGORIES) == len(_PATTERNS), (
+    f"_CATEGORIES ({len(_CATEGORIES)}) must align with _PATTERNS ({len(_PATTERNS)})"
+)
+
+# Map each category to a one-line description used in the denial,
+# pointing the agent at where the rationale lives.
+_CATEGORY_RATIONALE: dict[str, str] = {
+    "pre-existing": "claiming a failure pre-dates your change deflects ownership; even if true, the failure is in your delivery window now.",
+    "attribution-deflection": "'I didn't touch that' deflects ownership; if the failure surfaces from your work, it's yours to either fix or escalate.",
+    "unrelated": "declaring a failure unrelated assumes the boundary you're drawing is the boundary that matters.",
+    "infrastructure-blame": "blaming CI / pipeline / 'works locally' externalizes a problem the outcome still requires resolved.",
+    "deferral": "punting to 'later' or a 'separate ticket' is wind-down disguised as scoping.",
+    "scope-limitation": "'out of scope' is a real defense sometimes — but only if the genuinely-out-of-scope work was filed; otherwise it's deferral.",
+    "acceptance-evasion": "explicitly choosing to live with failures is the most direct form of the anti-pattern.",
+    "dismissal": "'flaky' or 'known issue' may be true, but the burden is on you to confirm — not assume.",
+}
 
 COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _PATTERNS]
 
@@ -385,14 +454,32 @@ def _strip_code_spans(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def find_shirking_phrase(text: str) -> str | None:
-    """Return a context snippet around the first shirking match, or None."""
+    """Return a context snippet around the first shirking match, or None.
+
+    Kept for backward compatibility; new code should call find_shirking_match
+    which also returns the category.
+    """
+    result = find_shirking_match(text)
+    return result[0] if result else None
+
+
+def find_shirking_match(text: str) -> tuple[str, str] | None:
+    """Return (phrase_context, category) on the first match, or None.
+
+    The category is one of the keys in _CATEGORY_RATIONALE — names the
+    *kind* of shirking matched (pre-existing, attribution-deflection,
+    unrelated, infrastructure-blame, deferral, scope-limitation,
+    acceptance-evasion, dismissal). The denial uses it to name what
+    was matched and link to the rationale; the signal log uses it for
+    half-life analysis.
+    """
     stripped = _strip_code_spans(text)
-    for pattern in COMPILED_PATTERNS:
+    for category, pattern in zip(_CATEGORIES, COMPILED_PATTERNS):
         m = pattern.search(stripped)
         if m:
             start = max(0, m.start() - 40)
             end = min(len(stripped), m.end() + 80)
-            return stripped[start:end].strip()
+            return stripped[start:end].strip(), category
     return None
 
 
@@ -401,12 +488,14 @@ def find_shirking_phrase(text: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 _BLOCK_BODY = """\
-🚨 OUTCOME OWNERSHIP VIOLATION — you dismissed failures instead of fixing them.
+🚨 OUTCOME OWNERSHIP VIOLATION ({category}) — you dismissed failures instead of fixing them.
 
 You said something like:
   «{phrase}»
 
-"Pre-existing" is not an excuse. "Not my code" is not an excuse.
+Why this counts as {category}: {rationale}
+
+See `claude/rules/outcome-ownership.md` for the full anti-pattern catalog.
 You own the OUTCOME, not just your diff.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -426,12 +515,19 @@ Do NOT move on to other work — fix THIS first.
 You may ONLY stop without fixing if you are genuinely blocked
 on something you cannot solve (missing credentials, need
 infrastructure access, need a human decision about product
-requirements). Test failures are never that.\
+requirements). Test failures are never that.
+
+The escape: if you believe this match is a false positive, the user
+can release with "yes" / "proceed" / "lgtm" / "approved" / "go ahead".
+That release is captured in the signal log as labeled training data —
+if a particular category keeps producing false positives, the patterns
+for that category get pruned in the next half-life review.\
 """
 
 
-def _deny_output(event_name: str, phrase: str) -> dict:
-    reason = _BLOCK_BODY.format(phrase=phrase)
+def _deny_output(event_name: str, phrase: str, category: str = "uncategorized") -> dict:
+    rationale = _CATEGORY_RATIONALE.get(category, "review `outcome-ownership.md` for the rationale.")
+    reason = _BLOCK_BODY.format(phrase=phrase, category=category, rationale=rationale)
     if event_name == "PreToolUse":
         return {
             "hookSpecificOutput": {
@@ -447,8 +543,16 @@ def _deny_output(event_name: str, phrase: str) -> dict:
     }
 
 
-def block(event_name: str, phrase: str) -> NoReturn:
-    print(json.dumps(_deny_output(event_name, phrase)))
+def block(event_name: str, phrase: str, category: str = "uncategorized") -> NoReturn:
+    _record_signal(
+        gate_name="validate_no_shirking",
+        decision="deny",
+        reason=f"shirking phrase matched (category: {category})",
+        category=category,
+        phrase=phrase[:200],
+        hook_event=event_name,
+    )
+    print(json.dumps(_deny_output(event_name, phrase, category)))
     sys.exit(2)
 
 
@@ -493,6 +597,7 @@ def main() -> int:
         last_shirking_idx: int | None = None
         last_shirking_phrase: str | None = None
 
+        last_shirking_category = None
         for i, (role, text) in enumerate(messages):
             if role != "assistant":
                 continue
@@ -500,10 +605,12 @@ def main() -> int:
             # otherwise the hook permanently poisons its own transcript.
             if any(sig in text for sig in _HOOK_SIGNATURES):
                 continue
-            phrase = find_shirking_phrase(text)
-            if phrase:
+            match = find_shirking_match(text)
+            if match:
+                phrase, category = match
                 last_shirking_idx = i
                 last_shirking_phrase = phrase
+                last_shirking_category = category
 
         if last_shirking_phrase is not None:
             # Check for user approval after the last shirking phrase
@@ -518,8 +625,19 @@ def main() -> int:
                     if approved:
                         break
 
-            if not approved:
-                block(hook_event, last_shirking_phrase)
+            if approved:
+                # User released — capture this as labeled signal. Recurring
+                # false-positive categories surface here over time.
+                _record_signal(
+                    gate_name="validate_no_shirking",
+                    decision="waiver-accepted",
+                    reason=f"user released after match (category: {last_shirking_category})",
+                    category=last_shirking_category or "uncategorized",
+                    phrase=last_shirking_phrase[:200],
+                    hook_event=hook_event,
+                )
+            else:
+                block(hook_event, last_shirking_phrase, last_shirking_category or "uncategorized")
 
     # ── Phase 2: Verification evidence (Stop only) ────────────────────────
     if hook_event == "Stop":
