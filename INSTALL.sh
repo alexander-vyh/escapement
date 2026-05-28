@@ -52,7 +52,7 @@ for tool in openspec bd direnv python3 jq git bash; do
   fi
 done
 
-run "mkdir -p '$CLAUDE_DIR'/{skills,rules,commands,hooks,harness} '$CLAUDE_DIR'/harness/threads '$BEADS_DIR'/formulas"
+run "mkdir -p '$CLAUDE_DIR'/{skills,rules,commands,hooks,harness,agents} '$CLAUDE_DIR'/harness/threads '$BEADS_DIR'/formulas"
 
 # --- Symlink plan: (source_relative_to_repo, dest_absolute) ---
 # Preserves directory structure. For skill directories, symlink the whole dir.
@@ -80,6 +80,13 @@ declare -a PLAN=(
   "claude/rules/continuation-harness.md|$CLAUDE_DIR/rules/continuation-harness.md"
   "claude/rules/delicate-art-of-bureaucracy.md|$CLAUDE_DIR/rules/delicate-art-of-bureaucracy.md"
   "claude/rules/gate-design.md|$CLAUDE_DIR/rules/gate-design.md"
+
+  # Agents (workflow-integral only — personal advisor agents live in the user's
+  # own config, not in this framework. adversarial-reviewer is dispatched by
+  # subagent-driven-development; test-quality-reviewer is the operational
+  # counterpart to tdd-enforcement + behavioral-test-oracle-review.)
+  "claude/agents/adversarial-reviewer.md|$CLAUDE_DIR/agents/adversarial-reviewer.md"
+  "claude/agents/test-quality-reviewer.md|$CLAUDE_DIR/agents/test-quality-reviewer.md"
 
   # Commands
   "claude/commands/discovery.md|$CLAUDE_DIR/commands/discovery.md"
