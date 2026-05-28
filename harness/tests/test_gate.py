@@ -360,11 +360,38 @@ def run_stop_hook() -> int:
     import tempfile as _tf
     tmp = pathlib.Path(_tf.mkdtemp(prefix="harness-hook-"))
     try:
-        # B2: no contract.json → allow stop (conversational session, no gate).
+        # B2: no contract.json AND no universal-override signal → block.
+        # The prior B2 carve-out (silent allow when contract.json was absent) was an
+        # unspec'd inversion of the contract-or-resumption invariant; this test
+        # locks in the corrected behavior. Conversational sessions release via
+        # user_released (covered by the B1 test below), not via "no contract".
         td = tmp / "no-contract"
         td.mkdir(parents=True)
         out = call_hook({"session_id": "x", "transcript_path": ""}, td)
-        _assert(out is None, "B2: no contract.json → allow (no block output)", results)
+        _assert(
+            out is not None and out.get("decision") == "block",
+            "B2: no contract.json + no release signal → block (no_contract)",
+            results,
+        )
+
+        # B2 conversational-release: no contract.json BUT user said 'stop' in transcript → allow.
+        # Preserves the conversational-session escape via the documented user_released path
+        # rather than via the unspec'd contract-absent carve-out.
+        td = tmp / "no-contract-user-release"
+        td.mkdir(parents=True)
+        transcript_release = tmp / "transcript-no-contract-stop.jsonl"
+        transcript_release.write_text(
+            json.dumps({"message": {"role": "user", "content": [{"type": "text", "text": "stop"}]}}) + "\n"
+        )
+        out = call_hook(
+            {"session_id": "x", "transcript_path": str(transcript_release)},
+            td,
+        )
+        _assert(
+            out is None,
+            "B2 conversational-release: no contract.json + user 'stop' → allow (user_released)",
+            results,
+        )
 
         # B2 negative: malformed contract.json → block (fail safe, not silently allow).
         td = tmp / "malformed"

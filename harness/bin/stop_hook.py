@@ -291,20 +291,13 @@ def main() -> int:
         return 0
 
     # No task mode: contract gate.
-    # B2 fix: no contract file = no declared task = conversational/no-mode session → allow.
-    # Malformed contract (file exists but unparseable) falls through to would_block_stop
-    # and returns ("block", "no_contract") — fail safe.
-    if not (thread_dir / "contract.json").exists():
-        _log_incident({
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "session_id": session_id,
-            "decision": "allow",
-            "reason": "no_contract_file",
-            "was_correct": None,
-            "notes": "",
-        })
-        return 0
-
+    # Per continuation-harness spec, the three Stop-permission paths are universal:
+    # verification_passed, wakeup_registered, user_released. Sessions that never
+    # declared a contract reach those checks via would_block_stop and fall through
+    # to ("block", "no_contract") iff none of the three holds. The prior B2 carve-out
+    # (no contract.json → silent allow) was an unspec'd inversion of that invariant
+    # and made the gate's coverage proportional to whether the agent remembered to
+    # call init_contract.py — a presence-only check the gate-design rule forbids.
     state = load_thread_state(thread_dir, recent_user_message=recent_user_message)
     decision, reason = would_block_stop(state)
 
