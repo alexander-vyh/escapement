@@ -17,5 +17,15 @@ jobs:
           python-version: "3.12"
       - name: Install pytest
         run: python -m pip install --upgrade pip pytest
+      - name: Deploy hooks to ~/.claude/hooks
+        # Most hook test files import from ~/.claude/hooks (the deployed location)
+        # and module-skip if it is absent. Without this, CI would silently SKIP
+        # ~365 tests and still go green — a meaningless gate. Symlink the repo
+        # hooks into place so the suite runs in full against this checkout.
+        run: |
+          mkdir -p "$HOME/.claude"
+          ln -s "$GITHUB_WORKSPACE/claude/hooks" "$HOME/.claude/hooks"
       - name: Run hook + harness test suites
-        run: python -m pytest claude/hooks/tests harness/tests -q
+        # -p no:cacheprovider keeps the runner clean; fail on skips that hide
+        # collection gaps by reporting the skip count explicitly.
+        run: python -m pytest claude/hooks/tests harness/tests -q -rs

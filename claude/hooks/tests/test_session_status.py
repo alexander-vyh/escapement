@@ -54,6 +54,11 @@ def _run_main(
         patch("session_status._read_cwd", return_value=cwd),
         patch("session_status._run_bd", side_effect=fake_run_bd),
         patch("session_status._molecule_status", side_effect=fake_mol),
+        # main() probes `bd --version` to distinguish all-empty from all-failed.
+        # Mock it so this unit test is hermetic — the intent is "bd present +
+        # empty queue -> 'Queue empty'", independent of whether the bd binary is
+        # installed in the runtime env (it is not, e.g., in CI).
+        patch("session_status.subprocess.run", return_value=MagicMock(returncode=0)),
         patch("sys.stdout", new_callable=io.StringIO) as mock_stdout,
     ):
         main()
