@@ -77,9 +77,22 @@ def _run(name: str | None, team_name: str | None) -> tuple[int, dict]:
 
 
 @pytest.fixture(autouse=True)
-def clean_tracker():
-    """Remove the fake-session tracker file before and after each test."""
-    track = Path.home() / ".claude" / "hooks" / "state" / f"agent-team-tracker-{_FAKE_SESSION}"
+def clean_tracker(monkeypatch):
+    """Hermetic per-test env.
+
+    - Ensure the tracker state dir EXISTS (a fresh $HOME, e.g. CI, has none — the
+      stale-tracker tests write a tracker file directly).
+    - Remove the fake-session tracker file before and after each test.
+    - Neutralize ambient CI: CI runners set CI=true, which would trigger the
+      hook's _is_ci_without_session stand-down and make the blocking tests see
+      exit 0 instead of 2. Tests that exercise CI detection set CI explicitly via
+      patch.dict, which overrides this delenv during their own body.
+    """
+    state_dir = Path.home() / ".claude" / "hooks" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    track = state_dir / f"agent-team-tracker-{_FAKE_SESSION}"
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
     track.unlink(missing_ok=True)
     yield
     track.unlink(missing_ok=True)
