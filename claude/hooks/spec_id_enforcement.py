@@ -86,6 +86,33 @@ def has_flag(command: str, flag: str) -> bool:
     return bool(re.search(rf'--{re.escape(flag)}(?:\s|=|$)', command))
 
 
+def parse_quoted_flag(command: str, flag: str) -> str | None:
+    """Extract a possibly-quoted, multi-word --flag value.
+
+    Unlike parse_flag (which stops at the first whitespace), this handles
+    free-text reasons supplied as --flag 'a multi word reason',
+    --flag "a multi word reason", or --flag=value. Returns None if the
+    flag is absent.
+    """
+    # --flag='...' or --flag="..."
+    m = re.search(rf"--{re.escape(flag)}=(['\"])(.*?)\1", command, re.DOTALL)
+    if m:
+        return m.group(2)
+    # --flag 'quoted reason' / --flag "quoted reason"
+    m = re.search(rf"--{re.escape(flag)}\s+(['\"])(.*?)\1", command, re.DOTALL)
+    if m:
+        return m.group(2)
+    # --flag=bareword
+    m = re.search(rf"--{re.escape(flag)}=(\S+)", command)
+    if m:
+        return m.group(1)
+    # --flag bareword (single token, not another flag)
+    m = re.search(rf"--{re.escape(flag)}\s+(\S+)", command)
+    if m and not m.group(1).startswith("-"):
+        return m.group(1)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Molecule detection
 # ---------------------------------------------------------------------------
@@ -148,6 +175,16 @@ def is_mol_feature_parent(parent_id: str) -> bool:
                 return False
 
             data = json.loads(result.stdout)
+            # `bd show --json` returns a single-element JSON array, not a bare
+            # object (verified against current bd). The sibling readers
+            # derive_contract.fetch_bead and spec_id_preflight already unwrap
+            # the list; this hook must too, or _check_issue_for_mol_feature
+            # gets a list and raises AttributeError — crashing the gate and
+            # failing it OPEN for every mol-feature molecule.
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            if not isinstance(data, dict):
+                return False  # Unexpected shape — fail-open
 
         except Exception:
             return False  # Fail-open
@@ -244,6 +281,69 @@ def validate_spec_id(spec_id: str, project_dir: Path) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# Waiver reason validation (gate-design.md Rules 1 & 3)
+# ---------------------------------------------------------------------------
+
+# Minimum substance threshold for a waiver reason, per the standard waiver
+# convention in gate-design.md ("Reason is required free-text … Minimum 20
+# characters").
+_WAIVER_MIN_LEN = 20
+
+# Null patterns rejected by the standard waiver convention.
+_WAIVER_PLACEHOLDERS = {
+    "tbd", "n/a", "na", "todo", "wip", "fixme", "none", "xxx",
+    "?", "??", "???",
+}
+
+
+def validate_waiver_reason(
+    reason: str | None, parent_id: str = ""
+) -> tuple[bool, str]:
+    """Validate a --spec-waiver reason per gate-design.md Rules 1 & 3.
+
+    A waiver's reason is the labeled training data future revisions of the
+    gate read, so a presence-only check would manufacture mock bureaucracy
+    (an agent under pressure learns the shortest passing string). This
+    validates the *value*:
+
+      1. Non-empty after stripping.
+      2. Rejects null/placeholder patterns (tbd, n/a, todo, wip, ...).
+      3. Enforces the >=20-char substance threshold.
+      4. Rejects reasons that merely echo the source artifact (the parent
+         issue id) — an echo carries no signal.
+
+    Returns (is_valid, error_message). error_message is empty on valid.
+    """
+    if reason is None:
+        return False, "no waiver reason supplied."
+
+    stripped = reason.strip()
+    if not stripped:
+        return False, "waiver reason is empty."
+
+    if stripped.lower() in _WAIVER_PLACEHOLDERS:
+        return False, (
+            f"waiver reason '{stripped}' is a placeholder, not a real "
+            f"rationale. Explain WHY this task legitimately has no spec yet."
+        )
+
+    if len(stripped) < _WAIVER_MIN_LEN:
+        return False, (
+            f"waiver reason is too short ({len(stripped)} chars). "
+            f"At least {_WAIVER_MIN_LEN} characters of substantive rationale "
+            f"are required."
+        )
+
+    if parent_id and stripped.lower() == parent_id.strip().lower():
+        return False, (
+            "waiver reason merely echoes the parent issue id and carries no "
+            "rationale. Explain WHY the spec link is being waived."
+        )
+
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
 
@@ -253,7 +353,14 @@ def allow() -> int:
 
 
 def deny(message: str) -> NoReturn:
-    """Deny the action with an explanation."""
+    """Deny the action with an explanation.
+
+    CANONICAL DENY CONTRACT: signal the block with a single mechanism — the
+    permissionDecision="deny" JSON document on stdout, exit 0. Exit 2 is the
+    mutually-exclusive legacy stderr-feedback path; emitting both the JSON
+    decision *and* exit 2 is a contradictory double-block. We use the JSON
+    path, so this exits 0.
+    """
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -261,7 +368,7 @@ def deny(message: str) -> NoReturn:
             "permissionDecisionReason": message,
         }
     }))
-    sys.exit(2)
+    sys.exit(0)
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +405,43 @@ def main() -> int:
     if not is_mol_feature_parent(parent_id):
         return allow()
 
-    # Parent IS mol-feature. Now check spec-id.
+    # Parent IS mol-feature. First honor the first-class escape: a
+    # --spec-waiver with a substantive reason (gate-design.md Rule 1)
+    # allows the create without a resolving --spec-id. The reason is
+    # validated (Rule 3) and persisted (Rule 2) so the waiver corpus is
+    # labeled training data, not a rubber stamp.
+    if has_flag(command, "spec-waiver"):
+        waiver_reason = parse_quoted_flag(command, "spec-waiver")
+        valid_waiver, waiver_error = validate_waiver_reason(waiver_reason, parent_id)
+        if valid_waiver:
+            _record_signal(
+                gate_name="spec_id_enforcement",
+                decision="waiver-accepted",
+                reason=waiver_reason,
+                event_type="waiver",
+                parent_id=parent_id,
+                command=command[:500],
+            )
+            return allow()
+        # Bad waiver reason — block. Do NOT fall through to spec-id checks;
+        # an invalid escape attempt is itself the failure to surface.
+        _record_signal(
+            gate_name="spec_id_enforcement",
+            decision="deny",
+            reason=f"invalid --spec-waiver: {waiver_error}",
+            parent_id=parent_id,
+            command=command[:500],
+        )
+        deny(
+            f"--spec-waiver reason rejected: {waiver_error}\n"
+            f"A waiver reason must be substantive free-text (>= "
+            f"{_WAIVER_MIN_LEN} chars, no placeholders like tbd/n/a/todo). "
+            f"Example: --spec-waiver 'spec deferred — this is an "
+            f"exploratory spike to de-risk the parser approach before "
+            f"requirements are written'"
+        )
+
+    # Now check spec-id.
     spec_id = parse_flag(command, "spec-id")
     if not spec_id:
         # Missing entirely — block, recording the signal first
@@ -312,8 +455,11 @@ def main() -> int:
             "This bd create is under a mol-feature molecule but is missing --spec-id. "
             "Add --spec-id <spec-identifier> to link this task to its specification. "
             "Example: bd create \"my task\" --parent {parent} "
-            "--spec-id openspec/changes/<change-name>/specs/<capability>.md#<requirement-name>"
-            .format(parent=parent_id)
+            "--spec-id openspec/changes/<change-name>/specs/<capability>.md#<requirement-name>\n"
+            "Escape (gate-design Rule 1): if this task legitimately has no spec yet "
+            "(spike/exploratory), supply a reasoned waiver instead: "
+            "--spec-waiver \"<>= {minlen}-char rationale for why no spec applies>\""
+            .format(parent=parent_id, minlen=_WAIVER_MIN_LEN)
         )
 
     # spec-id is present — validate the value resolves to a real spec.
@@ -351,7 +497,10 @@ def main() -> int:
         f"{error}\n"
         f"Expected format: openspec/changes/<change-name>/specs/"
         f"<capability>.md#<requirement-name>. The path must point at a real "
-        f"file; the anchor must match a '### Requirement: ...' heading in it."
+        f"file; the anchor must match a '### Requirement: ...' heading in it.\n"
+        f"Escape (gate-design Rule 1): if no spec legitimately applies yet, "
+        f"supply a reasoned waiver instead: "
+        f"--spec-waiver \"<>= {_WAIVER_MIN_LEN}-char rationale>\""
     )
 
     return 0  # unreachable, but keeps type checkers happy

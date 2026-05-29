@@ -167,7 +167,13 @@ def validate_framing(framing_path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def deny(hook_event: str, message: str) -> NoReturn:
-    """Deny the action (exit 2)."""
+    """Deny the action via the canonical PreToolUse mechanism.
+
+    CANONICAL DENY CONTRACT: signal the block with a single mechanism — the
+    permissionDecision="deny" JSON document on stdout, exit 0. Exit 2 is the
+    mutually-exclusive legacy stderr-feedback path; emitting both is a
+    contradictory double-block. We use the JSON path, so this exits 0.
+    """
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": hook_event,
@@ -175,7 +181,7 @@ def deny(hook_event: str, message: str) -> NoReturn:
             "permissionDecisionReason": message,
         }
     }))
-    sys.exit(2)
+    sys.exit(0)
 
 
 # ---------------------------------------------------------------------------

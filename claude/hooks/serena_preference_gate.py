@@ -160,7 +160,13 @@ _BLOCK_MESSAGE = (
 
 
 def _deny(reason: str) -> int:
-    """Emit a PreToolUse deny decision and return exit code 0."""
+    """Emit a PreToolUse deny decision and return exit code 0.
+
+    CANONICAL DENY CONTRACT: a hard-deny hook signals the block with a single
+    mechanism — the permissionDecision="deny" JSON document on stdout, exit 0.
+    Exit 2 is the mutually-exclusive legacy stderr-feedback path; emitting both
+    is a contradictory double-block. This gate uses the JSON path (returns 0).
+    """
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

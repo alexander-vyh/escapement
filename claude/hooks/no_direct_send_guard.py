@@ -56,6 +56,10 @@ _DRAFT_HINT: dict[str, str] = {
 
 
 def deny(tool_name: str) -> NoReturn:
+    # CANONICAL DENY CONTRACT: signal the block with a single mechanism — the
+    # permissionDecision="deny" JSON document on stdout, exit 0. Exit 2 is the
+    # mutually-exclusive legacy stderr-feedback path; emitting both is a
+    # contradictory double-block. We use the JSON path, so this exits 0.
     draft_tool = _DRAFT_HINT.get(tool_name, "the draft equivalent")
     print(json.dumps({
         "hookSpecificOutput": {
@@ -67,7 +71,7 @@ def deny(tool_name: str) -> NoReturn:
             ),
         }
     }))
-    sys.exit(2)
+    sys.exit(0)
 
 
 def main() -> int:

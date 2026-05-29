@@ -186,6 +186,13 @@ def main() -> int:
         # No review agent — ask the user to confirm before closing. This is a
         # soft gate: it never denies, only surfaces the missed review so the
         # user can dispatch a reviewer or knowingly proceed.
+        #
+        # CANONICAL DECISION CONTRACT: the decision is signaled with a single
+        # mechanism — one permissionDecision JSON document on stdout, exit 0.
+        # Exit 2 is the mutually-exclusive legacy stderr-feedback path; emitting
+        # both the JSON decision *and* a non-zero exit is a contradictory
+        # double-signal. This advisory gate uses the same single-mechanism
+        # JSON-on-stdout-plus-exit-0 contract as the hard-deny gates.
         _record_signal(
             gate_name="review_gate",
             decision="nudge",

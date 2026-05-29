@@ -10,6 +10,7 @@ Run from anywhere with:
   python -m pytest ~/.claude/hooks/tests/test_outcome_assertion_gate.py -v
 """
 
+import io
 import json
 import sys
 import tempfile
@@ -319,3 +320,41 @@ def test_correct():
     assert result.score == 75
 '''
         assert self._run_hook("Bash", "gh pr create --title test", good_test) == 0
+
+    def test_decision_honored_exactly_once(self):
+        """CANONICAL DECISION CONTRACT: the gate signals its decision with a
+        single mechanism — one permissionDecision JSON document on stdout AND
+        exit 0 (NOT exit 2). A JSON decision *plus* a non-zero exit is a
+        contradictory double-signal; capturing the exit code and asserting it
+        is 0 rejects that shape, and ``json.loads`` raises on two stacked
+        documents, rejecting a doubled signal. This is the regression guard
+        for fxh.7.
+        """
+        from outcome_assertion_gate import main
+
+        bad_test = '''### FILE: tests/test_example.py
+def test_exists():
+    assert result is not None
+'''
+        hook_input = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh pr create --title test"},
+        }
+        captured = io.StringIO()
+        exit_code = 0
+        with patch("outcome_assertion_gate.get_test_diff", return_value=bad_test):
+            with patch("json.load", return_value=hook_input):
+                with patch("sys.stdout", captured):
+                    try:
+                        ret = main()
+                        exit_code = ret if ret is not None else 0
+                    except SystemExit as exc:
+                        exit_code = exc.code or 0
+
+        assert exit_code == 0, (
+            "decision is carried by the stdout JSON, not exit 2 — "
+            "a permissionDecision JSON plus a non-zero exit is a double-signal"
+        )
+        data = json.loads(captured.getvalue().strip())
+        assert data["hookSpecificOutput"]["permissionDecision"] == "ask"

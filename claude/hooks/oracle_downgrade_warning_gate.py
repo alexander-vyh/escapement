@@ -132,6 +132,15 @@ def allow() -> int:
 
 
 def ask(message: str) -> int:
+    """Prompt the user for confirmation.
+
+    CANONICAL DECISION CONTRACT: signal the decision with a single mechanism —
+    one permissionDecision JSON document on stdout, exit 0. Exit 2 is the
+    mutually-exclusive legacy stderr-feedback path; emitting both the JSON
+    decision *and* a non-zero exit is a contradictory double-signal. This gate
+    is advisory (permissionDecision="ask"), but uses the same single-mechanism
+    JSON-on-stdout-plus-exit-0 contract as the hard-deny gates, so it returns 0.
+    """
     print(
         json.dumps(
             {

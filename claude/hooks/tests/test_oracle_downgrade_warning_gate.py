@@ -142,3 +142,36 @@ def test_unrelated_stronger_test_change_allows(tmp_path):
 
     assert code == 0
     assert output is None
+
+
+def test_decision_honored_exactly_once(tmp_path):
+    """CANONICAL DECISION CONTRACT: the gate signals its decision with a single
+    mechanism — one permissionDecision JSON document on stdout AND exit 0 (NOT
+    exit 2). A JSON decision *plus* a non-zero exit is a contradictory
+    double-signal; capturing the exit code and asserting it is 0 rejects that
+    shape, and ``json.loads`` raises on two stacked documents, rejecting a
+    doubled signal. This is the regression guard for fxh.7.
+    """
+    repo = init_repo(tmp_path)
+    commit_file(repo, "tests/test_app.py", "def test_value():\n    assert value == 'expected'\n")
+    (repo / "tests" / "test_app.py").write_text(
+        "import pytest\n\n@pytest.mark.skip(reason='later')\ndef test_value():\n    assert value == 'expected'\n",
+        encoding="utf-8",
+    )
+
+    stdout = io.StringIO()
+    exit_code = 0
+    with patch("sys.stdin", io.StringIO(json.dumps(hook_payload(repo)))):
+        with patch("sys.stdout", stdout):
+            try:
+                ret = gate.main()
+                exit_code = ret if ret is not None else 0
+            except SystemExit as exc:
+                exit_code = exc.code or 0
+
+    assert exit_code == 0, (
+        "decision is carried by the stdout JSON, not exit 2 — "
+        "a permissionDecision JSON plus a non-zero exit is a double-signal"
+    )
+    data = json.loads(stdout.getvalue().strip())
+    assert data["hookSpecificOutput"]["permissionDecision"] == "ask"

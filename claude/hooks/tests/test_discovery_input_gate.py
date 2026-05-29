@@ -145,6 +145,20 @@ def _decision(stdout):
     return json.loads(stdout)["hookSpecificOutput"]["permissionDecision"]
 
 
+def assert_denied(code, stdout):
+    """Assert the deny was honored EXACTLY ONCE via the canonical mechanism: a
+    single permissionDecision="deny" JSON document on stdout AND exit code 0
+    (NOT exit 2). permissionDecision=deny *plus* exit 2 is a contradictory
+    double-block — asserting exit 0 rejects that shape, and ``json.loads`` in
+    ``_decision`` raises on two stacked documents, rejecting a doubled signal.
+    """
+    assert code == 0, (
+        "deny is carried by the stdout JSON decision, not exit 2 — "
+        "permissionDecision=deny plus exit 2 is a contradictory double-block"
+    )
+    assert _decision(stdout) == "deny"
+
+
 # ===========================================================================
 # Pure function: is_gated_artifact
 # ===========================================================================
@@ -330,15 +344,13 @@ class TestFeatureGate:
         with tempfile.TemporaryDirectory() as tmp:
             design = _make_change(tmp, schema="feature", framing=None)
             code, out, _ = _run_hook(file_path=design)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
 
     def test_epic_no_framing_denies(self):
         with tempfile.TemporaryDirectory() as tmp:
             design = _make_change(tmp, schema="epic", framing=None)
             code, out, _ = _run_hook(file_path=design)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
 
     def test_feature_complete_framing_allows(self):
         """Positive control: feature change, complete framing -> ALLOW."""
@@ -366,32 +378,28 @@ class TestFeatureGate:
             design = _make_change(tmp, schema="feature", framing=None)
             proposal = str(Path(design).parent / "proposal.md")
             code, out, _ = _run_hook(file_path=proposal)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
 
     def test_feature_edit_tool_also_gated(self):
         """Edit, not just Write, is gated."""
         with tempfile.TemporaryDirectory() as tmp:
             design = _make_change(tmp, schema="feature", framing=None)
             code, out, _ = _run_hook(tool_name="Edit", file_path=design)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
 
     def test_tbd_field_denies(self):
         """A TBD field denies - no 'ask' path, no special-casing."""
         with tempfile.TemporaryDirectory() as tmp:
             design = _make_change(tmp, schema="feature", framing=FRAMING_AUTHORITY_TBD)
             code, out, _ = _run_hook(file_path=design)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
 
     def test_non_authority_tbd_also_denies(self):
         """Proves uniformity: a TBD Why Now denies exactly like a TBD authority."""
         with tempfile.TemporaryDirectory() as tmp:
             design = _make_change(tmp, schema="feature", framing=FRAMING_WHY_NOW_TBD)
             code, out, _ = _run_hook(file_path=design)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
 
     def test_missing_headers_denies(self):
         """Missing field headers deny (previously 'ask' - now uniform deny)."""
@@ -399,8 +407,7 @@ class TestFeatureGate:
             design = _make_change(tmp, schema="feature",
                                   framing=FRAMING_MISSING_HEADERS)
             code, out, _ = _run_hook(file_path=design)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
         # the deny message names the specific missing fields
         reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
         assert "Riskiest Assumption" in reason
@@ -411,8 +418,7 @@ class TestFeatureGate:
         with tempfile.TemporaryDirectory() as tmp:
             design = _make_change(tmp, schema="feature", framing="")
             code, out, _ = _run_hook(file_path=design)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
 
 
 # ===========================================================================
@@ -425,8 +431,7 @@ class TestFailClosed:
         with tempfile.TemporaryDirectory() as tmp:
             design = _make_change(tmp, schema=None, framing=None)
             code, out, _ = _run_hook(file_path=design)
-        assert code == 2
-        assert _decision(out) == "deny"
+        assert_denied(code, out)
 
     def test_no_openspec_yaml_complete_framing_allows(self):
         """Cannot read schema, but a complete framing is present -> ALLOW."""
