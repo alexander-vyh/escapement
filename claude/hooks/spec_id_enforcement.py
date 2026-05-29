@@ -175,6 +175,16 @@ def is_mol_feature_parent(parent_id: str) -> bool:
                 return False
 
             data = json.loads(result.stdout)
+            # `bd show --json` returns a single-element JSON array, not a bare
+            # object (verified against current bd). The sibling readers
+            # derive_contract.fetch_bead and spec_id_preflight already unwrap
+            # the list; this hook must too, or _check_issue_for_mol_feature
+            # gets a list and raises AttributeError — crashing the gate and
+            # failing it OPEN for every mol-feature molecule.
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            if not isinstance(data, dict):
+                return False  # Unexpected shape — fail-open
 
         except Exception:
             return False  # Fail-open
@@ -490,7 +500,7 @@ def main() -> int:
         f"file; the anchor must match a '### Requirement: ...' heading in it.\n"
         f"Escape (gate-design Rule 1): if no spec legitimately applies yet, "
         f"supply a reasoned waiver instead: "
-        f"--spec-waiver \"<>= {minlen}-char rationale>\"".format(minlen=_WAIVER_MIN_LEN)
+        f"--spec-waiver \"<>= {_WAIVER_MIN_LEN}-char rationale>\""
     )
 
     return 0  # unreachable, but keeps type checkers happy

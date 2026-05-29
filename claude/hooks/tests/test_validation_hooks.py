@@ -145,6 +145,34 @@ class TestSpecIdEnforcement:
         assert "--spec-id" in reason
         assert "mol-feature" in reason
 
+    def test_invalid_spec_id_denies_and_does_not_crash_open(self):
+        """A non-resolving --spec-id under mol-feature must DENY, not crash open.
+
+        Regression (claude-workflow-setup-fhl): the invalid-spec-id deny branch
+        built its message as an f-string containing `{minlen}` *plus* a trailing
+        `.format(minlen=_WAIVER_MIN_LEN)`. The f-string evaluated `{minlen}` at
+        once -> NameError; main() exited non-zero (fail-open), so a wrong-path /
+        bad-anchor spec-id sailed straight through the value check (gate-design
+        Rule 3) that is the whole reason this gate exists. The deny must render.
+
+        Negative-control framing: the spec-id is PRESENT (so this is not the
+        missing-spec-id path) but does NOT resolve — exactly the case validate_
+        spec_id rejects. The end-to-end hook must turn that rejection into a deny.
+        """
+        from spec_id_enforcement import _WAIVER_MIN_LEN
+        with patch("spec_id_enforcement.is_mol_feature_parent", return_value=True):
+            code, out, _ = _run_hook(
+                "spec_id_enforcement", "PreToolUse",
+                command=("bd create 'task' --parent bd-mol123 "
+                         "--spec-id openspec/changes/does-not-exist/specs/none.md#Ghost"),
+            )
+        data = assert_denied(code, out)
+        reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "does not resolve" in reason
+        # The waiver-escape hint must render the real minimum, proving the
+        # message was built (not aborted by the NameError).
+        assert f"{_WAIVER_MIN_LEN}-char" in reason
+
     def test_invalid_json_stdin_allows(self):
         """Invalid JSON on stdin fails open."""
         import spec_id_enforcement
@@ -178,6 +206,55 @@ class TestSpecIdEnforcement:
         from spec_id_enforcement import _check_issue_for_mol_feature
         assert _check_issue_for_mol_feature({"metadata": {"formula": "mol-feature"}})
         assert not _check_issue_for_mol_feature({"metadata": {"formula": "mol-rapid"}})
+
+    def test_is_mol_feature_parent_handles_bd_show_list_shape(self):
+        """is_mol_feature_parent must unwrap the LIST shape `bd show --json` emits.
+
+        Regression (claude-workflow-setup-1l7): current `bd` returns a single-element
+        JSON array `[{...}]` from `bd show <id> --json`, not a bare object. The
+        detection passed that list straight to `_check_issue_for_mol_feature`, which
+        called `.get()` on it -> AttributeError. The exception escaped
+        is_mol_feature_parent (the call is outside its try/except), crashed the hook
+        with a traceback, and the non-zero exit failed the gate OPEN — so the
+        --spec-id requirement silently stopped firing for EVERY mol-feature molecule.
+
+        Positive control: a list-shaped mol-feature parent must be detected as True.
+        Sibling scripts (derive_contract.fetch_bead, spec_id_preflight) already unwrap
+        the list; this pins the enforcement hook to the same contract.
+        """
+        import types
+        from spec_id_enforcement import is_mol_feature_parent
+
+        def fake_run(_cmd, **_kwargs):
+            payload = json.dumps([
+                {"id": "bd-mol123", "labels": ["mol-feature"], "parent": ""}
+            ])
+            return types.SimpleNamespace(returncode=0, stdout=payload, stderr="")
+
+        with patch("spec_id_enforcement.subprocess.run", side_effect=fake_run):
+            assert is_mol_feature_parent("bd-mol123") is True
+
+    def test_is_mol_feature_parent_list_shape_non_mol_is_false(self):
+        """Negative control: list-shaped issue that is NOT mol-feature -> False.
+
+        Pairs with the positive test to reject the fragile shortcut of wrapping the
+        detection call in try/except and returning False on error: that would stop
+        the crash but leave the gate dead (always False), which the positive test
+        above would catch. Together they pin the fix to 'unwrap the list and inspect
+        it', not 'swallow the error'.
+        """
+        import types
+        from spec_id_enforcement import is_mol_feature_parent
+
+        def fake_run(_cmd, **_kwargs):
+            payload = json.dumps([
+                {"id": "bd-rapid1", "labels": ["bug"],
+                 "metadata": {"formula": "mol-rapid"}, "parent": ""}
+            ])
+            return types.SimpleNamespace(returncode=0, stdout=payload, stderr="")
+
+        with patch("spec_id_enforcement.subprocess.run", side_effect=fake_run):
+            assert is_mol_feature_parent("bd-rapid1") is False
 
     # --- --spec-waiver first-class escape (gate-design Rule 1) -------------
 
