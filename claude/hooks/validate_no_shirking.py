@@ -501,6 +501,15 @@ _NEGATION_CUES = re.compile(
 # when NO clause break sits between the cue and the match.
 _CLAUSE_BREAK = re.compile(r"[,;:—–]|--")
 
+# Certainty idioms opened by "without". "Without a doubt …" / "Without
+# question …" are the INVERSE of disavowal — they intensify the assertion that
+# follows. So a "without" cue that opens one of these does NOT guard the match
+# ("Without a doubt this is a pre-existing failure" is real shirking). Matched
+# only when it immediately follows the cue, so a genuine disavowal ("without
+# claiming it's pre-existing") still guards.
+_WITHOUT_CERTAINTY = re.compile(r"\bwithout$", re.IGNORECASE)
+_CERTAINTY_TAIL = re.compile(r"^\s+(?:a\s+)?(?:doubt|question)\b", re.IGNORECASE)
+
 # Meta-description cues: the phrase is being named as an example of the kind of
 # thing to look for, not used as an assertion. Unlike negation, these are
 # checked across the whole preceding text (not a fixed window) but ONLY when
@@ -546,7 +555,14 @@ def _negation_guards(window: str) -> bool:
     if last is None:
         return False
     # Text between the end of the cue and the match (the window ends at match).
-    return _CLAUSE_BREAK.search(window[last.end():]) is None
+    tail = window[last.end():]
+    # "without a doubt" / "without question" are certainty idioms, not
+    # disavowals: they intensify the assertion that follows, so this cue does
+    # not guard the match. A genuine "without claiming ..." disavowal has no
+    # certainty tail and still guards.
+    if _WITHOUT_CERTAINTY.search(window[:last.end()]) and _CERTAINTY_TAIL.match(tail):
+        return False
+    return _CLAUSE_BREAK.search(tail) is None
 
 
 def _is_guarded(stripped: str, match_start: int) -> bool:
@@ -603,6 +619,76 @@ def find_shirking_match(text: str) -> tuple[str, str] | None:
             end = min(len(stripped), m.end() + 80)
             return stripped[start:end].strip(), category
     return None
+
+
+# ---------------------------------------------------------------------------
+# Blocker-bead escape — "documented failure is also an outcome"
+# ---------------------------------------------------------------------------
+#
+# claude/rules/continuation-harness.md sanctions a legitimate terminal state:
+# an agent that genuinely cannot proceed and FILES A BLOCKER BEAD documenting
+# why has produced an outcome, NOT shirking. docs/reconciliation-rules.md
+# § "Conflict 1" makes the boundary explicit: this gate is authoritative on
+# the *linguistic* fact "did a shirking phrase appear", not on the *task-state*
+# fact "is the work blocked" — beads owns that. A filed blocker bead is the
+# authoritative record of the latter, so it is a first-class, agent-invokable
+# escape (gate-design.md Rule 1: Repair) that releases the block without a user
+# round-trip.
+#
+# Tightness (the never-suppress / no-blanket-bypass requirement): a passing
+# mention of the word "blocker" — "it's a real blocker", "I'm blocked on CI" —
+# must NOT release the gate. The escape requires a STRUCTURAL signal that a
+# bead was actually filed:
+#   1. a `bd create` invocation, OR
+#   2. a filing verb collocated with "blocker bead"
+#      ("filed/created/opened/logged a blocker bead"), OR
+#   3. a filing verb + a concrete bead id with blocker framing nearby.
+# The bare word "blocker" alone never matches.
+
+# A concrete bead id: <project-slug>-<suffix>, e.g. claude-workflow-setup-z9q,
+# cake-ta5.7. Lowercase alnum/hyphen project, then "-", then an alnum/dot id.
+_BEAD_ID = r"[a-z0-9]+(?:-[a-z0-9]+)*-[a-z0-9]+(?:\.[a-z0-9]+)*"
+
+# Verbs that denote actually filing/opening a tracked item.
+_FILE_VERB = r"(?:fil(?:e|ed|ing)|creat(?:e|ed|ing)|open(?:ed|ing)?|log(?:ged|ging)?|rais(?:e|ed|ing))"
+
+_BLOCKER_BEAD_SIGNALS: list[re.Pattern[str]] = [
+    # 1. An explicit `bd create` invocation. The blocker framing comes from the
+    #    --type=bug flag or a "blocker"/"blocked" word anywhere in the same text
+    #    (checked by the caller); the `bd create` token itself is the strong
+    #    structural signal that a bead was filed.
+    re.compile(r"\bbd\s+create\b", re.IGNORECASE),
+    # 2. A filing verb collocated with "blocker bead": "filed a blocker bead",
+    #    "created blocker bead", "I've opened a blocker bead".
+    re.compile(rf"\b{_FILE_VERB}\b[^.\n]{{0,40}}?\bblocker\s+bead\b", re.IGNORECASE),
+    # 3. A filing verb + a concrete bead id, with "blocker"/"blocked" framing
+    #    nearby (within the same sentence-ish window).
+    re.compile(
+        rf"\b{_FILE_VERB}\b[^.\n]{{0,40}}?\b{_BEAD_ID}\b[^.\n]{{0,40}}?\bblock(?:er|ed)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\bblock(?:er|ed)\b[^.\n]{{0,40}}?\b{_FILE_VERB}\b[^.\n]{{0,40}}?\b{_BEAD_ID}\b",
+        re.IGNORECASE,
+    ),
+]
+
+
+def filed_blocker_bead(text: str) -> bool:
+    """True if the text shows the agent filed a blocker bead for the obstacle.
+
+    This is the sanctioned escape from the shirking gate: per
+    continuation-harness.md, "documented failure is also an outcome." A filed
+    blocker bead is the authoritative record (owned by beads) that the work is
+    genuinely blocked, so the shirking phrase that accompanies it is not the
+    agent evading — it is the agent documenting why it cannot proceed.
+
+    Kept TIGHT to avoid a blanket bypass: the bare word "blocker" never
+    matches; a structural filing signal (see `_BLOCKER_BEAD_SIGNALS`) is
+    required. Code spans are NOT stripped here — a `bd create` command the
+    agent ran or quoted is exactly the evidence we want to honour.
+    """
+    return any(p.search(text) for p in _BLOCKER_BEAD_SIGNALS)
 
 
 # ---------------------------------------------------------------------------
@@ -720,6 +806,7 @@ def main() -> int:
         last_shirking_phrase: str | None = None
 
         last_shirking_category = None
+        filed_blocker = False
         for i, (role, text) in enumerate(messages):
             if role != "assistant":
                 continue
@@ -727,12 +814,32 @@ def main() -> int:
             # otherwise the hook permanently poisons its own transcript.
             if any(sig in text for sig in _HOOK_SIGNATURES):
                 continue
+            # A filed blocker bead is a sanctioned outcome ("documented failure
+            # is also an outcome", continuation-harness.md). Track it across the
+            # recent assistant turns — it releases the gate below.
+            if filed_blocker_bead(text):
+                filed_blocker = True
             match = find_shirking_match(text)
             if match:
                 phrase, category = match
                 last_shirking_idx = i
                 last_shirking_phrase = phrase
                 last_shirking_category = category
+
+        if last_shirking_phrase is not None and filed_blocker:
+            # First-class, agent-invokable escape (gate-design.md Rule 1): the
+            # agent documented why it cannot proceed by filing a blocker bead.
+            # beads owns the "is this blocked" fact; the gate owns only the
+            # phrase. Record the escape as labeled signal, then allow.
+            _record_signal(
+                gate_name="validate_no_shirking",
+                decision="waiver-accepted",
+                reason=f"blocker bead filed (category: {last_shirking_category})",
+                category=last_shirking_category or "uncategorized",
+                phrase=last_shirking_phrase[:200],
+                hook_event=hook_event,
+            )
+            last_shirking_phrase = None  # release the block
 
         if last_shirking_phrase is not None:
             # Check for user approval after the last shirking phrase

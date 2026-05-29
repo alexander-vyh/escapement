@@ -27,7 +27,23 @@ def run_hook(payload: dict) -> tuple[int, dict | None]:
         with patch("sys.stdout", stdout):
             code = gate.main()
     output = stdout.getvalue().strip()
+    # json.loads raises on a second concatenated document, so a clean parse is
+    # part of the EXACTLY-ONCE guarantee (no stacked block signals).
     return code, json.loads(output) if output else None
+
+
+def assert_denied(code: int, output: dict | None) -> None:
+    """Assert the hard block was honored EXACTLY ONCE via the canonical
+    mechanism: a single permissionDecision="deny" JSON document on stdout AND
+    exit code 0 (NOT exit 2). A deny JSON *plus* exit 2 is a contradictory
+    double-block; asserting exit 0 rejects that shape.
+    """
+    assert code == 0, (
+        "deny is carried by the stdout JSON decision, not exit 2 — "
+        "permissionDecision=deny plus exit 2 is a contradictory double-block"
+    )
+    assert output is not None
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def write_valid_brief(repo: Path) -> None:
@@ -73,8 +89,7 @@ def test_claude_edit_blocks_relevant_file_without_brief(tmp_path):
 
     code, output = run_hook(payload)
 
-    assert code == 2
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert_denied(code, output)
     assert "test-oracle-brief.md" in output["hookSpecificOutput"]["permissionDecisionReason"]
 
 
@@ -130,7 +145,7 @@ def test_codex_commit_blocks_changed_code_without_brief(tmp_path):
 
     code, output = run_hook(payload)
 
-    assert code == 2
+    assert_denied(code, output)
     assert "src/app.py" in output["hookSpecificOutput"]["permissionDecisionReason"]
 
 

@@ -304,6 +304,43 @@ class TestMainTDDEnforcement:
         assert decision == "ask"
         assert decision != "deny"
 
+    def test_decision_honored_exactly_once(self):
+        """CANONICAL DECISION CONTRACT: the gate signals its decision with a
+        single mechanism — one permissionDecision JSON document on stdout AND
+        exit 0 (NOT exit 2). A JSON decision *plus* a non-zero exit is a
+        contradictory double-signal; asserting exit 0 rejects that shape, and
+        ``json.loads`` raises on two stacked documents, rejecting a doubled
+        signal. This is the regression guard for fxh.7.
+        """
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/repo/src/app.py"},
+        }
+        stdout_capture = io.StringIO()
+        exit_code = 0
+        with (
+            patch("tdd_gate.find_git_root", return_value="/repo"),
+            patch("tdd_gate.has_tests_directory", return_value=True),
+            patch("tdd_gate.get_modified_files", return_value=[]),
+            patch("sys.stdin", io.StringIO(json.dumps(payload))),
+            patch("sys.stdout", stdout_capture),
+        ):
+            try:
+                ret = tdd_gate.main()
+                exit_code = ret if ret is not None else 0
+            except SystemExit as exc:
+                exit_code = exc.code or 0
+        # exit 0, not 2 — the decision rides on stdout JSON, not the exit code
+        assert exit_code == 0, (
+            "decision is carried by the stdout JSON, not exit 2 — "
+            "a permissionDecision JSON plus a non-zero exit is a double-signal"
+        )
+        out = stdout_capture.getvalue().strip()
+        # exactly one JSON document: json.loads raises on two stacked documents
+        data = json.loads(out)
+        assert data["hookSpecificOutput"]["permissionDecision"] == "ask"
+
 
 # ---------------------------------------------------------------------------
 # Serena edit tools (replace_symbol_body, insert_after_symbol, insert_before_symbol)

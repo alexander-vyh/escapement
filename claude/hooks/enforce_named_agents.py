@@ -50,6 +50,13 @@ def _is_safe_session_id(value: str) -> bool:
         return False
     if os.sep in value or (os.altsep and os.altsep in value):
         return False
+    # Reject NUL and any other control byte. A NUL is a classic
+    # filename-injection vector (open() truncates at it on some
+    # platforms / raises ValueError on others); other control bytes
+    # (newline, tab, etc.) would corrupt the line-delimited tracker
+    # file. Any C0/C1/DEL control character disqualifies the id.
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in value):
+        return False
     return True
 
 
@@ -158,6 +165,38 @@ def _record_teamless_dispatch(data: dict | None = None) -> None:
         pass
 
 
+# Placeholder reasons that do not satisfy the waiver substance threshold.
+# Mirrors spec_id_enforcement._PLACEHOLDER_VALUES so the corpus is uniform.
+_PLACEHOLDER_REASONS = {
+    "none", "tbd", "todo", "wip", "n/a", "na", "fixme", "xxx", "?", "??", "???",
+}
+_WAIVER_MIN_LEN = 20
+_WAIVER_KEY = "enforce_named_agents_waiver"
+
+
+def _validate_waiver(reason: str) -> tuple[bool, str]:
+    """Validate a waiver reason per gate-design.md Rule 3 (value, not presence).
+
+    Rejects: empty/whitespace, placeholder tokens (tbd/n/a/todo/wip/?...),
+    and reasons under the substance threshold. Returns (is_valid, error)
+    where error is empty on valid.
+    """
+    cleaned = (reason or "").strip()
+    if not cleaned:
+        return False, "waiver reason is empty — supply a real justification"
+    if cleaned.lower() in _PLACEHOLDER_REASONS:
+        return False, (
+            f"waiver reason '{cleaned}' is a placeholder, not a real "
+            "justification"
+        )
+    if len(cleaned) < _WAIVER_MIN_LEN:
+        return False, (
+            f"waiver reason is too short ({len(cleaned)} chars); a real "
+            f"justification needs at least {_WAIVER_MIN_LEN} characters"
+        )
+    return True, ""
+
+
 _BLOCK_NO_NAME = """\
 🚫 AGENT BLOCKED — missing `name` parameter.
 
@@ -177,7 +216,14 @@ two legitimate cases — a one-off lookup, or an explicit user-requested
 anonymous probe — are still served by giving the agent a name (even
 something throwaway like name="oneoff" or name="probe"). The cost of
 naming is one keyword arg; the cost of leaving it off is that the
-agent cannot be addressed, paired, or coordinated with.\
+agent cannot be addressed, paired, or coordinated with.
+
+ESCAPE — if you genuinely must dispatch an unnamed agent, add a waiver
+field to the SAME Agent call:
+  Agent(enforce_named_agents_waiver="<why this must be anonymous>", ...)
+The reason must be real free-text (>=20 chars; tbd/n/a/todo/wip/? are
+rejected) and is logged to the gate-signal corpus. You do NOT need to
+disable this gate.\
 """
 
 _BLOCK_MULTI_NO_TEAM = """\
@@ -222,13 +268,6 @@ def main() -> int:
     if tool_name != "Agent":
         return 0
 
-    # In CI with no usable session id, the PPID fallback is meaningless
-    # (each step is a fresh process), so teamless tracking would produce
-    # false positives. Stand down rather than block legitimate dispatch.
-    if _is_ci_without_session(data):
-        _log("SKIPPED — CI without session id")
-        return 0
-
     tool_input = data.get("tool_input", {})
     if not isinstance(tool_input, dict):
         return 0
@@ -237,8 +276,43 @@ def main() -> int:
     team_name = (tool_input.get("team_name") or "").strip()
     _log(f"AGENT name={agent_name!r} team={team_name!r} desc={tool_input.get('description', '')!r}")
 
-    # HARD BLOCK: no name
+    # HARD BLOCK: no name — unless a valid waiver is supplied (escape path,
+    # gate-design.md Rule 1). The waiver reason is validated for substance
+    # (Rule 3) and persisted to the signal corpus (Rule 2).
     if not agent_name:
+        waiver_raw = tool_input.get(_WAIVER_KEY)
+        if waiver_raw is not None:
+            valid, error = _validate_waiver(str(waiver_raw))
+            if valid:
+                _log("ALLOWED — no name but valid waiver supplied")
+                _record_signal(
+                    gate_name="enforce_named_agents",
+                    decision="waiver-accepted",
+                    reason=str(waiver_raw).strip(),
+                    event_type="waiver",
+                    team=team_name,
+                )
+                return 0
+            # Invalid waiver — fall through to deny, with the reason why.
+            _log(f"BLOCKED — no name, invalid waiver: {error}")
+            _record_signal(
+                gate_name="enforce_named_agents",
+                decision="deny",
+                reason=f"invalid waiver: {error}",
+            )
+            result = {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"🚫 AGENT BLOCKED — waiver rejected: {error}\n\n"
+                        f"{_BLOCK_NO_NAME}"
+                    ),
+                }
+            }
+            json.dump(result, sys.stdout)
+            return 0  # canonical deny: JSON permissionDecision only, exit 0
+
         _log("BLOCKED — no name")
         _record_signal(
             gate_name="enforce_named_agents",
@@ -253,10 +327,19 @@ def main() -> int:
             }
         }
         json.dump(result, sys.stdout)
-        return 2
+        return 0  # canonical deny: JSON permissionDecision only, exit 0
 
     # Team check: only applies when team_name is missing
     if not team_name:
+        # In CI with no usable session id, the PPID fallback is meaningless
+        # (each step is a fresh process), so teamless-multi-agent tracking
+        # would produce false positives. Stand down ONLY this tracking path —
+        # the missing-name hard block above needs no session state and has
+        # already run, so an anonymous agent is still correctly blocked in CI.
+        if _is_ci_without_session(data):
+            _log("SKIPPED — CI without session id (teamless tracking only)")
+            return 0
+
         recent_count = _get_recent_teamless_count(data)
         _record_teamless_dispatch(data)
 
@@ -280,7 +363,7 @@ def main() -> int:
                 }
             }
             json.dump(result, sys.stdout)
-            return 2
+            return 0  # canonical deny: JSON permissionDecision only, exit 0
 
         # First teamless agent in window — SOFT NUDGE
         _log("NUDGED — no team_name (first in window)")

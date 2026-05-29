@@ -1,0 +1,1 @@
+{"ts":"2026-05-29T12:23:27+00:00","gate":"enforce_named_agents","decision":"waiver-accepted","reason":"user explicitly requested an anonymous probe agent for a one-shot diagnostic that will never be addressed","event_type":"waiver","session_id":"31e77709-7260-4977-8a1a-5a413be25e5d","extras":{"team":"my-team"}}

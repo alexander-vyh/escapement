@@ -402,6 +402,24 @@ class TestAskDecisionOnNoReview:
         reason = output.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
         assert "adversarial-reviewer" in reason or "code-reviewer" in reason
 
+    def test_decision_honored_exactly_once(self):
+        """CANONICAL DECISION CONTRACT: the gate signals its decision with a
+        single mechanism — one permissionDecision JSON document on stdout AND
+        exit 0 (NOT exit 2). A JSON decision *plus* a non-zero exit is a
+        contradictory double-signal; asserting exit 0 rejects that shape, and
+        ``json.loads`` raises on two stacked documents, rejecting a doubled
+        signal. This is the regression guard for fxh.7.
+        """
+        code, out = _run_bash_hook("bd close bd-once", session_id="sess-once")
+        assert code == 0, (
+            "decision is carried by the stdout JSON, not exit 2 — "
+            "a permissionDecision JSON plus a non-zero exit is a double-signal"
+        )
+        stripped = out.strip()
+        # exactly one JSON document: json.loads raises on two stacked documents
+        data = json.loads(stripped)
+        assert data["hookSpecificOutput"]["permissionDecision"] == "ask"
+
 
 # ===========================================================================
 # bd close regex — word-boundary anchors prevent false matches

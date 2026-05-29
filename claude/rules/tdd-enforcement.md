@@ -51,6 +51,25 @@ The brief must include:
 A test plan fails review if the named fragile implementation would pass every
 behavioral, fixture, contract, architecture, and static check.
 
+### Rapid form (low-blast-radius changes)
+
+The 9-section brief is the default. For a **low-blast-radius** change (a narrow,
+well-signposted edit — e.g. scoping one guard to the path it protects, a single-clause
+fix), you may collapse the brief to the three load-bearing sections:
+
+1. Business invariant (what user/business outcome must hold)
+2. Negative control (what must fail if the code is wrong)
+3. Final outcome verification (the command/query/flow that proves the actual result)
+
+**…provided the named-fragile-implementation challenge still passes against those three.**
+If any plausible fragile implementation (echo test, wrong-layer filter, status-correct /
+state-wrong) would survive the 3-section subset, the short form is illegitimate — author
+the full 9 sections. The fragile-implementation challenge is mandatory in *both* forms;
+the rapid form drops restatement sections, never the oracle. This is a Flexibility
+affordance (a documented second path for small work), not an oracle downgrade — dropping
+the negative control or the outcome check is exactly the downgrade `never-suppress.md`
+forbids, and the rapid form retains both.
+
 ## Implementation-Echo Tests Are Not Accepted
 
 A test is an implementation echo if it passes by repeating the same constant,

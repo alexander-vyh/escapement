@@ -1032,6 +1032,41 @@ class TestNegationGuard:
         assert find_shirking_phrase("Don't say it's not my problem.") is None
 
 
+class TestWithoutCertaintyIdiom:
+    """'without a doubt' / 'without question' are CERTAINTY idioms, not disavowals.
+
+    Bare 'without' is a negation cue ("I fixed this without claiming it's
+    pre-existing" genuinely disavows), but "Without a doubt this is a
+    pre-existing failure" ASSERTS the shirking — the 'without' opens a
+    certainty idiom that intensifies, not denies. Those must still flag.
+    """
+
+    # --- MUST FLAG: 'without' opens a certainty idiom, not a disavowal ---
+
+    def test_without_a_doubt_pre_existing_still_flagged(self):
+        assert find_shirking_phrase(
+            "Without a doubt this is a pre-existing failure unrelated to us."
+        ) is not None
+
+    def test_without_question_pre_existing_still_flagged(self):
+        assert find_shirking_phrase(
+            "Without question this is a pre-existing failure."
+        ) is not None
+
+    def test_without_a_doubt_case_insensitive_still_flagged(self):
+        assert find_shirking_phrase(
+            "without a doubt this is a pre-existing failure."
+        ) is not None
+
+    # --- MUST NOT FLAG: 'without' is a genuine disavowal ---
+
+    def test_without_claiming_disavowal_not_flagged(self):
+        # "without claiming it is a pre-existing failure" denies the assertion.
+        assert find_shirking_phrase(
+            "I fixed this without claiming it is a pre-existing failure"
+        ) is None
+
+
 class TestNegationClauseScope:
     """Negation only disavows when it scopes the SAME clause as the match.
 
@@ -1128,3 +1163,132 @@ class TestHookSignatureExpansion:
         from validate_no_shirking import read_recent_messages, _HOOK_SIGNATURES
         assert "outcome-ownership.md" in _HOOK_SIGNATURES
         assert "validate_no_shirking" in _HOOK_SIGNATURES
+
+
+# ---------------------------------------------------------------------------
+# Blocker-bead escape (c3i clause b)
+# ---------------------------------------------------------------------------
+#
+# Per claude/rules/continuation-harness.md: "documented failure is also an
+# outcome." An agent that genuinely cannot proceed and FILES A BLOCKER BEAD
+# documenting why has produced a legitimate, sanctioned outcome — NOT shirking.
+# The gate must recognize this as a first-class, agent-invokable escape
+# (gate-design.md Rule 1: Repair) so it does not force a user round-trip for a
+# sanctioned terminal state.
+#
+# docs/reconciliation-rules.md § "Conflict 1" describes the intended shape:
+# the gate is authoritative on "did the agent emit a shirking phrase" (a
+# linguistic fact); it is NOT authoritative on "is this work blocked" (a
+# task-state fact owned by beads). A filed blocker bead is the authoritative
+# record that the work is blocked.
+#
+# The escape must be TIGHT: a passing mention of the word "blocker" must NOT
+# disable the gate (no blanket bypass). The signal required is an actual
+# blocker-bead filing — `bd create --type=bug ...`, "filed blocker bead",
+# "blocker bead <id>", or a concrete bead id with blocker framing.
+
+
+class TestBlockerBeadEscapeUnit:
+    """Unit tests for the blocker-bead-filing detector."""
+
+    def test_bd_create_bug_detected(self):
+        from validate_no_shirking import filed_blocker_bead
+        assert filed_blocker_bead(
+            "I cannot proceed: missing prod credentials. "
+            "bd create --type=bug --title 'sync blocked on creds' "
+            "and bd update <id> --status=blocked."
+        ) is True
+
+    def test_filed_blocker_bead_phrase_detected(self):
+        from validate_no_shirking import filed_blocker_bead
+        assert filed_blocker_bead(
+            "This is a pre-existing failure I cannot fix without schema access. "
+            "I've filed a blocker bead documenting the obstacle."
+        ) is True
+
+    def test_blocker_bead_with_id_detected(self):
+        from validate_no_shirking import filed_blocker_bead
+        assert filed_blocker_bead(
+            "Filed blocker bead cake-ta5.7 — needs a human decision on the API contract."
+        ) is True
+
+    def test_concrete_bead_id_with_blocker_framing_detected(self):
+        from validate_no_shirking import filed_blocker_bead
+        assert filed_blocker_bead(
+            "Created claude-workflow-setup-z9q as a blocker documenting why this "
+            "cannot be completed in this session."
+        ) is True
+
+    # --- Guard: NO blanket bypass on a passing mention of "blocker" ---
+
+    def test_passing_mention_of_blocker_not_detected(self):
+        from validate_no_shirking import filed_blocker_bead
+        # The word "blocker" appears, but no bead was filed.
+        assert filed_blocker_bead(
+            "This was already failing before our changes; it's a real blocker for the release."
+        ) is False
+
+    def test_blocked_status_without_bead_not_detected(self):
+        from validate_no_shirking import filed_blocker_bead
+        assert filed_blocker_bead(
+            "The pipeline is broken and I'm blocked on it, so I'll leave this for now."
+        ) is False
+
+    def test_clean_completion_text_not_detected(self):
+        from validate_no_shirking import filed_blocker_bead
+        assert filed_blocker_bead("All tests pass. Fixed the bug.") is False
+
+
+class TestMainBlockerBeadEscape:
+    """Integration: a filed blocker bead releases the Stop block end-to-end."""
+
+    def test_shirking_with_blocker_bead_allows_stop(self):
+        """Escape control: shirking phrase + filed blocker bead → NOT flagged."""
+        transcript = _make_transcript(
+            "This is a pre-existing failure in the auth module, unrelated to our "
+            "changes, and I cannot fix it without prod credentials I don't have. "
+            "I've filed a blocker bead (bd create --type=bug) documenting the obstacle."
+        )
+        try:
+            denied = _run_main("Stop", transcript_path=transcript)
+            assert denied is False
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+    def test_genuine_shirking_without_blocker_bead_still_blocks(self):
+        """Negative control: shirking phrase, no blocker bead → STILL flagged."""
+        transcript = _make_transcript(
+            "This is a pre-existing failure unrelated to our changes. "
+            "I'll leave it for now and move on."
+        )
+        try:
+            denied = _run_main("Stop", transcript_path=transcript)
+            assert denied is True
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+    def test_passing_blocker_mention_with_shirking_still_blocks(self):
+        """Guard control: 'blocker' mentioned in passing, no bead → STILL flagged."""
+        transcript = _make_transcript(
+            "This was already failing before our changes; it's a real blocker for "
+            "the release, but that's outside the scope of this task."
+        )
+        try:
+            denied = _run_main("Stop", transcript_path=transcript)
+            assert denied is True
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+    def test_blocker_bead_escape_on_pretooluse(self):
+        """Escape applies on the PreToolUse (commit) path too."""
+        transcript = _make_transcript(
+            "The failure is unrelated to my changes and needs schema access I lack. "
+            "Filed blocker bead claude-workflow-setup-z9q documenting why."
+        )
+        try:
+            denied = _run_main(
+                "PreToolUse", command="git commit -m 'wip'", transcript_path=transcript
+            )
+            assert denied is False
+        finally:
+            Path(transcript).unlink(missing_ok=True)

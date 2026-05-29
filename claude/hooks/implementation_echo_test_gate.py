@@ -183,6 +183,10 @@ def allow() -> int:
 
 
 def deny(message: str) -> int:
+    # CANONICAL DENY CONTRACT: signal the block with a single mechanism — the
+    # permissionDecision="deny" JSON document on stdout, exit 0. Exit 2 is the
+    # mutually-exclusive legacy stderr-feedback path; emitting both is a
+    # contradictory double-block. We use the JSON path, so this returns 0.
     print(
         json.dumps(
             {
@@ -194,7 +198,7 @@ def deny(message: str) -> int:
             }
         )
     )
-    return 2
+    return 0
 
 
 def command_from(data: dict) -> str:

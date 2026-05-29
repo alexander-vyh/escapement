@@ -14,8 +14,10 @@ Bugs and chores are always allowed. Standalone tasks trigger an "ask" prompt.
 Input (via stdin):
   JSON with hook_event_name, tool_name, tool_input
 Exit codes:
-  0 — allow or ask
-  2 — deny (JSON output explains why)
+  0 — allow, ask, OR deny. The deny decision is carried by the
+      permissionDecision="deny" JSON on stdout (the single-signal contract).
+      Exit 2 is the mutually-exclusive legacy stderr path; emitting both is a
+      contradictory double-block, so this hook never exits 2.
 """
 
 import json
@@ -129,7 +131,13 @@ def ask(hook_event: str, message: str) -> int:
 
 
 def deny(hook_event: str, message: str) -> NoReturn:
-    """Deny the action (exit 2)."""
+    """Deny the action via the canonical PreToolUse mechanism.
+
+    CANONICAL DENY CONTRACT: signal the block with a single mechanism — the
+    permissionDecision="deny" JSON document on stdout, exit 0. Exit 2 is the
+    mutually-exclusive legacy stderr-feedback path; emitting both is a
+    contradictory double-block. We use the JSON path, so this exits 0.
+    """
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": hook_event,
@@ -137,7 +145,7 @@ def deny(hook_event: str, message: str) -> NoReturn:
             "permissionDecisionReason": message,
         }
     }))
-    sys.exit(2)
+    sys.exit(0)
 
 
 # ---------------------------------------------------------------------------

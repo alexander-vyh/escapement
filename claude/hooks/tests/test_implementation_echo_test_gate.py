@@ -29,7 +29,23 @@ def run_hook(payload: dict) -> tuple[int, dict | None]:
         with patch("sys.stdout", stdout):
             code = gate.main()
     output = stdout.getvalue().strip()
+    # json.loads raises on a second concatenated document, so a clean parse is
+    # part of the EXACTLY-ONCE guarantee (no stacked block signals).
     return code, json.loads(output) if output else None
+
+
+def assert_denied(code: int, output: dict | None) -> None:
+    """Assert the deny was honored EXACTLY ONCE via the canonical mechanism: a
+    single permissionDecision="deny" JSON document on stdout AND exit code 0
+    (NOT exit 2). A deny JSON *plus* exit 2 is a contradictory double-block;
+    asserting exit 0 rejects that shape.
+    """
+    assert code == 0, (
+        "deny is carried by the stdout JSON decision, not exit 2 — "
+        "permissionDecision=deny plus exit 2 is a contradictory double-block"
+    )
+    assert output is not None
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_shared_generated_literal_detected():
@@ -144,7 +160,7 @@ def test_commit_blocks_shared_generated_literal(tmp_path):
 
     code, output = run_hook(payload)
 
-    assert code == 2
+    assert_denied(code, output)
     reason = output["hookSpecificOutput"]["permissionDecisionReason"]
     assert "IMPLEMENTATION-ECHO TEST GATE" in reason
     assert "shared-generated-literal" in reason

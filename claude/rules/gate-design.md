@@ -113,12 +113,54 @@ A gate whose only output is a conversation-level `systemMessage`,
 be evaluated for half-life review (Operating Rule 1 from the
 principle file). You cannot prune what you cannot count.
 
-### Audit finding (2026-05-26)
+### Audit finding (2026-05-26) and remediation (resolved)
 
-The integrator panel's cross-cutting finding: every gate in the repo
-currently violates this rule. No gate writes to beads, no gate
-appends to a log, no gate calls `bd audit record`. The repo-wide
-remediation is tracked separately.
+The integrator panel's original cross-cutting finding (2026-05-26)
+was that no gate in the repo persisted signal: none wrote to a log,
+none called `bd audit record`. That finding has since been
+remediated — `claude/hooks/_gate_signal.py` now provides a shared
+`record()` helper that appends to `.beads/.gate-signal.jsonl`, and
+the corpus has accumulated real decisions across many sessions.
+
+**Current state (as of 2026-05-29):** 15 gates emit persistent
+signal via `_gate_signal.record()`:
+
+- `context_burn_detector.py`
+- `discovery_input_gate.py`
+- `discovery-close-gate.py`
+- `discovery-gate.py`
+- `enforce_named_agents.py`
+- `implementation_echo_test_gate.py`
+- `no_direct_send_guard.py`
+- `oracle_downgrade_warning_gate.py`
+- `outcome_assertion_gate.py`
+- `review_gate.py`
+- `serena_preference_gate.py`
+- `spec_id_enforcement.py`
+- `tdd-gate.py`
+- `test_oracle_brief_gate.py`
+- `validate_no_shirking.py`
+
+**Still not emitting signal** — these hooks fire on every matching
+event and are advisory nudges, status reporters, or redirect-only
+guards where per-event signal would be pure noise; the design
+question for each is whether it should escalate to signal-worthy
+decisions, not whether it is currently in violation:
+
+- `design_doc_location_guard.py`
+- `discovery-nudge.py`
+- `mol_status_check.py`
+- `openspec_init_guard.py`
+- `review_nudge.py`
+- `serena_preference_injection.py`
+- `session_cleanup.py`
+- `session_status.py`
+- `test_reminder.py`
+
+The lesson the original finding now illustrates is the **petrified**
+failure mode (see `delicate-art-of-bureaucracy.md`): a finding that
+outlived the condition it described, left un-reconciled in the rule
+text after the infrastructure shipped. Half-life review caught it.
 
 ## Rule 3: Validate the value, not just the presence
 

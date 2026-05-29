@@ -34,7 +34,10 @@ def _run_hook(module_name: str, hook_event: str, tool_name: str = "Bash",
               cwd: str = "") -> tuple[int, str, str]:
     """Run a hook's main() and return (exit_code, stdout, stderr).
 
-    exit_code: 0 for allow, 2 for deny.
+    CANONICAL DENY CONTRACT: a hard-deny hook signals the block with a single
+    mechanism — a permissionDecision="deny" JSON document on stdout plus exit
+    code 0 (NOT exit 2). exit_code is therefore 0 for every outcome; a deny is
+    distinguished by the stdout JSON, asserted via ``assert_denied``.
     stdout: captured JSON output (if any).
     stderr: captured advisory/warning output (if any).
     """
@@ -65,6 +68,23 @@ def _run_hook(module_name: str, hook_event: str, tool_name: str = "Bash",
         return 0, captured_out.getvalue(), captured_err.getvalue()
     except SystemExit as exc:
         return exc.code, captured_out.getvalue(), captured_err.getvalue()
+
+
+def assert_denied(code, stdout) -> dict:
+    """Assert the hard block was honored EXACTLY ONCE via the canonical
+    mechanism: a single permissionDecision="deny" JSON document on stdout AND
+    exit code 0 (NOT exit 2). A deny JSON *plus* exit 2 is a contradictory
+    double-block; asserting exit 0 rejects that shape, and ``json.loads`` raises
+    on two stacked documents, rejecting a doubled signal. Returns the parsed
+    JSON so callers can make further assertions on the deny reason.
+    """
+    assert code == 0, (
+        "deny is carried by the stdout JSON decision, not exit 2 — "
+        "permissionDecision=deny plus exit 2 is a contradictory double-block"
+    )
+    data = json.loads(stdout)
+    assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
+    return data
 
 
 # ===========================================================================
@@ -120,8 +140,7 @@ class TestSpecIdEnforcement:
         with patch("spec_id_enforcement.is_mol_feature_parent", return_value=True):
             code, out, _ = _run_hook("spec_id_enforcement", "PreToolUse",
                                      command="bd create 'task' --parent bd-mol123")
-        assert code == 2
-        data = json.loads(out)
+        data = assert_denied(code, out)
         reason = data["hookSpecificOutput"]["permissionDecisionReason"]
         assert "--spec-id" in reason
         assert "mol-feature" in reason
@@ -159,6 +178,200 @@ class TestSpecIdEnforcement:
         from spec_id_enforcement import _check_issue_for_mol_feature
         assert _check_issue_for_mol_feature({"metadata": {"formula": "mol-feature"}})
         assert not _check_issue_for_mol_feature({"metadata": {"formula": "mol-rapid"}})
+
+    # --- --spec-waiver first-class escape (gate-design Rule 1) -------------
+
+    def test_spec_waiver_with_valid_reason_allows(self):
+        """A --spec-waiver with a substantive reason allows the create.
+
+        Positive control: the gate's first-class escape path lets an agent
+        proceed without a resolving --spec-id when it supplies a real reason.
+        """
+        records = []
+        with patch("spec_id_enforcement.is_mol_feature_parent", return_value=True), \
+             patch("spec_id_enforcement._record_signal",
+                   side_effect=lambda **kw: records.append(kw)):
+            code, _, _ = _run_hook(
+                "spec_id_enforcement", "PreToolUse",
+                command=(
+                    "bd create 'task' --parent bd-mol123 "
+                    "--spec-waiver 'spec not yet authored; this is a spike to "
+                    "de-risk the parser approach before writing requirements'"
+                ),
+            )
+        assert code == 0, "valid waiver reason should allow the action"
+        # Rule 2: the waiver must persist to the signal store.
+        waiver_records = [r for r in records
+                          if r.get("decision") == "waiver-accepted"]
+        assert waiver_records, "waiver must be recorded via _record_signal"
+        rec = waiver_records[0]
+        assert rec["gate_name"] == "spec_id_enforcement"
+        assert "spike to de-risk the parser" in rec["reason"]
+
+    def test_spec_waiver_placeholder_reason_blocks(self):
+        """A --spec-waiver with a placeholder reason is rejected.
+
+        Negative control: 'tbd' is exactly the null pattern Rule 3 forbids.
+        The gate must NOT accept it as an escape.
+        """
+        with patch("spec_id_enforcement.is_mol_feature_parent", return_value=True):
+            code, out, _ = _run_hook(
+                "spec_id_enforcement", "PreToolUse",
+                command="bd create 'task' --parent bd-mol123 --spec-waiver tbd",
+            )
+        data = assert_denied(code, out)  # placeholder waiver reason must be blocked
+        reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "placeholder" in reason.lower() or "tbd" in reason.lower()
+
+    def test_spec_waiver_too_short_reason_blocks(self):
+        """A --spec-waiver reason under the 20-char substance threshold blocks.
+
+        Negative control for Rule 3's minimum-substance requirement.
+        """
+        with patch("spec_id_enforcement.is_mol_feature_parent", return_value=True):
+            code, out, _ = _run_hook(
+                "spec_id_enforcement", "PreToolUse",
+                command="bd create 'task' --parent bd-mol123 --spec-waiver 'too short'",
+            )
+        data = assert_denied(code, out)  # sub-threshold waiver reason must be blocked
+        reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "20" in reason or "short" in reason.lower() or "substan" in reason.lower()
+
+    def test_deny_message_documents_waiver_escape(self):
+        """The hard-deny message itself documents the --spec-waiver escape.
+
+        Rule 1: the escape must be documented in the denial message, not
+        discoverable only by reading source.
+        """
+        with patch("spec_id_enforcement.is_mol_feature_parent", return_value=True):
+            code, out, _ = _run_hook(
+                "spec_id_enforcement", "PreToolUse",
+                command="bd create 'task' --parent bd-mol123",
+            )
+        data = assert_denied(code, out)
+        reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "--spec-waiver" in reason, (
+            "deny message must surface the agent-invokable escape path"
+        )
+
+
+# ===========================================================================
+# Standard waiver convention: dedicated .gate-waivers.jsonl corpus
+# (claude-workflow-setup-8dm — gate-design.md "Standard waiver convention")
+# ===========================================================================
+
+class TestWaiverCorpus:
+    """The documented waiver convention writes a dedicated corpus.
+
+    Per gate-design.md, accepted waiver reasons accumulate in a dedicated
+    .beads/.gate-waivers.jsonl file (distinct from the high-volume unified
+    .gate-signal.jsonl) so the user can grep ONE file for the reasoned-
+    exception corpus. These tests exercise that a REAL waiver entry lands in
+    that file — both via the shared backbone and via a gate end-to-end.
+    """
+
+    def _isolated_beads(self, tmp_path, monkeypatch):
+        """Point _gate_signal at a tmp .beads/ and clear session env."""
+        import _gate_signal
+        beads = tmp_path / ".beads"
+        beads.mkdir()
+        monkeypatch.setenv("BEADS_DIR", str(beads))
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        return _gate_signal, beads
+
+    def test_waiver_event_writes_dedicated_corpus(self, tmp_path, monkeypatch):
+        """record(event_type='waiver') appends to .gate-waivers.jsonl.
+
+        Positive control: a waiver event lands a well-formed line in the
+        dedicated corpus carrying the captured reason.
+        """
+        gs, beads = self._isolated_beads(tmp_path, monkeypatch)
+        reason = "spec deferred — exploratory spike to de-risk the parser"
+        gs.record(
+            gate_name="spec_id_enforcement",
+            decision="waiver-accepted",
+            reason=reason,
+            event_type="waiver",
+            parent_id="bd-mol123",
+        )
+        waiver_file = beads / ".gate-waivers.jsonl"
+        assert waiver_file.is_file(), "waiver corpus file must be created"
+        lines = waiver_file.read_text().strip().splitlines()
+        assert len(lines) == 1
+        rec = json.loads(lines[0])
+        assert rec["gate"] == "spec_id_enforcement"
+        assert rec["decision"] == "waiver-accepted"
+        assert rec["reason"] == reason
+        assert rec["event_type"] == "waiver"
+
+    def test_waiver_also_lands_in_unified_signal_store(self, tmp_path, monkeypatch):
+        """A waiver writes BOTH stores — the timeline stays complete.
+
+        The dedicated corpus is additive, not a replacement: the unified
+        signal store still carries the waiver so the decision timeline is
+        not split.
+        """
+        gs, beads = self._isolated_beads(tmp_path, monkeypatch)
+        gs.record(
+            gate_name="enforce_named_agents",
+            decision="waiver-accepted",
+            reason="one-off anonymous probe requested explicitly by the user",
+            event_type="waiver",
+        )
+        signal_file = beads / ".gate-signal.jsonl"
+        assert signal_file.is_file()
+        assert "waiver-accepted" in signal_file.read_text()
+
+    def test_non_waiver_signal_does_not_touch_waiver_corpus(self, tmp_path, monkeypatch):
+        """Negative control: a plain signal must NOT write the waiver corpus.
+
+        If a routine 'allow'/'deny'/'nudge' decision leaked into the waiver
+        store, the corpus would be polluted with non-exceptions and grep
+        would stop being a clean reasoned-exception view.
+        """
+        gs, beads = self._isolated_beads(tmp_path, monkeypatch)
+        gs.record(
+            gate_name="enforce_named_agents",
+            decision="deny",
+            reason="agent dispatched without name parameter",
+        )
+        waiver_file = beads / ".gate-waivers.jsonl"
+        assert not waiver_file.exists(), (
+            "a non-waiver signal must not create or write the waiver corpus"
+        )
+        # Positive control on the same call: the unified store DID get it.
+        assert (beads / ".gate-signal.jsonl").is_file()
+
+    def test_spec_waiver_gate_writes_waiver_corpus_end_to_end(self, tmp_path, monkeypatch):
+        """End-to-end: an accepted --spec-waiver lands in .gate-waivers.jsonl.
+
+        Exercises the full spec_id_enforcement escape path with a real
+        .beads/ on disk — the gate, not just the backbone, produces a real
+        greppable waiver entry. This is the bead's 'exercise it in a test'
+        requirement.
+        """
+        self._isolated_beads(tmp_path, monkeypatch)
+        beads = tmp_path / ".beads"
+        reason = ("spec not yet authored; this is a spike to validate the "
+                  "approach before requirements are written")
+        with patch("spec_id_enforcement.is_mol_feature_parent", return_value=True):
+            code, out, _ = _run_hook(
+                "spec_id_enforcement", "PreToolUse",
+                command=(
+                    "bd create 'task' --parent bd-mol123 "
+                    f"--spec-waiver '{reason}'"
+                ),
+            )
+        assert code == 0, "valid waiver should allow the create"
+        waiver_file = beads / ".gate-waivers.jsonl"
+        assert waiver_file.is_file(), "gate must write the dedicated waiver corpus"
+        recs = [json.loads(line)
+                for line in waiver_file.read_text().strip().splitlines()]
+        waiver_recs = [r for r in recs if r["decision"] == "waiver-accepted"]
+        assert waiver_recs, "accepted waiver must be recorded in the corpus"
+        assert waiver_recs[0]["reason"] == reason
+        assert waiver_recs[0]["gate"] == "spec_id_enforcement"
+        assert waiver_recs[0]["event_type"] == "waiver"
 
 
 # ===========================================================================
@@ -299,17 +512,16 @@ class TestOpenspecInitGuard:
             # tmpdir has no openspec/ subdirectory
             code, out, _ = _run_hook("openspec_init_guard", "PreToolUse",
                                      command="openspec list", cwd=tmpdir)
-        assert code == 2
-        data = json.loads(out)
+        data = assert_denied(code, out)
         reason = data["hookSpecificOutput"]["permissionDecisionReason"]
         assert "openspec init" in reason
 
     def test_openspec_change_blocks_without_init(self):
         """openspec change blocks when openspec/ doesn't exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            code, _, _ = _run_hook("openspec_init_guard", "PreToolUse",
+            code, out, _ = _run_hook("openspec_init_guard", "PreToolUse",
                                    command="openspec change create my-change", cwd=tmpdir)
-        assert code == 2
+        assert_denied(code, out)
 
     def test_openspec_list_allows_when_initialized(self):
         """openspec list is allowed when openspec/ exists in cwd from payload."""

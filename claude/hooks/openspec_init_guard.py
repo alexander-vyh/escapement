@@ -73,7 +73,13 @@ def allow() -> int:
 
 
 def deny(message: str) -> NoReturn:
-    """Deny the action with an explanation."""
+    """Deny the action with an explanation.
+
+    CANONICAL DENY CONTRACT: signal the block with a single mechanism — the
+    permissionDecision="deny" JSON document on stdout, exit 0. Exit 2 is the
+    mutually-exclusive legacy stderr-feedback path; emitting both is a
+    contradictory double-block. We use the JSON path, so this exits 0.
+    """
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -81,7 +87,7 @@ def deny(message: str) -> NoReturn:
             "permissionDecisionReason": message,
         }
     }))
-    sys.exit(2)
+    sys.exit(0)
 
 
 # ---------------------------------------------------------------------------

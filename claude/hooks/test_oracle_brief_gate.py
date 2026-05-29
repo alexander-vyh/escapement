@@ -221,8 +221,15 @@ def ask(reason: str) -> int:
 
 
 def deny(reason: str) -> int:
-    """Hard block. Emits permissionDecision "deny" and exits non-zero so the
-    edit / finishing command is stopped.
+    """Hard block via the canonical PreToolUse mechanism.
+
+    CANONICAL DENY CONTRACT (see CONTRACT note at top of this module): a
+    hard-deny hook signals the block with a SINGLE mechanism — the
+    ``hookSpecificOutput.permissionDecision == "deny"`` JSON document on
+    stdout, and exit code 0. Exit 2 is the *legacy* stderr-feedback path and
+    is mutually exclusive with the JSON-decision path; emitting both is a
+    contradictory double-block. We use the JSON path exclusively, so this
+    returns 0, not 2.
 
     Per gate-design.md Rule 1 the escape path stays first-class: the denial
     *reason* (built by block_message) documents the agent-invokable 'proceed'
@@ -239,7 +246,7 @@ def deny(reason: str) -> int:
             }
         )
     )
-    return 2
+    return 0
 
 
 def normalize_heading(value: str) -> str:
