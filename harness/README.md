@@ -39,6 +39,13 @@ harness/
    - **block** otherwise
 4. Block decisions return a constructive resumption prompt; the agent receives it and continues.
 
+> ⚠ **Wakeup caveat (until the launchd waker ships — see "Still v0.1+").** A
+> future-dated `scheduled.json` entry unlocks Stop, but nothing yet *fires* that
+> wakeup automatically. Treat a registered wakeup as **human-must-resume**: it lets
+> the turn end cleanly, but the agent will not be re-invoked on its own until the
+> waker daemon exists. Do not rely on a wakeup as autonomous resumption for
+> unattended work.
+
 Coexists with `~/.claude/hooks/validate_no_shirking.py` — both fire on Stop, both can block. Additive coverage.
 
 ## Session isolation (v0.1 — 2026-05-20)

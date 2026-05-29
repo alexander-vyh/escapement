@@ -15,11 +15,60 @@ import datetime as _dt
 import json
 import os
 import pathlib
+import re
 import sys
 import uuid
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from would_block_stop import thread_dir_for_session, sanitize_session_id, harness_home  # noqa: E402
+
+# Commands that exit 0 regardless of system state — i.e. not oracles at all.
+# An exact whole-segment match against this set (case-insensitive) is trivial.
+_TRIVIAL_EXACT = frozenset({"", "true", ":", "exit", "exit 0", "pwd", "cd", "cd .", "cd ./"})
+# Commands whose first word always exits 0 no matter the arguments.
+_TRIVIAL_FIRST_WORD = frozenset({"echo", "printf"})
+# Shell separators that compose multiple commands.
+_SEGMENT_RE = re.compile(r"&&|\|\||;|\||\n")
+
+
+def _oracle_segments(command: str) -> list[str]:
+    return [seg.strip() for seg in _SEGMENT_RE.split(command) if seg.strip()]
+
+
+def _segment_is_trivial(segment: str) -> bool:
+    low = segment.strip().lower()
+    if low in _TRIVIAL_EXACT:
+        return True
+    first = low.split()[0] if low.split() else ""
+    return first in _TRIVIAL_FIRST_WORD
+
+
+def is_trivial_oracle(command: str) -> "str | None":
+    """Return a human-readable reason if `command` is a trivial (always-0) oracle,
+    else None.
+
+    Implements gate-design Rule 3 (validate the value, not its presence): an oracle
+    like `true` / `:` / `echo done` / `exit 0` unlocks the Stop gate with no proof of
+    outcome. It catches the *named null patterns* — it is NOT a general triviality
+    prover (deciding whether an arbitrary command always exits 0 is undecidable). A
+    command is rejected only when EVERY composed segment is a known no-op, so a real
+    check in any segment (e.g. `true && pytest`) is allowed.
+    """
+    raw = (command or "").strip()
+    if raw == "":
+        return "empty oracle — --verify must run a command whose exit code proves the outcome"
+    segments = _oracle_segments(raw)
+    if not segments:
+        return "no executable command found in --verify"
+    if all(_segment_is_trivial(seg) for seg in segments):
+        return (
+            f"trivial oracle {command!r}: every segment is a no-op that exits 0 "
+            "regardless of state, so it proves nothing. Provide a command whose exit "
+            "code actually demonstrates the outcome — e.g. a test run (pytest ...), a "
+            "state assertion (bd close <id>, gh pr view ... -q '.state==\"OPEN\"'), or "
+            "a file/data check."
+        )
+    return None
 
 
 def main(argv: list[str]) -> int:
@@ -30,6 +79,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--source", choices=["agent-declared", "bead-derived", "user-authored"], default="agent-declared")
     parser.add_argument("--thread-id", default=None)
     args = parser.parse_args(argv)
+
+    # Gate-design Rule 3: screen the oracle BEFORE any filesystem work, so a trivial
+    # --verify leaves no contract behind. A no-op oracle would unlock the Stop gate
+    # with zero proof of outcome.
+    trivial_reason = is_trivial_oracle(args.verify)
+    if trivial_reason is not None:
+        print(f"refusing to write contract: {trivial_reason}", file=sys.stderr)
+        return 2
 
     harness_root = harness_home()
     # Resolve the per-session thread dir the same way the Stop hook and verify do,
