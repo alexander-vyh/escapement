@@ -190,6 +190,43 @@ uninstall_plan() {
   echo "    (any .backup-* files are left alone — rename manually to restore)"
 }
 
+# Verify the continuation-harness Stop gate is actually WIRED in the deployed
+# settings — not merely present on disk. The harness code is symlinked above, but
+# it does nothing unless ~/.claude/settings.json invokes stop_hook.py under Stop.
+# This catches the distribution-drift bug where a user symlinks the harness but
+# forgets to merge the Stop block (bead claude-workflow-setup-fxh.1).
+verify_stop_gate_wired() {
+  local settings="$CLAUDE_DIR/settings.json"
+  if [[ ! -f "$settings" ]]; then
+    echo "    ⚠  $settings not found — merge the template's Stop block (see step 1),"
+    echo "       or the continuation-harness Stop gate will be inert."
+    return 0
+  fi
+  if python3 - "$settings" <<'PY'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(f"    ⚠  could not parse settings.json ({e}) — verify the Stop block manually.")
+    sys.exit(0)
+cmds = [
+    h.get("command", "")
+    for grp in data.get("hooks", {}).get("Stop", [])
+    for h in grp.get("hooks", [])
+]
+sys.exit(0 if any("stop_hook.py" in c for c in cmds) else 1)
+PY
+  then
+    echo "    ✓  continuation-harness Stop gate is wired (stop_hook.py present under Stop)."
+  else
+    echo "    ⚠  continuation-harness Stop gate is NOT wired in $settings."
+    echo "       The harness code is installed but DEAD until you add this under hooks.Stop:"
+    echo '         { "hooks": [ { "type": "command",'
+    echo '             "command": "python3 ~/.claude/harness/bin/stop_hook.py" } ] }'
+    echo "       (additive — keep the existing validate_no_shirking.py entry too)."
+  fi
+}
+
 # --- Execute ---
 if [[ "$MODE" == "install" ]]; then
   install_plan
@@ -199,6 +236,9 @@ if [[ "$MODE" == "install" ]]; then
   echo "       your ~/.claude/settings.json (do NOT overwrite — merge)."
   echo "    2. Read claude/rules/*.md and edit to match your philosophy."
   echo "    3. Open Claude Code in a git repo under ~/GitHub/ to trigger bootstrap."
+  echo
+  echo "==> verifying continuation-harness Stop gate wiring"
+  verify_stop_gate_wired
   echo
   echo "    See README.md for full details."
 else

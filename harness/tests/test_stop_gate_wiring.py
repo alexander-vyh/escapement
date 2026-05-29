@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""B1 regression — the SHIPPED settings template must WIRE the harness Stop gate,
+and the wired gate must actually BLOCK an unverified Stop.
+
+Source / oracle brief: docs/assessments/2026-05-28-critical-assessment.md (B1),
+bead claude-workflow-setup-fxh.1.
+
+Business invariant
+------------------
+A user who installs from claude/settings.template.json gets a LIVE
+continuation-harness Stop gate — not merely the stop_hook.py file on disk. The
+bug being guarded: the template's Stop block invoked only validate_no_shirking.py,
+so distributees who merge it (per INSTALL.sh) symlinked the harness code but never
+wired the gate. The harness was dead-on-arrival for everyone but the author, whose
+hand-edited ~/.claude/settings.json masked the gap.
+
+Fragile implementations these tests REJECT
+-------------------------------------------
+- "stop_hook.py exists on disk"  -> already TRUE via symlink; passes despite the bug.
+- swapping validate_no_shirking for stop_hook -> must be ADDITIVE (both run); the two
+  gates are complementary per claude/rules/continuation-harness.md.
+- "INSTALL.sh mentions stop_hook" in a comment -> wiring must be in the template's
+  parsed Stop command list, not prose.
+
+Run: python3 -m pytest harness/tests/test_stop_gate_wiring.py -q
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import json
+import pathlib
+import sys
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
+HARNESS_BIN = REPO / "harness" / "bin"
+sys.path.insert(0, str(HARNESS_BIN))
+
+from would_block_stop import would_block_stop  # noqa: E402
+
+TEMPLATE = REPO / "claude" / "settings.template.json"
+
+
+def _stop_commands() -> list[str]:
+    """All command strings wired under hooks.Stop in the shipped template."""
+    data = json.loads(TEMPLATE.read_text())
+    cmds: list[str] = []
+    for group in data.get("hooks", {}).get("Stop", []):
+        for hook in group.get("hooks", []):
+            cmds.append(hook.get("command", ""))
+    return cmds
+
+
+# --- wiring oracle (the regression) ---------------------------------------
+
+def test_template_wires_harness_stop_hook() -> None:
+    cmds = _stop_commands()
+    assert any("stop_hook.py" in c for c in cmds), (
+        "shipped template Stop block does not invoke harness/bin/stop_hook.py — "
+        f"distributees get a dead continuation-harness. Stop commands: {cmds}"
+    )
+
+
+def test_template_keeps_shirking_validator() -> None:  # positive control
+    cmds = _stop_commands()
+    assert any("validate_no_shirking.py" in c for c in cmds), (
+        "the existing shirking gate must remain — the fix is additive, not a swap. "
+        f"Stop commands: {cmds}"
+    )
+
+
+def test_template_stop_is_additive() -> None:
+    cmds = _stop_commands()
+    has_harness = any("stop_hook.py" in c for c in cmds)
+    has_shirking = any("validate_no_shirking.py" in c for c in cmds)
+    assert has_harness and has_shirking, (
+        "both gates must be wired (additive enforcement), not one or the other. "
+        f"Stop commands: {cmds}"
+    )
+
+
+# --- behavioral oracle: the wired gate is a real blocker, not a no-op ------
+
+def test_wired_gate_blocks_unverified_stop() -> None:
+    decision, reason = would_block_stop(
+        {"contract": None, "scheduled": None, "recent_user_message": None}
+    )
+    assert decision == "block" and reason == "no_contract", (
+        f"an unverified Stop (no contract/wakeup/release) must block; got {decision}/{reason}"
+    )
+
+
+def test_wired_gate_allows_when_wakeup_registered() -> None:  # negative control
+    future = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=1)).isoformat()
+    decision, _ = would_block_stop(
+        {"contract": None, "scheduled": [{"wake_at": future}], "recent_user_message": None}
+    )
+    assert decision == "allow", (
+        "a future wakeup must release the gate — otherwise the block is unconditional"
+    )
+
+
+if __name__ == "__main__":  # allow plain-script execution like test_gate.py
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

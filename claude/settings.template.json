@@ -357,6 +357,14 @@
             "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/harness/bin/stop_hook.py"
+          }
+        ]
       }
     ]
   }
