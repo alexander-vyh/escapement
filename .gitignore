@@ -20,3 +20,8 @@ __pycache__/
 .dolt/
 *.db
 .beads-credential-key
+
+# Harness + hook runtime artifacts (written at runtime, not deliverables)
+.claude/scheduled_tasks.lock
+claude/hooks/agent-dispatch.log
+claude/hooks/state/
