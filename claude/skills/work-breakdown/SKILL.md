@@ -140,6 +140,51 @@ Announce which path is being taken before generating:
 - **Skeleton only:** "The walking skeleton hasn't been validated yet, so I'm generating skeleton tasks only -- [N] tasks to test the riskiest assumption. After these pass, re-run `/work-breakdown` for the full task graph."
 - **Full breakdown:** "The skeleton has been validated. Generating the full breakdown including remaining tasks."
 
+## Per-Epic Requirements
+
+The epic is not just a container for its children. It carries two standing
+elements of its own, and they are the reason a breakdown can be *trusted to be
+complete*. Skipping them is how a parent gets closed while its actual scope is
+still unbuilt.
+
+> **Motivating failure (real, 2026-05-29 [reported by the user]):** epic
+> `cake-ta5.1` was a refactor to "extract the seams" from a large module. The
+> breakdown produced ~50 child tasks, one per per-source handler function. The
+> epic's *own description* named `create_parser` / argparse setup (≈1,867 LOC) as a
+> seam to extract — but no child task covered it. All ~50 children were closed, so
+> the epic looked done; the largest named seam was never touched. Child-closure
+> masqueraded as parent-completion, and only a human caught it.
+
+### A. Epic done-bar (Outcome Format, independent of children)
+
+The epic must have its own acceptance criterion in the same outcome format as a
+task — "Done when [real-world state], **not when** [false proxy]" — and its
+"not when" clause MUST be the literal trap that bit `cake-ta5.1`:
+
+> "Done when [the epic's whole stated scope is delivered and its own oracle
+> passes], **not when** all child tasks are closed."
+
+"All children closed" is an intermediate artifact, never the epic's outcome. Give
+the epic a verifiable oracle, not a checkbox count. Where the outcome is
+mechanically checkable, encode it as a fenced ` ```verify ` block in the epic's
+acceptance criteria (the same convention the harness derives a contract from), so
+parent-completion is *run*, not asserted. See
+[`outcome-ownership.md`](../../rules/outcome-ownership.md) §
+"Child-Closure Is Not Parent-Completion".
+
+### B. Scope-coverage manifest (every named seam maps to a child)
+
+Exactly as every non-goal must map to a task boundary (Enforcement Rule 3), **every
+scope item the epic names must map to at least one child task.** Before finalizing:
+
+1. Enumerate the seams/scope items the epic's source names — from the design doc /
+   `proposal.md`, AND from the epic's own description (where `cake-ta5.1` named its
+   missing seam).
+2. For each, point to the child task that covers it.
+3. A named seam with no covering child is a **coverage gap** — add the missing
+   task, or the breakdown does not finalize. Do not rely on the child count
+   "feeling complete"; map the list explicitly.
+
 ## Per-Task Requirements
 
 The canonical definition of what every task must contain. The output format and enforcement rules reference this section -- it is not repeated elsewhere.
@@ -282,6 +327,8 @@ The skill refuses to finalize the breakdown if any of these checks fail. All per
 2. **Ambiguity check.** For each task, re-read it as if you had no context from this conversation. What is the first thing a fresh agent would get wrong? If a misinterpretation can be named, revise the task description until it cannot. If the ambiguity cannot be resolved by revising the description, surface it to the user: "Task '{title}' has an unresolvable ambiguity: {description}. Split it or add context." This is an internal pre-publish check: resolved ambiguities produce no output; only unresolvable ones are surfaced.
 3. **Non-goal coverage.** For each non-goal (from `proposal.md` or design doc), at least one task must reference it in "Not in scope." If a non-goal has no corresponding task boundary, add one.
 4. **Spec traceability gap (openspec mode only).** Every task must have a `--spec-id`. If a task cannot be traced to a spec requirement: "Task '{title}' doesn't trace to any spec requirement. Add a requirement or explain why it's needed."
+5. **Epic done-bar present.** The epic must carry its own outcome-format acceptance criterion whose "not when" clause is "not when all child tasks are closed" (or stronger). An epic with no done-bar of its own — only a name and children — fails the check: "Epic '{name}' has no acceptance criterion independent of its children. Add a 'Done when … not when all children closed' bar." (See [Per-Epic Requirements](#per-epic-requirements).)
+6. **Epic scope-coverage gap.** Every seam/scope item named in the epic's source *and in the epic's own description* must map to at least one child task. If a named seam has no covering child: "Epic '{name}' names seam '{seam}' but no task covers it. Add the task or remove it from the epic's scope." This is the check that would have caught `cake-ta5.1`. (See [Per-Epic Requirements](#per-epic-requirements).)
 
 ## Lean Review (automatic, feature/epic only)
 

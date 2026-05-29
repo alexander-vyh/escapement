@@ -248,3 +248,57 @@ After agents return:
 4. **Spot check** — Agents can make systematic errors
 5. **Shut down the team** — SendMessage shutdown_request to each agent
 6. **If ANY verification step fails** — dispatch new agents to fix, do NOT report partial success
+
+## Completeness Critic (the underreach pass)
+
+A review/critique roundtable that *only* dispatches per-lens reviewers and then an
+adversarial verify pass has a structural blind spot. The verify pass refutes
+**overreach** — claims that exist and are inflated. It is blind to **underreach**
+by construction: a true finding that no lens was pointed at is never *generated*,
+so there is nothing for the verifier to refute. A real lean violation can slip
+every seam between the lenses and be caught only by a human afterward.
+
+The completeness critic closes that gap. It is a **generative** stage, not a
+verifying one, and runs as a final agent *after* the per-lens reviewers report but
+*before* you call the review done.
+
+**Dispatch it on the same team, blinded to the other reviewers' verdicts** (give it
+the artifact and the list of lenses that ran, not their findings — so it reasons
+about what they *structurally could not have covered*, not just what they happened
+to miss). Its job is three questions:
+
+1. **What is missing?** — list coverage gaps owned by *no* lens that ran. Name the
+   gap and which (absent) lens would have owned it. "No lens looked at write-side
+   authoring redundancy across the openspec/beads/harness trio" is a gap finding.
+2. **What is understated?** — challenge severity calibration **up**, not only down.
+   The verify pass argues findings down ("this P1 is really a nit"); the critic
+   argues the reverse ("this was filed as a nit but it's a recurring lean
+   violation — raise it"). Severity calibration must move in both directions.
+3. **What is mis-scoped?** — a finding attached to the wrong layer, or one true
+   finding masquerading as the symptom of a deeper one.
+
+**Feed gaps back as a new round.** Each gap the critic surfaces is a *new* finding
+with no verdict yet — so it re-enters the loop: dispatch a lens at it, then verify
+it adversarially like any other. The critic does not get the last word; it
+*restarts* the loop with the findings the first pass could never have produced.
+Run the critic until a round surfaces nothing new (loop-until-dry), not once.
+
+```
+# After the per-lens roundtable reports, on the SAME team:
+Agent(
+  name="completeness-critic",
+  team_name="auth-review",
+  description="Surface coverage gaps and severity under-calibration",
+  prompt="You are the completeness critic for the review of <artifact>.
+    The lenses that ran were: security, ux, performance. You are NOT given their
+    findings — reason about what those three lenses STRUCTURALLY could not cover.
+    Answer three questions and SendMessage your findings:
+      1. MISSING: gaps owned by no lens that ran. Name the gap + the absent lens.
+      2. UNDERSTATED: findings whose severity should be calibrated UP (not just down).
+      3. MIS-SCOPED: findings attached to the wrong layer or masking a deeper cause.
+    Each gap you name is a NEW finding with no verdict — it will be dispatched to a
+    lens and verified. Do not rubber-stamp; if nothing is missing, say so explicitly
+    and justify why the lens set was exhaustive for this artifact.
+    [CONTINUATION DISCIPLINE block here]"
+)
+```

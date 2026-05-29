@@ -148,6 +148,39 @@ The outcome-verifier must not accept:
 Tests pass only counts as outcome verification when those tests exercise the
 actual desired outcome and reject known fragile implementations.
 
+### Completeness Critic
+
+The Mutation Challenger and the adversarial review pass both attack **overreach**:
+they refute findings that exist and are inflated. They are blind to **underreach**
+by construction — a true finding that no reviewer lens was pointed at is never
+generated, so there is nothing to refute or mutate. A real defect can slip every
+seam between the lenses and be caught only by a human afterward. (This is not
+hypothetical: the 2026-05-28 critique's verify phase refuted five inflated claims
+but never surfaced the write-side triplicate-authoring lean violation — no lens
+owned it.)
+
+After the per-lens reviewers report — and before declaring the review done —
+dispatch a **completeness-critic** agent. Unlike the other QA agents it is
+**generative, not verifying**. Brief it blinded to the other reviewers' verdicts
+(give it the artifact and the *list of lenses that ran*, not their findings) so it
+reasons about what those lenses structurally could not cover. It must answer:
+
+1. **What is missing?** Coverage gaps owned by *no* lens that ran. Name the gap and
+   the absent lens that would have owned it.
+2. **What is understated?** Findings whose severity should be calibrated **up**.
+   Severity calibration is bidirectional — the verify pass argues findings down, the
+   critic argues the under-rated ones up. A recurring nit may be a systemic
+   violation.
+3. **What is mis-scoped?** A finding attached to the wrong layer, or a symptom
+   standing in for a deeper cause.
+
+The critic does not get the last word — it **restarts the loop**. Each gap it names
+is a new finding with no verdict, so it re-enters the pipeline: dispatch a lens at
+it, then verify it adversarially like any other finding. Run the critic
+**loop-until-dry** (repeat until a round surfaces nothing new), not once. If the
+critic finds nothing, it must justify *why the lens set was exhaustive for this
+artifact* — "nothing missing" without that justification is a rubber stamp.
+
 ### When to Pair
 
 - **Always pair** for feature/epic work with behavioral specs

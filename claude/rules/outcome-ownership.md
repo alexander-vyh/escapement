@@ -74,6 +74,41 @@ Do not accept "tests pass", "implementation looks correct", or "the intermediate
 artifact is fixed" as sufficient proof when the requested outcome lives
 downstream.
 
+## Child-Closure Is Not Parent-Completion
+
+When work is tracked as a parent/epic with child tasks, **closing every child is an
+intermediate artifact, not the parent's outcome** — the same error as "tests pass"
+or "the job ran," one level up the tracking hierarchy. A parent is done when its
+*own* stated scope is delivered, verified against the parent's own acceptance
+criterion — never because the child count reached zero-open.
+
+Two distinct ways this fails, both real:
+
+1. **Coverage gap** — the child set never covered the whole parent scope. A seam the
+   parent's own description named was never given a child, so it was never built,
+   yet the parent looks done once the children that *do* exist are closed.
+2. **Verification gap** — even with full coverage, "all children closed" was treated
+   as the close condition instead of running the parent's own oracle.
+
+> **Real example (2026-05-29 [reported by the user]):** epic `cake-ta5.1` was a
+> seam-extraction refactor. ~50 child tasks (one per handler function) were created
+> and closed, so the epic read as complete — but the epic's description named
+> `create_parser` / argparse setup (≈1,867 LOC) as a seam, and no child ever covered
+> it. The largest named seam shipped unextracted under a green parent. A human, not
+> the workflow, caught it.
+
+❌ "All sub-tasks are closed, so the epic is done."
+→ Re-read the parent's description and acceptance. Is its *whole* named scope
+delivered? Does its own oracle pass? If a named seam has no covering child, the
+breakdown was incomplete — file the missing task; do not close the parent.
+
+The authoring-time defense is the work-breakdown skill's **scope-coverage manifest**
+and **epic done-bar** (every named seam maps to a child; the epic carries its own
+"Done when … **not when** all children closed" oracle). See
+[`../skills/work-breakdown/SKILL.md`](../skills/work-breakdown/SKILL.md)
+§ "Per-Epic Requirements". The completion-time defense is this rule: before closing
+any parent, verify the parent, not the children.
+
 ## When You May Actually Stop
 
 - You've verified the outcome works end-to-end — by RUNNING the actual workflow, not by reading code

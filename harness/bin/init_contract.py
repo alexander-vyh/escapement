@@ -71,6 +71,35 @@ def is_trivial_oracle(command: str) -> "str | None":
     return None
 
 
+def build_contract(
+    goal: str,
+    verify: str,
+    *,
+    source: str = "agent-declared",
+    expected_exit: int = 0,
+    session_id: "str | None" = None,
+    thread_id: "str | None" = None,
+) -> dict:
+    """Construct a contract dict in the canonical shape (single source of truth).
+
+    Both the hand-authoring path (`main`/init_contract) and the bead-derivation
+    path (derive_contract.py) build their contract here, so a derived contract is
+    byte-for-byte the same shape as a hand-authored one and the Stop gate / verify
+    treat them identically. Does NOT screen the oracle or touch the filesystem —
+    callers run `is_trivial_oracle` and write the file (so a rejected oracle leaves
+    nothing behind).
+    """
+    return {
+        "goal": goal,
+        "verification_command": verify,
+        "expected_exit": expected_exit,
+        "source": source,
+        "thread_id": thread_id or sanitize_session_id(session_id) or f"current-{uuid.uuid4().hex[:8]}",
+        "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "last_run": None,
+    }
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--goal", required=True, help="One-sentence outcome.")
@@ -95,15 +124,14 @@ def main(argv: list[str]) -> int:
     thread_dir = thread_dir_for_session(session_id, harness_root)
     thread_dir.mkdir(parents=True, exist_ok=True)
 
-    contract = {
-        "goal": args.goal,
-        "verification_command": args.verify,
-        "expected_exit": args.expected_exit,
-        "source": args.source,
-        "thread_id": args.thread_id or sanitize_session_id(session_id) or f"current-{uuid.uuid4().hex[:8]}",
-        "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
-        "last_run": None,
-    }
+    contract = build_contract(
+        args.goal,
+        args.verify,
+        source=args.source,
+        expected_exit=args.expected_exit,
+        session_id=session_id,
+        thread_id=args.thread_id,
+    )
 
     out = thread_dir / "contract.json"
     with out.open("w") as f:
