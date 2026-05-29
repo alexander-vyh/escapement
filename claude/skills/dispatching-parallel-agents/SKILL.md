@@ -207,6 +207,9 @@ but that is a second line of defense. The first line is you.
 
 ## Vocabulary
 
+> Canonical, principle-anchored definitions live in
+> [`docs/VOCABULARY.md`](../../../docs/VOCABULARY.md). Local quick-reference below.
+
 | User says | Means |
 |-----------|-------|
 | "agent team" | TeamCreate + named agents on the team |

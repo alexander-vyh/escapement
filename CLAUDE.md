@@ -2,6 +2,13 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
+## Vocabulary
+
+Foundational terms for this repo's workflow system — multi-agent organization, beads,
+molecules, the continuation-harness, gate/bureaucracy design, oracles — are defined and
+anchored to their base principles in [`docs/VOCABULARY.md`](docs/VOCABULARY.md). Consult
+it when a term is unclear; it is the single source of truth when local vocab sections drift.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
 

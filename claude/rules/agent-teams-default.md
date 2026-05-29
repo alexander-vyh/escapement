@@ -53,6 +53,10 @@ Agent(prompt="Investigate OAuth patterns...")
 
 ### Vocabulary — What the User Means
 
+> Canonical definitions for these and all cross-system terms live in
+> [`docs/VOCABULARY.md`](../../docs/VOCABULARY.md). The table below is the local
+> quick-reference; if the two disagree, the glossary wins.
+
 | User says | What to do |
 |-----------|-----------|
 | "agent team" | TeamCreate + 2-5 named agents with `team_name` |
