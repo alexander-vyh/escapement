@@ -220,9 +220,26 @@ def ask(reason: str) -> int:
     return 0
 
 
-# Legacy alias preserved for any external callers; new code should call ask().
 def deny(reason: str) -> int:
-    return ask(reason)
+    """Hard block. Emits permissionDecision "deny" and exits non-zero so the
+    edit / finishing command is stopped.
+
+    Per gate-design.md Rule 1 the escape path stays first-class: the denial
+    *reason* (built by block_message) documents the agent-invokable 'proceed'
+    override, so the gate blocks without trapping the user.
+    """
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
+    return 2
 
 
 def normalize_heading(value: str) -> str:
@@ -384,11 +401,11 @@ def handle_edit_gate(data: dict) -> int:
         return allow()
     _record_signal(
         gate_name="test_oracle_brief_gate",
-        decision="ask",
+        decision="deny",
         reason=reason or "Invalid Test Oracle Brief.",
         target=rel_target,
     )
-    return ask(block_message(reason or "Invalid Test Oracle Brief.", repo_root, [rel_target]))
+    return deny(block_message(reason or "Invalid Test Oracle Brief.", repo_root, [rel_target]))
 
 
 def command_from(data: dict) -> str:
@@ -499,12 +516,12 @@ def handle_bash_landing_gate(data: dict) -> int:
         return allow()
     _record_signal(
         gate_name="test_oracle_brief_gate",
-        decision="ask",
+        decision="deny",
         reason=reason or "Invalid Test Oracle Brief.",
         surface="finishing-command",
         file_count=len(relevant),
     )
-    return ask(block_message(reason or "Invalid Test Oracle Brief.", repo_root, relevant))
+    return deny(block_message(reason or "Invalid Test Oracle Brief.", repo_root, relevant))
 
 
 def main() -> int:

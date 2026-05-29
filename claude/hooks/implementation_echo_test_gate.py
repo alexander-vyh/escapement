@@ -616,27 +616,19 @@ def main() -> int:
         # All issues were overridden — allow with the override capture above
         return allow()
 
-    # Issues remain — convert from hard deny to ask so the agent has a
-    # documented escape ('proceed') beyond the per-file override.
+    # Issues remain — deny the finishing command. The denial message itself
+    # documents two first-class escape paths (gate-design.md Rule 1): the
+    # per-file `# oracle:` override and saying 'proceed'. A hard deny is
+    # warranted here because shared-generated-literals and mock-only tests are
+    # the highest-confidence echo patterns the gate detects.
     _record_signal(
         gate_name="implementation_echo_test_gate",
-        decision="ask",
+        decision="deny",
         reason=f"{len(remaining_issues)} implementation-echo issue(s) remaining after overrides",
         issue_count=len(remaining_issues),
         issue_kinds=sorted({i.kind for i in remaining_issues}),
     )
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "ask",
-                    "permissionDecisionReason": build_message(remaining_issues),
-                }
-            }
-        )
-    )
-    return 0
+    return deny(build_message(remaining_issues))
 
 
 if __name__ == "__main__":

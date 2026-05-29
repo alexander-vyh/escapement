@@ -32,19 +32,68 @@ except ImportError:  # pragma: no cover
 
 _LOG_FILE = Path.home() / ".claude" / "hooks" / "agent-dispatch.log"
 _TRACKER_PREFIX = "agent-team-tracker-"
-_TRACKER_DIR = Path("/tmp")
+_TRACKER_DIR = Path.home() / ".claude" / "hooks" / "state"
 _WINDOW_SECONDS = 30
 _STALE_SECONDS = 86400  # 24 hours
 
 
-def _get_session_id() -> str:
-    """Get a unique session identifier from env or fall back to PPID."""
-    return os.environ.get("CLAUDE_SESSION_ID") or str(os.getppid())
+def _is_safe_session_id(value: str) -> bool:
+    """A session id is safe to use as a filename component.
+
+    Reject empty values and anything that could escape the tracker
+    directory (path separators, traversal). Tracker files are keyed by
+    session id, so an unsafe id is a path-traversal vector.
+    """
+    if not value:
+        return False
+    if "/" in value or "\\" in value or value in (".", ".."):
+        return False
+    if os.sep in value or (os.altsep and os.altsep in value):
+        return False
+    return True
 
 
-def _get_track_file() -> Path:
+def _get_session_id(data: dict | None = None) -> str:
+    """Resolve a unique, filesystem-safe session identifier.
+
+    Preference order: the payload's ``session_id``, then the
+    ``CLAUDE_SESSION_ID`` env var, then the parent PID. Unsafe values
+    (empty, path-traversal) at any tier are skipped in favour of the
+    next tier so the tracker file always lands inside _TRACKER_DIR.
+    """
+    candidates = []
+    if isinstance(data, dict):
+        candidates.append((data.get("session_id") or "").strip())
+    candidates.append((os.environ.get("CLAUDE_SESSION_ID") or "").strip())
+    for candidate in candidates:
+        if _is_safe_session_id(candidate):
+            return candidate
+    return str(os.getppid())
+
+
+def _is_ci_without_session(data: dict) -> bool:
+    """True when running in CI with no usable session id.
+
+    In CI the parent-PID fallback is meaningless (every step is a fresh
+    process), so teamless-multi-agent tracking would produce false
+    positives. When CI is set and neither the payload nor the env
+    carries a session id, the hook should stand down. If a real
+    session id is present, normal enforcement still applies.
+    """
+    if not (os.environ.get("CI") or "").strip():
+        return False
+    payload_sid = (data.get("session_id") or "").strip() if isinstance(data, dict) else ""
+    env_sid = (os.environ.get("CLAUDE_SESSION_ID") or "").strip()
+    return not (_is_safe_session_id(payload_sid) or _is_safe_session_id(env_sid))
+
+
+def _get_track_file(data: dict | None = None) -> Path:
     """Return the session-keyed tracker file path."""
-    return _TRACKER_DIR / f"{_TRACKER_PREFIX}{_get_session_id()}"
+    try:
+        _TRACKER_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return _TRACKER_DIR / f"{_TRACKER_PREFIX}{_get_session_id(data)}"
 
 
 def _cleanup_stale_trackers() -> None:
@@ -71,9 +120,9 @@ def _log(msg: str) -> None:
         pass
 
 
-def _get_recent_teamless_count() -> int:
+def _get_recent_teamless_count(data: dict | None = None) -> int:
     """Count teamless agent dispatches within the tracking window."""
-    track_file = _get_track_file()
+    track_file = _get_track_file(data)
     try:
         if not track_file.exists():
             return 0
@@ -87,9 +136,9 @@ def _get_recent_teamless_count() -> int:
         return 0
 
 
-def _record_teamless_dispatch() -> None:
+def _record_teamless_dispatch(data: dict | None = None) -> None:
     """Record a teamless agent dispatch timestamp and prune old entries."""
-    track_file = _get_track_file()
+    track_file = _get_track_file(data)
     now = time.time()
     try:
         # Read existing, prune old entries, append new
@@ -173,6 +222,13 @@ def main() -> int:
     if tool_name != "Agent":
         return 0
 
+    # In CI with no usable session id, the PPID fallback is meaningless
+    # (each step is a fresh process), so teamless tracking would produce
+    # false positives. Stand down rather than block legitimate dispatch.
+    if _is_ci_without_session(data):
+        _log("SKIPPED — CI without session id")
+        return 0
+
     tool_input = data.get("tool_input", {})
     if not isinstance(tool_input, dict):
         return 0
@@ -201,8 +257,8 @@ def main() -> int:
 
     # Team check: only applies when team_name is missing
     if not team_name:
-        recent_count = _get_recent_teamless_count()
-        _record_teamless_dispatch()
+        recent_count = _get_recent_teamless_count(data)
+        _record_teamless_dispatch(data)
 
         if recent_count > 0:
             # Second+ teamless agent in window — HARD BLOCK

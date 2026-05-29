@@ -48,7 +48,7 @@ except ImportError:  # pragma: no cover
 # A 91-day-old design that's still load-bearing should still appear; staleness
 # is a content question, not a filesystem-attribute one.
 
-def find_openspec_changes(changes_dir: Path) -> list:
+def find_recent_openspec_changes(changes_dir: Path) -> list:
     """Return change directories under openspec/changes/, skipping archive/."""
     if not changes_dir.is_dir():
         return []
@@ -247,7 +247,7 @@ def main() -> int:
     change_dir: Optional[Path] = None
     design_source: Optional[Path] = None  # path used for the dedup key
 
-    changes = find_openspec_changes(Path(project_dir) / "openspec" / "changes")
+    changes = find_recent_openspec_changes(Path(project_dir) / "openspec" / "changes")
     if changes:
         changes.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         change_dir = changes[0]

@@ -162,6 +162,10 @@ _HOOK_SIGNATURES = frozenset({
     "VERIFICATION REQUIRED",
     "FIX THE FAILURES NOW:",
     "RUN VERIFICATION NOW:",
+    # Self-referential names: a message that mentions this hook or the rule
+    # file it enforces is discussing the gate, not shirking through it.
+    "outcome-ownership.md",
+    "validate_no_shirking",
 })
 
 # ---------------------------------------------------------------------------
@@ -439,14 +443,128 @@ def read_recent_messages(transcript_path: str) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 _FENCED_BLOCK = re.compile(r"```[\s\S]*?```", re.MULTILINE)
+_TILDE_FENCE = re.compile(r"~~~[\s\S]*?~~~", re.MULTILINE)
 _INLINE_CODE = re.compile(r"`[^`]+`")
+# Quoting/example markup: content the agent is showing or that the harness
+# injected, not asserting. Strip the whole tagged span (and its contents) so a
+# shirking phrase quoted as an example or inside a system reminder does not fire.
+_QUOTED_TAGS = re.compile(
+    r"<(system-reminder|example)>[\s\S]*?</\1>",
+    re.IGNORECASE,
+)
 
 
 def _strip_code_spans(text: str) -> str:
-    """Remove fenced code blocks and inline code spans from text."""
+    """Remove fenced code blocks, inline code spans, and quoted markup.
+
+    Both ``` and ~~~ fences are stripped, along with the contents of
+    <system-reminder> and <example> tags — these hold quoted or injected
+    content, not the agent's own assertions, so a shirking phrase inside
+    them is not the agent shirking.
+    """
     text = _FENCED_BLOCK.sub("", text)
+    text = _TILDE_FENCE.sub("", text)
+    text = _QUOTED_TAGS.sub("", text)
     text = _INLINE_CODE.sub("", text)
     return text
+
+
+# ---------------------------------------------------------------------------
+# Negation / meta-description guard
+# ---------------------------------------------------------------------------
+#
+# A shirking phrase that the agent *disavows* ("I will NOT claim it's
+# pre-existing") or *describes* ("scan for phrases like 'not my problem'") is
+# not the agent shirking. These cues, when they appear in the short window of
+# text immediately before a match, mark the match as disavowal/description
+# rather than assertion. The window is bounded (GUARD_WINDOW) so that a real
+# shirking assertion appearing far enough after a descriptive cue still fires
+# (see test_scan_for_real_match_after_window_still_flagged).
+
+GUARD_WINDOW = 40
+
+# Negation cues: the phrase is being denied, forbidden, or made conditional.
+# Checked only in the short window immediately before a match — "I will NOT
+# claim it's pre-existing" disavows; "is pre-existing" asserts. Bare "like" /
+# "such as" are deliberately NOT here: "looks like a pre-existing failure" is a
+# real assertion (those belong to the quoted meta-description path below).
+_NEGATION_CUES = re.compile(
+    r"\b(?:not|n['’]?t|avoid|never|don['’]?t|doesn['’]?t|"
+    r"won['’]?t|without|if|unless|whether)\b",
+    re.IGNORECASE,
+)
+
+# Clause boundaries. English negation scopes within its own clause: in
+# "I do not have time, leaving this for now" the "not" negates "have time",
+# and the comma ends that clause — the deferral that follows is a fresh,
+# unconditional assertion. So a negation cue only disavows the matched phrase
+# when NO clause break sits between the cue and the match.
+_CLAUSE_BREAK = re.compile(r"[,;:—–]|--")
+
+# Meta-description cues: the phrase is being named as an example of the kind of
+# thing to look for, not used as an assertion. Unlike negation, these are
+# checked across the whole preceding text (not a fixed window) but ONLY when
+# the match itself is wrapped in quotation marks — quoting is the structural
+# signal that the phrase is mentioned, not used. An unquoted shirking
+# assertion after a meta-cue ("scan for signs ... it was already failing")
+# still fires.
+_META_CUES = re.compile(
+    r"\b(?:scan(?:ning)?\s+for|look(?:ing)?\s+for|check(?:ing)?\s+for|"
+    r"search(?:ing)?\s+for|watch(?:ing)?\s+for|detect(?:ing|s)?|"
+    r"phrases?\s+like|patterns?\s+like|signs?\s+(?:of|it)|"
+    r"language\s+(?:such\s+as|like)|such\s+as\b)",
+    re.IGNORECASE,
+)
+
+# Straight and curly double-quote characters used to delimit quoted examples.
+_QUOTE_CHARS = "\"“”"
+
+
+def _inside_quotes(stripped: str, match_start: int) -> bool:
+    """True if the match begins inside an open double-quoted span.
+
+    Counts unbalanced double-quote characters before the match: an odd count
+    means the match sits inside a quotation (a mentioned phrase), an even
+    count means it is unquoted (an asserted phrase).
+    """
+    quote_count = sum(stripped[:match_start].count(q) for q in _QUOTE_CHARS)
+    return quote_count % 2 == 1
+
+
+def _negation_guards(window: str) -> bool:
+    """True if a negation cue in the window actually scopes the match.
+
+    A negation only disavows the matched phrase when it is in the SAME clause —
+    i.e. no clause break (comma, semicolon, colon, em/en-dash, `--`) sits
+    between the cue and the match. We test the nearest (last) cue in the
+    window: if a clause break follows it, that cue belongs to an earlier clause
+    and does not guard the match ("I do not have time, leaving this for now").
+    """
+    last = None
+    for m in _NEGATION_CUES.finditer(window):
+        last = m
+    if last is None:
+        return False
+    # Text between the end of the cue and the match (the window ends at match).
+    return _CLAUSE_BREAK.search(window[last.end():]) is None
+
+
+def _is_guarded(stripped: str, match_start: int) -> bool:
+    """True if the match at match_start is disavowed or described, not asserted.
+
+    Two independent guards:
+      * Negation — a negation cue in the GUARD_WINDOW chars before the match
+        AND in the same clause (no clause break between cue and match) means
+        the phrase is being denied or made conditional.
+      * Meta-description — the match is inside quotes AND a meta-cue appears
+        anywhere before it, meaning the phrase is named as an example.
+    """
+    window = stripped[max(0, match_start - GUARD_WINDOW):match_start]
+    if _negation_guards(window):
+        return True
+    if _inside_quotes(stripped, match_start) and _META_CUES.search(stripped[:match_start]):
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -475,8 +593,12 @@ def find_shirking_match(text: str) -> tuple[str, str] | None:
     """
     stripped = _strip_code_spans(text)
     for category, pattern in zip(_CATEGORIES, COMPILED_PATTERNS):
-        m = pattern.search(stripped)
-        if m:
+        for m in pattern.finditer(stripped):
+            # Skip matches that are disavowed ("I will NOT claim...") or
+            # described ("scan for phrases like ..."); keep scanning in case a
+            # later, un-guarded match of the same pattern is a real assertion.
+            if _is_guarded(stripped, m.start()):
+                continue
             start = max(0, m.start() - 40)
             end = min(len(stripped), m.end() + 80)
             return stripped[start:end].strip(), category

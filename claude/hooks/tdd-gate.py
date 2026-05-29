@@ -33,6 +33,27 @@ except ImportError:  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
+# Gated tools
+# ---------------------------------------------------------------------------
+
+# Tools that write/edit code and therefore go through the TDD nudge.
+# Serena's symbol-editing tools and NotebookEdit modify implementation code the
+# same way Write/Edit do, so they get the same treatment.
+_GATED_TOOLS = frozenset({
+    "Write",
+    "Edit",
+    "NotebookEdit",
+    "mcp__serena__replace_symbol_body",
+    "mcp__serena__insert_after_symbol",
+    "mcp__serena__insert_before_symbol",
+})
+
+# Tool-input keys that carry the target file path, in priority order.
+# Serena tools use relative_path; NotebookEdit uses notebook_path.
+_FILE_PATH_KEYS = ("file_path", "relative_path", "notebook_path")
+
+
+# ---------------------------------------------------------------------------
 # File classification
 # ---------------------------------------------------------------------------
 
@@ -133,8 +154,42 @@ def find_git_root(filepath: str) -> str | None:
 
 
 def has_tests_directory(repo_root: str) -> bool:
-    """Check if the repo has a tests/ directory."""
-    return (Path(repo_root) / "tests").is_dir()
+    """Check if the repo has test infrastructure.
+
+    Recognized across ecosystems:
+      - a tests/, test/, or spec/ directory
+      - Rust:    Cargo.toml
+      - Go:      go.mod
+      - Elixir:  mix.exs
+      - JS/TS:   package.json that declares a "test" script
+
+    A package.json without a "test" script does NOT count on its own — many
+    JS projects have one with only build/lint scripts and no test harness.
+    """
+    root = Path(repo_root)
+
+    # Test directories (plural and singular, plus RSpec-style spec/)
+    for dirname in ("tests", "test", "spec"):
+        if (root / dirname).is_dir():
+            return True
+
+    # Single-file ecosystem markers that imply a built-in test harness
+    for marker in ("Cargo.toml", "go.mod", "mix.exs"):
+        if (root / marker).is_file():
+            return True
+
+    # JS/TS: only counts when a "test" script is actually declared
+    pkg = root / "package.json"
+    if pkg.is_file():
+        try:
+            data = json.loads(pkg.read_text())
+        except (json.JSONDecodeError, OSError):
+            data = {}
+        scripts = data.get("scripts") if isinstance(data, dict) else None
+        if isinstance(scripts, dict) and scripts.get("test"):
+            return True
+
+    return False
 
 
 def get_modified_files(repo_root: str) -> list[str]:
@@ -209,13 +264,18 @@ def main() -> int:
 
     if hook_event != "PreToolUse":
         return 0
-    if tool_name not in ("Write", "Edit"):
+    if tool_name not in _GATED_TOOLS:
         return 0
 
-    # Extract file path from tool input
+    # Extract file path from tool input (key varies by tool)
     if not isinstance(tool_input, dict):
         return 0
-    filepath = tool_input.get("file_path", "")
+    filepath = ""
+    for key in _FILE_PATH_KEYS:
+        value = tool_input.get(key)
+        if value:
+            filepath = value
+            break
     if not filepath:
         return 0
 

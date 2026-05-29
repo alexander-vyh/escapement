@@ -47,28 +47,45 @@ _REVIEWER_SUBAGENT_TYPES = {
 # like "reviewable", "preview", or "previewer".
 _REVIEW_WORD_RE = re.compile(r"\breview(?:s|ed|er|ers|ing)?\b", re.IGNORECASE)
 
+# Word-boundary anchored detection of `bd close`. The leading \b prevents
+# matching when "bd" is the tail of a longer token (e.g. "mybd close",
+# "subd close") — those are not the beads CLI. The boundary still matches
+# "bd close" at the start of a string or after a shell separator like ";".
+_BD_CLOSE_RE = re.compile(r"\bbd\s+close\b")
+_BD_UPDATE_CLOSED_RE = re.compile(r"\bbd\s+update\s+.*--status[=\s]+closed\b")
+
 
 def _state_file(session_id: str) -> Path:
     """Return the state file path for a given session."""
     return _STATE_DIR / f"{session_id}.json"
 
 
-def _read_state(session_id: str) -> dict:
-    """Read the review dispatch state for a session."""
+def _read_state(session_id: str) -> list:
+    """Read the list of review-agent names recorded for a session.
+
+    Returns a list of reviewer names (possibly empty). Defends against state
+    files that are valid JSON but not the expected shape: a dict missing the
+    "reviews" key, a null literal, or a top-level array all return []
+    rather than raising KeyError/TypeError.
+    """
     sf = _state_file(session_id)
     if not sf.exists():
-        return {"reviews": []}
+        return []
     try:
-        return json.loads(sf.read_text())
+        parsed = json.loads(sf.read_text())
     except (json.JSONDecodeError, OSError):
-        return {"reviews": []}
+        return []
+    if isinstance(parsed, dict):
+        reviews = parsed.get("reviews", [])
+        return reviews if isinstance(reviews, list) else []
+    return []
 
 
-def _write_state(session_id: str, state: dict) -> None:
-    """Write the review dispatch state for a session."""
+def _write_state(session_id: str, reviews: list) -> None:
+    """Persist the list of review-agent names for a session."""
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        _state_file(session_id).write_text(json.dumps(state))
+        _state_file(session_id).write_text(json.dumps({"reviews": reviews}))
     except OSError:
         pass
 
@@ -95,9 +112,9 @@ def _is_review_agent(tool_input: dict) -> bool:
 
 def _is_close_command(command: str) -> bool:
     """Return True if the bash command is a bd close or bd update --status closed."""
-    if re.search(r"bd\s+close", command):
+    if _BD_CLOSE_RE.search(command):
         return True
-    if re.search(r"bd\s+update\s+.*--status[=\s]+closed", command):
+    if _BD_UPDATE_CLOSED_RE.search(command):
         return True
     return False
 
@@ -117,6 +134,15 @@ _WARN_NO_REVIEW = (
     "review, say 'proceed' to close anyway."
 )
 
+# Concise remedy surfaced as the ask-decision reason. Names the concrete
+# escape path (dispatch a reviewer subagent, or say 'proceed') so the gate
+# is actionable rather than a bare prohibition (gate-design.md Rule 1).
+_ASK_REASON = (
+    "No review agent was dispatched before this close. Dispatch a "
+    "code-reviewer or adversarial-reviewer subagent first, or say "
+    "'proceed' to close without review."
+)
+
 
 def main() -> int:
     try:
@@ -134,10 +160,10 @@ def main() -> int:
     # --- Agent tracking path ---
     if tool_name == "Agent":
         if _is_review_agent(tool_input):
-            state = _read_state(session_id)
+            reviews = _read_state(session_id)
             agent_name = tool_input.get("name", "unknown")
-            state["reviews"].append(agent_name)
-            _write_state(session_id, state)
+            reviews.append(agent_name)
+            _write_state(session_id, reviews)
         return 0
 
     # --- Bash gating path ---
@@ -146,18 +172,20 @@ def main() -> int:
         if not _is_close_command(command):
             return 0
 
-        state = _read_state(session_id)
-        if state["reviews"]:
+        reviews = _read_state(session_id)
+        if reviews:
             # Review agent was dispatched — allow silently
             _record_signal(
                 gate_name="review_gate",
                 decision="allow",
-                reason=f"{len(state['reviews'])} review agent(s) dispatched this session",
-                reviewers=state["reviews"][:5],
+                reason=f"{len(reviews)} review agent(s) dispatched this session",
+                reviewers=reviews[:5],
             )
             return 0
 
-        # No review agent — soft warning
+        # No review agent — ask the user to confirm before closing. This is a
+        # soft gate: it never denies, only surfaces the missed review so the
+        # user can dispatch a reviewer or knowingly proceed.
         _record_signal(
             gate_name="review_gate",
             decision="nudge",
@@ -165,6 +193,12 @@ def main() -> int:
         )
         result = {
             "systemMessage": _WARN_NO_REVIEW,
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": _ASK_REASON,
+                "additionalContext": _WARN_NO_REVIEW,
+            },
         }
         json.dump(result, sys.stdout)
         return 0

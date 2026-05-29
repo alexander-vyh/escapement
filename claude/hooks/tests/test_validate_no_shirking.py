@@ -1032,6 +1032,41 @@ class TestNegationGuard:
         assert find_shirking_phrase("Don't say it's not my problem.") is None
 
 
+class TestNegationClauseScope:
+    """Negation only disavows when it scopes the SAME clause as the match.
+
+    A negation cue in an earlier clause (separated from the match by a comma,
+    semicolon, colon, or dash) does NOT guard the following shirking phrase.
+    These are negative controls protecting against the over-broad guard that
+    suppressed any match with an incidental negation anywhere in the window.
+    """
+
+    # --- MUST FLAG: negation is in a different clause from the match ---
+
+    def test_incidental_negation_before_comma_still_flagged(self):
+        # "not" scopes "have time", not the "leaving this for now" deferral.
+        assert find_shirking_phrase("I do not have time, leaving this for now.") is not None
+
+    def test_negation_before_semicolon_still_flagged(self):
+        assert find_shirking_phrase(
+            "The disk issue is not ours; this is a pre-existing failure."
+        ) is not None
+
+    def test_negation_before_em_dash_still_flagged(self):
+        assert find_shirking_phrase(
+            "Doesn't matter — leave this for now and move on."
+        ) is not None
+
+    # --- MUST NOT FLAG: negation scopes the same clause as the match ---
+
+    def test_same_clause_negation_not_flagged(self):
+        assert find_shirking_phrase("I will not defer this") is None
+
+    def test_same_clause_negation_pre_existing_not_flagged(self):
+        # No clause break between "not" and "pre-existing failure".
+        assert find_shirking_phrase("I will not call this a pre-existing failure") is None
+
+
 class TestExpandedStripping:
     def test_tilde_fence_stripped(self):
         text = "~~~\npre-existing failure\n~~~\nclean text here"

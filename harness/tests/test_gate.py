@@ -843,6 +843,33 @@ def run_implicit_queue() -> int:
     return 0 if failed == 0 else 1
 
 
+# --- pytest discovery -------------------------------------------------------
+# Thin wrappers exposing the run_*() suites to pytest. Previously this file
+# defined only run_*() functions + a __main__ runner, so `pytest` collected
+# ZERO tests here — a CI `pytest` run silently skipped the harness's core gate
+# tests. Each run_*() returns 0 on success (non-zero prints its _assert
+# failures), so asserting == 0 surfaces any failure to pytest without changing
+# the existing test logic.
+
+def test_gate_decision_cases():
+    assert run() == 0
+
+def test_session_isolation():
+    assert run_isolation() == 0
+
+def test_portability():
+    assert run_portability() == 0
+
+def test_stop_hook():
+    assert run_stop_hook() == 0
+
+def test_task_mode():
+    assert run_task_mode() == 0
+
+def test_implicit_queue():
+    assert run_implicit_queue() == 0
+
+
 if __name__ == "__main__":
     rc_gate = run()
     rc_iso = run_isolation()
