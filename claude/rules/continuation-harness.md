@@ -69,6 +69,20 @@ The three release paths from a task-mode block are:
 
 Picking up unrelated backlog items is not a fourth path. If `bd ready` shows tasks outside the current session's scope, ignore them — they belong to a different session.
 
+### Background-workflow watchdog (long runs die silently at the host timeout)
+
+A background `Workflow` run is killed at the Claude Code host's task timeout (~13 min, observed 2026-05-29) with **no completion notification** — the parent is silently stranded mid-run. That timeout is a platform limit this repo cannot reconfigure; the mitigation is to make the death *observable* and *recoverable* instead of silent. When you launch a `Workflow` that may exceed ~13 min of wall-clock:
+
+1. **Register a fallback wakeup for it.** `ScheduleWakeup(delaySeconds=<~run estimate + buffer>, reason="watchdog: workflow <runId>", prompt="<resume/check prompt>")`. Since the ScheduleWakeup→Stop-gate bridge now works (bead `claude-workflow-setup-0wg`), this both releases the Stop gate while you wait and re-invokes you when the timer fires.
+2. **On re-invocation, classify the run mechanically — do NOT do manual `ps`/file-activity forensics:**
+   ```bash
+   python3 ~/.claude/harness/bin/workflow_status.py --run <runId>
+   ```
+   Exit 0 = `completed` (collect the result). Non-zero = actionable: `running` (re-arm the wakeup and wait longer), `no_signal` (silently died — resume), `ended_incomplete` (errored — inspect).
+3. **Resume a dead run** with `Workflow({scriptPath, resumeFromRunId: "<runId>"})` — completed agents return from cache; only the killed/edited call onward re-runs. If a run dies repeatedly at the same boundary, decompose the script into smaller phases (each phase a separate background run) so no single run approaches the timeout.
+
+The residual platform fix (the runtime emitting its own death signal / raising the timeout) is tracked outside this repo; the harness-side mitigation above turns silent stranding into a scheduled, mechanical re-check.
+
 ## Rule: outcome-bias
 
 If you are not done and not scheduled to return, you are not stopping. Action without outcomes (more tool calls, more subagent dispatches, more bead-claims) does not substitute for proof of completion or proof of resumption. See `feedback/outcome-bias-over-action-bias` memory for the underlying principle.
