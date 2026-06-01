@@ -67,21 +67,13 @@ The user must respond to at least one specific point from the probe, even if the
 
 When proposing the 2-3 approaches (the propose-approaches step), use a different lens for each approach. If generating more than 3 approaches or doing extended ideation, rotate lenses every ~10 ideas. LLMs tend to generate ideas that are semantically similar — rotating lenses forces divergent thinking.
 
-**Lenses (rotate through these in order):**
+**The lenses (and structured methods) live in the shared method block:
+[`references/methods.md`](references/methods.md)** — Part A is the 9 rotating
+lenses, Part B the structured methods. This is the single source the `mol-feature`
+brainstorm step also references, so the method vocabulary does not drift between
+the conversational skill and the molecule's team dispatch.
 
-1. **User perspective** — "What does the user actually experience?"
-2. **Technical constraint** — "What does the technology make easy or hard?"
-3. **First principles** — "What is the irreducible core need? What would we build with 1/10th the budget?"
-4. **Business impact** — "What moves the needle on the actual goal?"
-5. **Failure mode** — "How does this break? What goes wrong?"
-6. **Inversion** — "What if we inverted the main constraint? What if the opposite were true?"
-7. **Competitor approach** — "How would [adjacent tool/product] solve this?"
-8. **Simplification** — "What if we removed half of this?"
-9. **Adjacent domain analogy** — "What problem in [other domain] is structurally similar?"
-
-**Announce each rotation explicitly:** "Switching lens to [X]" — so the user can see the shift and engage with the new perspective.
-
-After cycling through all seven, start over. The point is never to stay in one frame long enough for clustering to take hold.
+**Announce each rotation explicitly:** "Switching lens to [X]" — so the user can see the shift and engage with the new perspective. After cycling through all nine, start over; never stay in one frame long enough for clustering to take hold.
 
 ---
 
