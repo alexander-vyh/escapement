@@ -351,6 +351,15 @@
             "command": "python3 ~/.claude/hooks/test_reminder.py"
           }
         ]
+      },
+      {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/harness/bin/schedule_wakeup_bridge.py"
+          }
+        ]
       }
     ],
     "Stop": [
