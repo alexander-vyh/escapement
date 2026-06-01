@@ -85,7 +85,9 @@ cd ~/GitHub/claude-workflow-setup
 ./INSTALL.sh
 ```
 
-`INSTALL.sh` creates **symlinks** from `~/.claude/` and `~/.beads/` into this repo — so `git pull` in this repo updates your live config. Existing files are moved to `<file>.backup-<timestamp>` before being replaced. Nothing is silently overwritten.
+`INSTALL.sh` creates **symlinks** from `~/.claude/` and `~/.beads/` into a **pinned checkout** of this repo (`~/.claude/.cws-pinned`, tracking `main`) — *not* your live working tree. This is deliberate: `~/.claude` is machine-wide, so if it symlinked your working tree, a branch switch or mid-edit here could break hooks in **every** repo at once. With the pinned checkout, your day-to-day git work in this repo never disturbs your live config. Existing files are moved to `<file>.backup-<timestamp>` before being replaced — nothing is silently overwritten.
+
+Because the deploy is pinned, edits go live in two steps: land them on `main`, then run `./INSTALL.sh --update` (fast-forwards the pinned checkout). Prefer instant edits-from-working-tree (accepting the branch-fragility)? Install with `./INSTALL.sh --dev`.
 
 ### Settings merge (you do this by hand)
 
