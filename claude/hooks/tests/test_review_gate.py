@@ -101,9 +101,13 @@ class TestIsReviewAgentSubagentType:
             "prompt": "Examine PR #123 for defects.",
         })
 
-    def test_superpowers_code_reviewer_subagent_type_is_review(self):
+    def test_superpowers_code_reviewer_subagent_type_no_longer_allowlisted(self):
+        # superpowers:code-reviewer was removed upstream (v5.1.0) and de-listed in
+        # the superpowers disconnect (epic e3o). A blinded prompt (no review words)
+        # with that subagent_type must NOT satisfy the gate — regression guard that
+        # the entry stays gone.
         from review_gate import _is_review_agent
-        assert _is_review_agent({
+        assert not _is_review_agent({
             "name": "checker",
             "subagent_type": "superpowers:code-reviewer",
             "description": "Inspect the implementation",
