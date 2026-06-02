@@ -525,6 +525,11 @@ _NEGATION_CUES = re.compile(
 # unconditional assertion. So a negation cue only disavows the matched phrase
 # when NO clause break sits between the cue and the match.
 _CLAUSE_BREAK = re.compile(r"[,;:—–]|--")
+# For the detector-naming meta-guard (below): clause breaks AND sentence
+# boundaries (. ! ?). A strong meta-cue in an EARLIER clause or sentence must
+# not launder a shirk asserted later ("the hook is fine. This failure is
+# unrelated." still fires) — never-suppress.
+_META_SCOPE_BREAK = re.compile(r"[,;:—–.!?]|--")
 
 # Certainty idioms opened by "without". "Without a doubt …" / "Without
 # question …" are the INVERSE of disavowal — they intensify the assertion that
@@ -547,6 +552,20 @@ _META_CUES = re.compile(
     r"search(?:ing)?\s+for|watch(?:ing)?\s+for|detect(?:ing|s)?|"
     r"phrases?\s+like|patterns?\s+like|signs?\s+(?:of|it)|"
     r"language\s+(?:such\s+as|like)|such\s+as\b)",
+    re.IGNORECASE,
+)
+
+# Strong meta-cues NAME THE DETECTOR ITSELF (not the dismissive category words).
+# When the agent is talking ABOUT this gate — "validate_no_shirking fired on my
+# explanation of why a CI failure looked unrelated" — the match is meta-discussion,
+# not shirking, even when UNQUOTED. An agent actually shirking does not say
+# "the shirking hook fires on 'unrelated'", so detector-naming cues are safe to
+# guard unquoted. Category words ("pre-existing", "unrelated") are NEVER cues here
+# (that would launder a real deflection — never-suppress). Bead 858.5 / design Step 3.
+_STRONG_META_CUES = re.compile(
+    r"\b(?:shirk(?:ing)?|false[\s-]?positive|validate_no_shirking|the\s+hook|"
+    r"this\s+(?:gate|check|hook)\s+(?:fire|match|flag|trigger|catch)\w*|"
+    r"keyword\s+match|meta[\s-]?discussion)\b",
     re.IGNORECASE,
 )
 
@@ -604,6 +623,16 @@ def _is_guarded(stripped: str, match_start: int) -> bool:
     if _negation_guards(window):
         return True
     if _inside_quotes(stripped, match_start) and _META_CUES.search(stripped[:match_start]):
+        return True
+    # Detector-naming meta-discussion guards even UNQUOTED — but only when the cue
+    # and the match share a sentence-clause: a clause OR sentence break between
+    # them un-guards an asserted shirk ("the hook flags X; anyway this is a
+    # pre-existing failure" still fires). Whole-prefix search (NOT GUARD_WINDOW):
+    # in a legit description the detector name can sit far from the category phrase.
+    strong = None
+    for m in _STRONG_META_CUES.finditer(stripped[:match_start]):
+        strong = m
+    if strong is not None and _META_SCOPE_BREAK.search(stripped[strong.end():match_start]) is None:
         return True
     return False
 
