@@ -111,6 +111,20 @@ def test_legit_exits_preserved() -> None:
     )
 
 
+def test_tasks_remain_names_sanctioned_pacing_pause() -> None:
+    """858.6: the queue-block message must name the BOTH-conditions pacing pause
+    (file remaining beads AND ScheduleWakeup), not just 'keep working'."""
+    low = TASKS_REMAIN.lower()
+    assert "pause" in low, "the pacing-pause path must be named for the agent to take it"
+    assert "schedulewakeup" in low.replace(" ", ""), "the pause must route through ScheduleWakeup"
+    assert "file" in low and "bead" in low, (
+        "the pause must require FILING the remaining work as beads (durable), not wakeup-alone"
+    )
+    assert "evaporate" in low or "pause-and-evaporate" in low.replace(" ", ""), (
+        "the message must warn that ScheduleWakeup-without-filing is pause-and-evaporate"
+    )
+
+
 if __name__ == "__main__":
     import pytest
 
