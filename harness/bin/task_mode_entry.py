@@ -51,23 +51,53 @@ def _extract_task_id(command: str) -> Optional[str]:
     return None
 
 
-def _lookup_parent_id(task_id: str) -> Optional[str]:
-    """Run bd show <id> --json and extract the parent_id field."""
-    try:
-        r = subprocess.run(
-            ["bd", "show", task_id, "--json"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if r.returncode != 0:
-            return None
-        data = json.loads(r.stdout)
-        if isinstance(data, list) and data:
-            data = data[0]
-        if isinstance(data, dict):
-            return data.get("parent_id") or data.get("parent") or None
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, json.JSONDecodeError):
-        pass
-    return None
+_MAX_PARENT_HOPS = 20  # cycle / runaway-chain backstop so the hook never hangs
+
+
+def _lookup_parent_id(task_id: str, run_show=None) -> Optional[str]:
+    """Walk the parent chain to the molecule ROOT (bead 858.3, closes FN-1).
+
+    Returns the TOPMOST ancestor id (the bead with no parent), or None when
+    task_id has no parent. Reading only ONE level scoped `bd ready --parent` to
+    the immediate sub-epic and missed ready siblings under sibling sub-epics —
+    a premature stop. `bd ready --parent <root>` is transitive, so the root
+    covers the whole molecule.
+
+    `run_show(id) -> dict|None` is injectable for tests; production runs
+    `bd show <id> --json`. Capped at _MAX_PARENT_HOPS with a seen-set so a
+    parent cycle terminates instead of hanging the Stop hook.
+    """
+    if run_show is None:
+        def run_show(tid: str):
+            try:
+                r = subprocess.run(
+                    ["bd", "show", tid, "--json"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if r.returncode != 0:
+                    return None
+                data = json.loads(r.stdout)
+                if isinstance(data, list) and data:
+                    data = data[0]
+                return data if isinstance(data, dict) else None
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
+                    json.JSONDecodeError):
+                return None
+
+    current = task_id
+    root_parent: Optional[str] = None
+    seen: set = {task_id}
+    for _ in range(_MAX_PARENT_HOPS):
+        data = run_show(current)
+        if not isinstance(data, dict):
+            break
+        pid = data.get("parent_id") or data.get("parent")
+        if not pid or pid in seen:
+            break
+        seen.add(pid)
+        root_parent = pid
+        current = pid
+    return root_parent
 
 
 def main() -> int:
