@@ -286,6 +286,43 @@ def _check_bd_queue_implicit(
     return ("allow", "implicit_queue_scoped_drained")
 
 
+def _record_gate_signal(decision: str, reason: str, session_id: str, notes: str = "") -> None:
+    """Bridge a Stop-gate decision to `.beads/.gate-signal.jsonl` (corpus-bridge).
+
+    harness/bin is state-only and cannot import claude/hooks/_gate_signal, so we
+    mirror its line shape + .beads resolution (BEADS_DIR, else walk up from cwd).
+    REQUIRED because the half-life toolchain and the running launchd monitor read
+    ONLY `.gate-signal.jsonl`; a scope decision logged only to incidents.jsonl is
+    invisible to half-life review (the corpus-split gap the 858 panel flagged).
+    Best-effort — never fails the hook.
+    """
+    try:
+        beads = None
+        env = os.environ.get("BEADS_DIR")
+        if env and pathlib.Path(env).is_dir():
+            beads = pathlib.Path(env)
+        else:
+            cwd = pathlib.Path(os.getcwd()).resolve()
+            for parent in [cwd, *cwd.parents]:
+                if (parent / ".beads").is_dir():
+                    beads = parent / ".beads"
+                    break
+        if beads is None:
+            return
+        line = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "gate": "continuation-harness",
+            "decision": decision,
+            "reason": reason,
+            "session_id": session_id,
+            "extras": {"notes": notes} if notes else {},
+        }
+        with (beads / ".gate-signal.jsonl").open("a") as f:
+            f.write(json.dumps(line) + "\n")
+    except OSError:
+        pass
+
+
 def _log_incident(record: dict) -> None:
     try:
         INCIDENTS_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -293,6 +330,13 @@ def _log_incident(record: dict) -> None:
             f.write(json.dumps(record) + "\n")
     except OSError:
         pass  # Don't fail the hook on logging error.
+    # Corpus-bridge: half-life review reads .gate-signal.jsonl, not incidents.jsonl.
+    _record_gate_signal(
+        record.get("decision", ""),
+        record.get("reason", ""),
+        record.get("session_id", ""),
+        record.get("notes", ""),
+    )
 
 
 def main() -> int:
