@@ -121,12 +121,23 @@ def _read_last_user_message(transcript_path: str) -> Optional[str]:
     return last_user_text
 
 
-def _check_task_mode_queue(session_mode: dict) -> Tuple[str, str]:
+def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
     """Run bd ready / bd list in repo_cwd to determine if queue-drain allows stop.
 
     Returns (decision, reason) where decision is "allow" or "block".
-    Falls through to allow on any bd execution failure so the gate degrades
-    gracefully rather than permanently trapping the agent.
+
+    Capability probe, NOT a directory check. A git worktree has no literal
+    `.beads/` directory but `bd` still resolves the shared Dolt DB via the
+    redirect file / BEADS_DIR env (see beads-worktree-integration rule). The
+    prior implementation short-circuited to ("allow", "task_mode_no_beads_in_cwd")
+    whenever `repo_cwd/.beads` was absent — which silently ungated EVERY worktree
+    session (2026-06-01 incident: session 75be09cc allowed Stop 8x while a ready
+    sibling task remained). We now probe `bd` directly and degrade to allow ONLY
+    when bd cannot resolve a queue at all, while still keeping a real beads repo
+    (one whose `.beads/` is present) blocked when bd merely hiccups.
+
+    `run_bd` is injectable for testing; in production it defaults to a
+    subprocess runner scoped to repo_cwd and the molecule/task parent.
     """
     repo_cwd = session_mode.get("repo_cwd", "")
     # Scope priority: parent_id (molecule root) > task_id (standalone task) > unscoped.
@@ -140,33 +151,42 @@ def _check_task_mode_queue(session_mode: dict) -> Tuple[str, str]:
     if not repo_cwd:
         return ("block", "task_mode_no_cwd")
 
-    repo_path = pathlib.Path(repo_cwd)
-    if not (repo_path / ".beads").exists():
-        # Stale cwd or beads not present: degrade gracefully, don't gate.
-        return ("allow", "task_mode_no_beads_in_cwd")
+    # A real beads repo announces itself with a `.beads/` dir; a worktree does
+    # not (it uses a redirect / BEADS_DIR). We use this ONLY to decide how to
+    # degrade when bd is unavailable — never to skip the queue check.
+    has_beads_dir = (pathlib.Path(repo_cwd) / ".beads").exists()
 
-    import json as _json
+    if run_bd is None:
+        import json as _json
 
-    def run_bd(args: list[str]) -> Optional[list]:
-        """Run bd with --json output; returns parsed list or None on failure."""
-        cmd = ["bd"] + args + ["--json"] + (["--parent", parent_id] if parent_id else [])
-        try:
-            r = subprocess.run(cmd, cwd=repo_cwd, capture_output=True, text=True, timeout=15)
-            return _json.loads(r.stdout)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
-                _json.JSONDecodeError, ValueError):
-            return None
+        def run_bd(args: list[str]) -> Optional[list]:
+            """Run bd with --json output; returns parsed list or None on failure."""
+            cmd = ["bd"] + args + ["--json"] + (["--parent", parent_id] if parent_id else [])
+            try:
+                r = subprocess.run(cmd, cwd=repo_cwd, capture_output=True, text=True, timeout=15)
+                return _json.loads(r.stdout)
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
+                    _json.JSONDecodeError, ValueError):
+                return None
 
     ready = run_bd(["ready"])
     if ready is None:
-        return ("block", "task_mode_bd_ready_failed")
+        # bd produced no parseable queue. Inside a real beads repo this is a
+        # transient error — stay blocked so the agent can't sneak out. Outside
+        # one (no .beads/ dir AND bd can't resolve a DB), it's genuinely not a
+        # beads context — degrade gracefully so the gate never permanently traps.
+        if has_beads_dir:
+            return ("block", "task_mode_bd_ready_failed")
+        return ("allow", "task_mode_bd_unavailable")
     if len(ready) > 0:
         return ("block", "tasks_remain_in_queue")
 
     # bd ready empty: distinguish "all done" from "all remaining tasks blocked".
     open_items = run_bd(["list"])
     if open_items is None:
-        return ("block", "task_mode_bd_list_failed")
+        if has_beads_dir:
+            return ("block", "task_mode_bd_list_failed")
+        return ("allow", "task_mode_bd_unavailable")
     if len(open_items) > 0:
         return ("block", "all_remaining_tasks_blocked")
 
