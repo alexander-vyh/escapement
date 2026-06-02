@@ -28,6 +28,7 @@ if str(_hooks_dir) not in sys.path:
 
 from validate_no_shirking import (  # noqa: E402
     check_verification_evidence,
+    find_shirking_match,
     find_shirking_phrase,
     read_recent_agent_text,
 )
