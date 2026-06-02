@@ -2,9 +2,18 @@
 # INSTALL.sh — Symlinks claude-workflow-setup into ~/.claude/ and ~/.beads/
 #
 # Usage:
-#   ./INSTALL.sh             # install (backup existing, symlink new)
+#   ./INSTALL.sh              # install: symlink ~/.claude into a PINNED checkout (default)
+#   ./INSTALL.sh --dev        # install: symlink into THIS live working tree (instant edits)
+#   ./INSTALL.sh --update     # refresh the pinned checkout to latest (deploy new main)
 #   ./INSTALL.sh --uninstall  # remove symlinks (backups are left alone)
 #   ./INSTALL.sh --dry-run    # show what would happen, change nothing
+#
+# Default deploy model (bead ft1): ~/.claude symlinks resolve into a pinned clone
+# (CWS_PIN_DIR, default ~/.claude/.cws-pinned) of this repo at CWS_PIN_REF (default
+# main) — NOT the live working tree. This way a branch switch or mid-edit in this
+# repo can't break hooks machine-wide across all your repos. The price: edits go
+# live only after they reach main AND you run `./INSTALL.sh --update`. Use --dev to
+# opt back into instant-edit-from-working-tree (the old, fragile-but-convenient model).
 #
 # Fail-fast. Backup-then-symlink — nothing is silently clobbered.
 
@@ -15,20 +24,31 @@ CLAUDE_DIR="$HOME/.claude"
 BEADS_DIR="$HOME/.beads"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 
+# Pinned-checkout deploy (bead ft1). Overridable via env for testing/relocation.
+CWS_PIN_DIR="${CWS_PIN_DIR:-$CLAUDE_DIR/.cws-pinned}"
+CWS_PIN_REF="${CWS_PIN_REF:-main}"
+CWS_PIN_REMOTE="${CWS_PIN_REMOTE:-$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || echo "$REPO_DIR")}"
+
 # --- Arg parsing ---
 MODE="install"
 DRY_RUN=false
+DEV_MODE=false
 for arg in "$@"; do
   case "$arg" in
     --uninstall) MODE="uninstall" ;;
+    --update)    MODE="update" ;;
+    --dev)       DEV_MODE=true ;;
     --dry-run)   DRY_RUN=true ;;
     --help|-h)
-      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "Unknown arg: $arg" >&2; exit 1 ;;
   esac
 done
+
+# Where symlinks point: the pinned checkout (default) or the live working tree (--dev).
+if [[ "$DEV_MODE" == true ]]; then DEPLOY_SRC="$REPO_DIR"; else DEPLOY_SRC="$CWS_PIN_DIR"; fi
 
 run() {
   if [[ "$DRY_RUN" == true ]]; then
@@ -43,6 +63,7 @@ echo "==> claude-workflow-setup installer"
 echo "    repo:   $REPO_DIR"
 echo "    claude: $CLAUDE_DIR"
 echo "    beads:  $BEADS_DIR"
+echo "    deploy: $([ "$DEV_MODE" == true ] && echo "live working tree (--dev)" || echo "pinned checkout ($CWS_PIN_DIR @ $CWS_PIN_REF)")"
 echo "    mode:   $MODE$([ "$DRY_RUN" == true ] && echo ' (dry-run)')"
 echo
 
@@ -159,9 +180,12 @@ install_plan() {
   for entry in "${PLAN[@]}"; do
     local src_rel="${entry%|*}"
     local dest="${entry#*|}"
-    local src_abs="$REPO_DIR/$src_rel"
+    local src_abs="$DEPLOY_SRC/$src_rel"
 
-    if [[ ! -e "$src_abs" ]]; then
+    # Existence is checked against the repo (source of truth); the symlink itself
+    # points at DEPLOY_SRC (pinned checkout by default). Decoupling lets --dry-run
+    # report a real plan even before the pinned checkout is created.
+    if [[ ! -e "$REPO_DIR/$src_rel" ]]; then
       echo "SKIP (source missing): $src_rel"
       continue
     fi
@@ -227,8 +251,34 @@ PY
   fi
 }
 
+# Create or refresh the pinned checkout that ~/.claude symlinks resolve into.
+# Idempotent: clone if absent, else fast-forward to CWS_PIN_REF. Never rewrites
+# local edits (ff-only) — the pinned checkout is deploy state, not a dev tree.
+ensure_pinned_checkout() {
+  if [[ -d "$CWS_PIN_DIR/.git" ]]; then
+    echo "==> refreshing pinned checkout: $CWS_PIN_DIR -> $CWS_PIN_REF"
+    run "git -C '$CWS_PIN_DIR' fetch --quiet '$CWS_PIN_REMOTE' '$CWS_PIN_REF'"
+    run "git -C '$CWS_PIN_DIR' checkout --quiet '$CWS_PIN_REF'"
+    run "git -C '$CWS_PIN_DIR' merge --ff-only FETCH_HEAD"
+  else
+    echo "==> creating pinned checkout: clone $CWS_PIN_REMOTE -> $CWS_PIN_DIR"
+    run "git clone --quiet '$CWS_PIN_REMOTE' '$CWS_PIN_DIR'"
+    run "git -C '$CWS_PIN_DIR' checkout --quiet '$CWS_PIN_REF'"
+  fi
+}
+
 # --- Execute ---
-if [[ "$MODE" == "install" ]]; then
+if [[ "$MODE" == "update" ]]; then
+  # Refresh the pinned checkout only; existing symlinks already point into it.
+  ensure_pinned_checkout
+  echo
+  echo "==> pinned checkout now at $CWS_PIN_REF; ~/.claude reflects the update."
+elif [[ "$MODE" == "install" ]]; then
+  if [[ "$DEV_MODE" == true ]]; then
+    echo "==> --dev: symlinking the LIVE working tree (instant edits; not branch-safe)"
+  else
+    ensure_pinned_checkout
+  fi
   install_plan
   echo
   echo "==> next steps"
@@ -236,6 +286,7 @@ if [[ "$MODE" == "install" ]]; then
   echo "       your ~/.claude/settings.json (do NOT overwrite — merge)."
   echo "    2. Read claude/rules/*.md and edit to match your philosophy."
   echo "    3. Open Claude Code in a git repo under ~/GitHub/ to trigger bootstrap."
+  [[ "$DEV_MODE" == true ]] || echo "    NOTE: harness/hook edits go live after they reach main + './INSTALL.sh --update'."
   echo
   echo "==> verifying continuation-harness Stop gate wiring"
   verify_stop_gate_wired
