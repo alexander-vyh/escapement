@@ -44,28 +44,32 @@ HARNESS_ROOT = harness_home()
 INCIDENTS_LOG = HARNESS_ROOT / "incidents.jsonl"
 
 RESUMPTION_PROMPT = (
-    "continuation-harness: {reason}. "
-    "To allow Stop next turn, do one of: "
+    "continuation-harness: {reason}. You are NOT done and you are NOT stopping. "
+    "Do NOT end your turn to summarize what's left or to ask the user what to do next — "
+    "that wind-down is the exact failure this gate exists to prevent. Continue now with the "
+    "next concrete in-scope action. The only ways to actually finish this turn: "
     "(1) run `~/.claude/harness/bin/verify` and have it exit 0 "
     "(declare a contract via init_contract.py first if you haven't); "
-    "(2) call the ScheduleWakeup tool to register a future check-in; "
-    "(3) ask the user to release with 'stop' or 'end here'. "
-    "Per the outcome-bias rule, don't keep doing things — finish the outcome or schedule resumption."
+    "(2) call the ScheduleWakeup tool because you are blocked on an external event. "
+    "The user can release you by saying 'stop' — but do not solicit that by halting."
 )
 
 # Task-mode-specific display text, keyed by reason code.
 # Reason codes are short log-friendly strings; display text carries the guidance.
 _TASK_MODE_DISPLAY: dict[str, str] = {
     "tasks_remain_in_queue": (
-        "continuation-harness [task-mode]: tasks_remain_in_queue. "
-        "bd ready has items — keep working the queue. "
-        "Stop is allowed when bd ready is empty, the user releases, or a wakeup is registered."
+        "continuation-harness [task-mode]: tasks_remain_in_queue. In-scope work is ready "
+        "under this session's goal — keep working it. Do NOT stop to summarize or to ask the "
+        "user what to do next; run the next ready task to completion. Stop is allowed only "
+        "when the scoped queue is drained, you have called ScheduleWakeup for an external "
+        "blocker, or the user has already said 'stop'."
     ),
     "all_remaining_tasks_blocked": (
-        "continuation-harness [task-mode]: all_remaining_tasks_blocked. "
-        "bd ready is empty but open tasks remain blocked on dependencies. "
-        "To stop: (1) call the ScheduleWakeup tool for when the blockers clear; "
-        "(2) ask the user to release with 'stop' or 'end here'."
+        "continuation-harness [task-mode]: all_remaining_tasks_blocked. bd ready is empty but "
+        "open tasks remain blocked on dependencies. Do NOT stop to ask the user what to do next — "
+        "call the ScheduleWakeup tool for when the blockers clear, which both releases this "
+        "turn and brings you back to continue. Stop without that only if the user has already "
+        "said 'stop'."
     ),
 }
 
@@ -194,10 +198,12 @@ def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
 
 
 _IMPLICIT_QUEUE_DISPLAY = (
-    "continuation-harness: verification passed for declared contract, but bd has "
-    "unfinished work in this repo (in-progress or ready tasks exist). "
-    "Close active tasks, drain the queue, or ask the user to release with 'stop' or 'end here'. "
-    "Hint: bd list --status=in_progress to see what is still claimed."
+    "continuation-harness: your contract verify passed, but bd still has unfinished work in "
+    "this repo. If any of it is in this session's scope, keep going — do NOT stop to summarize "
+    "or to ask the user what to do next. If the only open work is unrelated backlog from other "
+    "sessions, do not drain it (that is scope creep): instead close out your own claimed tasks, "
+    "or call ScheduleWakeup if you are waiting on something external. "
+    "Hint: `bd list --status=in_progress` shows what is still claimed."
 )
 
 
