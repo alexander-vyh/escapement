@@ -34,8 +34,11 @@ from would_block_stop import (  # noqa: E402
     load_thread_state,
     thread_dir_for_session,
     harness_home,
+    resolve_watermark,
     _load_json,
+    _parse_iso,
 )
+import datetime as _dt2
 
 # State root is the standard per-user location (env-overridable), NOT relative
 # to where this code is installed — so dev-copy and installed-copy share state
@@ -207,51 +210,80 @@ _IMPLICIT_QUEUE_DISPLAY = (
 )
 
 
-def _check_bd_queue_implicit(cwd: str) -> Tuple[str, str]:
-    """Check bd queue in cwd without requiring session_mode.json.
+def _created_at_in_scope(item: dict, watermark: "_dt2.datetime") -> bool:
+    """True if `item` is session-fresh (created_at >= watermark).
 
-    Covers the case where task-mode was not entered via the PreToolUse hook
-    (e.g., bd claims made inside subagents) but bd work is still in-flight.
+    FAIL-SAFE: a missing/unparseable created_at returns True (treat as in-scope)
+    so an item of unknown age biases toward BLOCK, never toward a premature stop.
+    """
+    if not isinstance(item, dict):
+        return True
+    ca = _parse_iso(item.get("created_at", ""))
+    if ca is None:
+        return True
+    if ca.tzinfo is None:
+        ca = ca.replace(tzinfo=_dt2.timezone.utc)
+    wm = watermark if watermark.tzinfo else watermark.replace(tzinfo=_dt2.timezone.utc)
+    return ca >= wm
 
-    Returns (decision, reason) — same contract as _check_task_mode_queue.
-    Degrades gracefully to allow on any bd failure so the gate never permanently traps.
+
+def _check_bd_queue_implicit(
+    cwd: str,
+    thread_dir=None,
+    run_bd=None,
+    watermark=None,
+) -> Tuple[str, str]:
+    """Watermark-scoped implicit Stop-path (beads 858.2 + 858.4).
+
+    Blocks only on SESSION-FRESH bd work (created_at >= watermark); older backlog
+    is treated as not-this-session's and does NOT block (fixes the a2n over-block).
+    The query set is {in_progress ∪ ready ∪ open} — dropping `open` re-opens FN-4
+    (a session-fresh bead blocked on unmet deps is in neither ready nor in_progress).
+
+    Capability probe (858.4, fixes E-1): no `.beads/`-directory check — a worktree
+    has no dir but bd resolves via redirect/BEADS_DIR; degrade to advisory-allow only
+    when bd genuinely cannot resolve a queue. `watermark` absent ⇒ advisory-allow
+    (never a hard block on unscoped backlog, never now()). `run_bd`/`watermark`
+    injectable for tests.
     """
     if not cwd:
         return ("allow", "implicit_queue_no_cwd")
 
-    repo_path = pathlib.Path(cwd)
-    if not (repo_path / ".beads").exists():
-        return ("allow", "implicit_queue_no_beads")
+    if watermark is None and thread_dir is not None:
+        watermark = resolve_watermark(pathlib.Path(thread_dir))
 
-    import json as _json
+    if run_bd is None:
+        import json as _json
 
-    def run_bd(args: list[str]) -> Optional[list]:
-        try:
-            r = subprocess.run(
-                ["bd"] + args + ["--json"],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            return _json.loads(r.stdout)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
-                _json.JSONDecodeError, ValueError):
-            return None
+        def run_bd(args: list[str]) -> Optional[list]:
+            try:
+                r = subprocess.run(
+                    ["bd"] + args + ["--json"],
+                    cwd=cwd, capture_output=True, text=True, timeout=15,
+                )
+                return _json.loads(r.stdout)
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
+                    _json.JSONDecodeError, ValueError):
+                return None
 
+    # No watermark (session predating this feature) ⇒ cannot scope ⇒ advisory allow.
+    if watermark is None:
+        return ("allow", "scope_no_watermark")
+
+    # {in_progress ∪ ready ∪ open}, capability-probe: degrade on bd FAILURE only.
     in_progress = run_bd(["list", "--status=in_progress"])
-    if in_progress is None:
-        return ("allow", "implicit_queue_bd_failed")
-    if len(in_progress) > 0:
-        return ("block", "implicit_queue_in_progress")
-
     ready = run_bd(["ready"])
-    if ready is None:
-        return ("allow", "implicit_queue_bd_failed")
-    if len(ready) > 0:
-        return ("block", "implicit_queue_ready_items")
+    open_items = run_bd(["list", "--status=open"])
+    if in_progress is None or ready is None or open_items is None:
+        return ("allow", "scope_bd_failed")
 
-    return ("allow", "implicit_queue_drained")
+    seen: dict = {}
+    for it in list(in_progress) + list(ready) + list(open_items):
+        if isinstance(it, dict):
+            seen[it.get("id") or id(it)] = it
+    if any(_created_at_in_scope(it, watermark) for it in seen.values()):
+        return ("block", "implicit_queue_scoped")
+    return ("allow", "implicit_queue_scoped_drained")
 
 
 def _log_incident(record: dict) -> None:
@@ -336,7 +368,7 @@ def main() -> int:
             cwd = os.getcwd()
         except OSError:
             cwd = ""
-        bd_decision, bd_reason = _check_bd_queue_implicit(cwd)
+        bd_decision, bd_reason = _check_bd_queue_implicit(cwd, thread_dir=thread_dir)
         if bd_decision == "block":
             decision, reason = bd_decision, bd_reason
 
