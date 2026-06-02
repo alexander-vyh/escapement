@@ -196,6 +196,24 @@ _CODE_MOD_TOOLS = frozenset({
     "mcp__serena__rename_symbol",
 })
 
+# Only Edit/Write target arbitrary file paths; NotebookEdit (.ipynb) and the
+# Serena symbol tools operate on code by construction, so they are always
+# code-mods. For Edit/Write we inspect the path: prose/docs edits are NOT code
+# modifications and must not demand a verification run (2026-06-01 false-positive:
+# the gate fired on a markdown-only memory edit). This mirrors the prose/docs
+# exemption in claude/rules/tdd-enforcement.md. Behavioral config (CI YAML, IaC,
+# manifests) is deliberately NOT exempt there, so it stays a code-mod here too —
+# the exemption is prose/docs ONLY, by file extension.
+_PATH_CHECKED_TOOLS = frozenset({"Edit", "Write"})
+_DOCS_EXTENSIONS = (".md", ".markdown", ".txt", ".rst", ".adoc")
+
+
+def _is_docs_path(file_path: str) -> bool:
+    """True iff file_path is a prose/docs file (exempt from the verification gate)."""
+    if not isinstance(file_path, str) or not file_path:
+        return False
+    return file_path.lower().endswith(_DOCS_EXTENSIONS)
+
 _VERIFICATION_COMMANDS: list[str] = [
     r"\bpytest\b",
     r"\brspec\b",
@@ -304,6 +322,13 @@ def check_verification_evidence(transcript_path: str) -> str | None:
                 tool_name = blk.get("name", "")
                 tool_input = blk.get("input", {})
                 if tool_name in _CODE_MOD_TOOLS:
+                    # Prose/docs edits via Edit/Write are not code modifications.
+                    if (
+                        tool_name in _PATH_CHECKED_TOOLS
+                        and isinstance(tool_input, dict)
+                        and _is_docs_path(tool_input.get("file_path", ""))
+                    ):
+                        continue
                     last_code_mod_line = line_num
                 elif tool_name == "Bash" and isinstance(tool_input, dict):
                     cmd = tool_input.get("command", "")

@@ -771,6 +771,86 @@ class TestVerificationEvidence:
         finally:
             Path(path).unlink(missing_ok=True)
 
+    # --- docs/prose edits are NOT code modifications (false-positive fix) -----
+    # Source: 2026-06-01 — validate_no_shirking fired "you modified code but
+    # didn't verify" after a markdown-only memory edit. Mirrors the docs/prose
+    # exemption in claude/rules/tdd-enforcement.md. Behavioral config stays
+    # NON-exempt per that same rule.
+
+    def test_docs_only_md_edit_allows(self) -> None:
+        """NEGATIVE CONTROL (the bug): a markdown-only edit must not demand verification."""
+        path = _make_tool_transcript([
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "1", "name": "Edit", "input": {
+                    "file_path": "/Users/x/.claude/projects/p/memory/note.md",
+                    "old_string": "a", "new_string": "b"
+                }}
+            ]},
+            {"role": "assistant", "content": [
+                {"type": "text", "text": "Updated the memory note."}
+            ]},
+        ])
+        try:
+            assert check_verification_evidence(path) is None, (
+                "a markdown-only edit must not be treated as a code modification"
+            )
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_write_prose_files_allow(self) -> None:
+        """Write to .md / .txt / .rst docs → not a code mod."""
+        for fp in ("README.md", "notes.txt", "guide.rst"):
+            path = _make_tool_transcript([
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "1", "name": "Write", "input": {
+                        "file_path": fp, "content": "prose"
+                    }}
+                ]},
+            ])
+            try:
+                assert check_verification_evidence(path) is None, (
+                    f"Write to prose file {fp} must not require verification"
+                )
+            finally:
+                Path(path).unlink(missing_ok=True)
+
+    def test_docs_edit_then_code_edit_still_blocks(self) -> None:
+        """POSITIVE CONTROL: a docs edit must not mask a later real code edit."""
+        path = _make_tool_transcript([
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "1", "name": "Edit", "input": {
+                    "file_path": "CHANGELOG.md", "old_string": "a", "new_string": "b"
+                }}
+            ]},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "2", "name": "Edit", "input": {
+                    "file_path": "app.py", "old_string": "x", "new_string": "y"
+                }}
+            ]},
+        ])
+        try:
+            assert check_verification_evidence(path) is not None, (
+                "a real .py edit after a docs edit must still demand verification"
+            )
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_behavioral_config_edit_still_blocks(self) -> None:
+        """POSITIVE CONTROL: .yml CI config is NOT exempt (tdd-enforcement.md)."""
+        path = _make_tool_transcript([
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "1", "name": "Edit", "input": {
+                    "file_path": ".github/workflows/ci.yml", "old_string": "a", "new_string": "b"
+                }}
+            ]},
+        ])
+        try:
+            assert check_verification_evidence(path) is not None, (
+                "behavioral config must still require verification — only prose/docs is exempt"
+            )
+        finally:
+            Path(path).unlink(missing_ok=True)
+
     def test_nonexistent_transcript_allows(self) -> None:
         assert check_verification_evidence("/tmp/nonexistent_xyzzy.jsonl") is None
 
