@@ -1372,3 +1372,49 @@ class TestMainBlockerBeadEscape:
             assert denied is False
         finally:
             Path(transcript).unlink(missing_ok=True)
+
+
+class TestMetaDiscussionGuard:
+    """858.5 / design Step 3 — UNQUOTED discussion of the DETECTOR ITSELF is guarded,
+    but a real deflection (even one that names the gate in an earlier clause/sentence)
+    still fires. The negative controls are the load-bearing never-suppress oracle.
+    """
+
+    # --- meta-FP: naming the detector, unquoted, same clause ⇒ ALLOWED ---
+    def test_detector_named_unquoted_allowed(self) -> None:
+        assert find_shirking_match(
+            "validate_no_shirking fired on my explanation of why a CI failure looked unrelated"
+        ) is None
+
+    def test_the_hook_fires_on_unrelated_allowed(self) -> None:
+        assert find_shirking_match(
+            "the hook fires on phrases about a CI failure being unrelated"
+        ) is None
+
+    def test_false_positive_keyword_match_allowed(self) -> None:
+        assert find_shirking_match(
+            "this looks like a false positive — the keyword match caught 'pre-existing failure'"
+        ) is None
+
+    # --- never-suppress negative controls: real deflection STILL fires ---
+    def test_real_preexisting_deflection_still_fires(self) -> None:
+        """NC-5: no detector-naming cue ⇒ genuine deflection is NOT laundered."""
+        assert find_shirking_match("This is a pre-existing failure, not from my change") is not None
+
+    def test_real_unrelated_deflection_still_fires(self) -> None:
+        assert find_shirking_match("All three jobs died OOM, unrelated to my fix") is not None
+
+    def test_mixed_meta_then_shirk_same_message_still_fires(self) -> None:
+        """NC-6: discusses the gate AND then shirks in a LATER clause ⇒ still fires."""
+        assert find_shirking_match(
+            "the hook flags category words; anyway this is a pre-existing failure, not mine"
+        ) is not None
+
+    def test_prior_sentence_cue_does_not_launder_later_shirk(self) -> None:
+        """A detector cue in an EARLIER sentence must not guard a later asserted shirk."""
+        assert find_shirking_match(
+            "the hook is fine. This is a pre-existing failure, not mine"
+        ) is not None
+        assert find_shirking_match(
+            "I discussed validate_no_shirking earlier. This OOM is unrelated to my change"
+        ) is not None
