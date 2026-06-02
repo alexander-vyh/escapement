@@ -87,6 +87,36 @@ def _load_json(path: pathlib.Path):
         return None
 
 
+def resolve_watermark(
+    thread_dir: pathlib.Path,
+    contract: Optional[dict] = None,
+) -> Optional[_dt.datetime]:
+    """Session-start watermark for scope filtering (bead 858.1), or None.
+
+    A DERIVED signal (gate-design Rule 3 / derive-not-assert) — never agent-asserted.
+    Priority:
+      1. contract.json#created_at  (system-stamped at init_contract; the lean common case)
+      2. {thread_dir}/scope_watermark.json#watermark  (SessionStart fallback, contract-less)
+      3. None  -> caller MUST degrade to advisory-allow, never a hard block on unscoped
+         backlog, and never substitute now() (a now-watermark filters out every real
+         session-fresh bead and re-creates the premature-stop bug).
+
+    A malformed/absent timestamp at one source falls through to the next.
+    """
+    if contract is None:
+        contract = _load_json(thread_dir / "contract.json")
+    if isinstance(contract, dict):
+        ts = _parse_iso(contract.get("created_at", ""))
+        if ts is not None:
+            return ts
+    watermark = _load_json(thread_dir / "scope_watermark.json")
+    if isinstance(watermark, dict):
+        ts = _parse_iso(watermark.get("watermark", ""))
+        if ts is not None:
+            return ts
+    return None
+
+
 def _verification_passed_this_turn(contract: Optional[dict]) -> bool:
     if not isinstance(contract, dict):
         return False
