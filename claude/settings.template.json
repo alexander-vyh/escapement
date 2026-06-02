@@ -27,6 +27,11 @@
             "type": "command",
             "command": "bash ~/.claude/hooks/serena_onboarding_check.sh",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/harness/bin/session_watermark.py",
+            "timeout": 5000
           }
         ]
       }
