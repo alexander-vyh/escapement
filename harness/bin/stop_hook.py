@@ -64,8 +64,11 @@ _TASK_MODE_DISPLAY: dict[str, str] = {
         "continuation-harness [task-mode]: tasks_remain_in_queue. In-scope work is ready "
         "under this session's goal — keep working it. Do NOT stop to summarize or to ask the "
         "user what to do next; run the next ready task to completion. Stop is allowed only "
-        "when the scoped queue is drained, you have called ScheduleWakeup for an external "
-        "blocker, or the user has already said 'stop'."
+        "when the scoped queue is drained, the user has already said 'stop', or you take the "
+        "sanctioned PAUSE: if you must pause for quality/pacing rather than finish now, file "
+        "the remaining in-scope work as beads (durable) AND call ScheduleWakeup — together "
+        "they record WHAT to resume and bring you back. ScheduleWakeup WITHOUT filing the "
+        "remaining work is pause-and-evaporate; that is the stall this gate exists to prevent."
     ),
     "all_remaining_tasks_blocked": (
         "continuation-harness [task-mode]: all_remaining_tasks_blocked. bd ready is empty but "
@@ -369,13 +372,16 @@ def main() -> int:
         override_decision, override_reason = would_block_stop(override_state)
         if override_decision == "allow":
             # user_released or wakeup_registered — universal overrides apply in task mode too.
+            # Tag a wakeup-allow as scope_wakeup_pause so half-life review can count
+            # pacing-pause fires vs genuine completion (858.6 / design Step 4 signal).
             _log_incident({
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "session_id": session_id,
                 "decision": override_decision,
                 "reason": override_reason,
                 "was_correct": None,
-                "notes": "task_mode_universal_override",
+                "notes": ("scope_wakeup_pause" if override_reason == "wakeup_registered"
+                          else "task_mode_universal_override"),
             })
             return 0
         decision, reason = _check_task_mode_queue(session_mode)
