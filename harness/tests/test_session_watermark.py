@@ -47,6 +47,18 @@ def test_resolve_watermark_reads_it_back(tmp_path) -> None:
     assert got == _dt.datetime.fromisoformat("2026-06-02T05:00:00+00:00")
 
 
+def test_main_falls_back_to_env_session_id(tmp_path, monkeypatch) -> None:
+    """E-3: if the SessionStart payload omits session_id, key off
+    CLAUDE_CODE_SESSION_ID so the watermark lands where the Stop hook reads."""
+    import io
+    monkeypatch.setenv("HARNESS_THREAD_DIR", str(tmp_path))  # force the thread dir
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-1")
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({})))  # payload WITHOUT session_id
+    session_watermark.main()
+    data = json.loads((tmp_path / "scope_watermark.json").read_text())
+    assert data["session_id"] == "env-sess-1", "must fall back to the env session id, not ''"
+
+
 if __name__ == "__main__":
     import pytest
 

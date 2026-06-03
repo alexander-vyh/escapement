@@ -18,6 +18,7 @@ Rule 3) — never agent free-text.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 import time
@@ -45,7 +46,13 @@ def main() -> int:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0
-    session_id = payload.get("session_id") or ""
+    # Key off the SAME session id the Stop hook + init_contract resolve, so the
+    # watermark lands in the thread dir the Stop hook reads. SessionStart payloads
+    # may omit session_id (the existing SessionStart hooks read only cwd), so fall
+    # back to CLAUDE_CODE_SESSION_ID — what init_contract keys on (E-3 robustness,
+    # flagged by the 858 panel's adversary + implementer). thread_dir_for_session
+    # also honors HARNESS_THREAD_DIR (rung 1) for subagents.
+    session_id = payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
     thread_dir = thread_dir_for_session(session_id, HARNESS_ROOT)
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     write_session_watermark(thread_dir, session_id, ts)
