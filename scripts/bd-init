@@ -68,4 +68,11 @@ else
   "$BD" init --stealth "${args[@]}"
 fi
 
+# Eliminate the stale-JSONL revert race: with interval 0, every `bd close`/write
+# flushes to issues.jsonl immediately, so a later `bd dolt push` re-imports the
+# CURRENT state instead of reverting recent closes. (Default 60s leaves a window
+# where close-then-push within 60s silently reverts the close.)
+"$BD" config set export.interval 0 >/dev/null 2>&1 || true
+echo "bd-init: export.interval=0 (closes flush immediately; no dolt-push revert race)"
+
 echo "bd-init: covered by the central off-machine backup on the next beads-backup-all.sh run"
