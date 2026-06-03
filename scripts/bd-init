@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# bd-init — ownership-aware wrapper around `bd init`.
+#
+# The reusable policy gate: when you start beads in a NEW or EXISTING repo,
+# this routes it automatically so you never hand-decide again.
+#
+#   • OWNED repo      → beads is committable in-place (you said you like this).
+#   • NON-OWNED / no-remote repo → `bd init --stealth` (fork-excluded), so your
+#                       task data can NEVER leak into a repo you don't own.
+#
+# Either way the repo is covered by the central OFF-MACHINE backup
+# (beads-backup-all.sh) — that part needs no per-repo action.
+#
+# Ownership is decided by the `origin` remote:
+#   - built-in owned: github.com/alexander-vyh/*  and  any /secure/ local remote
+#   - extend it WITHOUT editing this script: add one regex per line to
+#       ~/.config/beads-backup/owned-remotes.txt   (e.g. your team's simplifi repos)
+#   - override per-invocation: `bd-init --mine`  or  `bd-init --theirs`
+#
+# Canonical copy in claude-workflow-setup/scripts/; symlinked to ~/.local/bin.
+set -uo pipefail
+BD="${BD_BIN:-$(command -v bd || echo /opt/homebrew/bin/bd)}"
+OWNED_PATTERNS_FILE="${BEADS_OWNED_REMOTES:-$HOME/.config/beads-backup/owned-remotes.txt}"
+builtin_owned=('github\.com[:/]alexander-vyh/' '/secure/')
+
+force=""
+args=()
+for a in "$@"; do
+  case "$a" in
+    --mine)            force="mine" ;;
+    --theirs|--stealth) force="theirs" ;;
+    *)                 args+=("$a") ;;
+  esac
+done
+
+remote="$(git remote get-url origin 2>/dev/null || echo '')"
+
+is_owned() {
+  [ "$force" = "mine" ]   && return 0
+  [ "$force" = "theirs" ] && return 1
+  [ -z "$remote" ]        && return 1   # no remote → nowhere to push in-place → treat as non-owned
+  local p
+  for p in "${builtin_owned[@]}"; do
+    printf '%s' "$remote" | grep -qE "$p" && return 0
+  done
+  if [ -f "$OWNED_PATTERNS_FILE" ]; then
+    while IFS= read -r pat; do
+      [ -z "$pat" ] && continue
+      case "$pat" in \#*) continue ;; esac
+      printf '%s' "$remote" | grep -qE "$pat" && return 0
+    done < "$OWNED_PATTERNS_FILE"
+  fi
+  return 1
+}
+
+if is_owned; then
+  echo "bd-init: OWNED repo (${remote:-<none>}) → beads committable in-place"
+  "$BD" init "${args[@]}"
+  excl=".git/info/exclude"
+  if [ -f "$excl" ] && grep -q 'beads/issues.jsonl' "$excl"; then
+    grep -v 'beads/issues\.jsonl' "$excl" > "$excl.tmp" && mv "$excl.tmp" "$excl"
+    echo "bd-init: removed issues.jsonl from $excl → now committable"
+  fi
+  "$BD" config set export.git-add true >/dev/null 2>&1 || true
+  echo "bd-init: tip — 'git add .beads/issues.jsonl' rides with your normal pushes"
+else
+  echo "bd-init: NON-OWNED / no-remote (${remote:-<none>}) → fork-excluded (stealth); data stays OUT of this repo"
+  "$BD" init --stealth "${args[@]}"
+fi
+
+echo "bd-init: covered by the central off-machine backup on the next beads-backup-all.sh run"
