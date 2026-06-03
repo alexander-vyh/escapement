@@ -82,11 +82,25 @@ def test_template_stop_is_additive() -> None:
 # --- behavioral oracle: the wired gate is a real blocker, not a no-op ------
 
 def test_wired_gate_blocks_unverified_stop() -> None:
+    """Teeth: a DECLARED contract that isn't verified must still block. (No-contract
+    is now 'conversational' → allow; the harness's bite lives on the committed-task
+    path — declaring a contract is committing to a verifiable outcome.)"""
+    decision, reason = would_block_stop(
+        {"contract": {"goal": "x", "verification_command": "pytest"},
+         "scheduled": None, "recent_user_message": None}
+    )
+    assert decision == "block" and reason == "no_completion_or_resumption_proof", (
+        f"a declared-but-unverified contract must block Stop; got {decision}/{reason}"
+    )
+
+
+def test_no_contract_is_conversational_allow() -> None:  # the relaxed behavior
+    """No contract = no committed task in flight = free to stop (no magic word)."""
     decision, reason = would_block_stop(
         {"contract": None, "scheduled": None, "recent_user_message": None}
     )
-    assert decision == "block" and reason == "no_contract", (
-        f"an unverified Stop (no contract/wakeup/release) must block; got {decision}/{reason}"
+    assert decision == "allow" and reason == "conversational", (
+        f"a conversational turn (no contract) must allow Stop; got {decision}/{reason}"
     )
 
 

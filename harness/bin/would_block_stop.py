@@ -10,8 +10,8 @@ Decision rules:
   ("allow", "verification_passed")  -- contract.last_run.exit_code == expected_exit AND timestamp within current turn
   ("allow", "wakeup_registered")    -- scheduled.json has at least one future-dated entry
   ("allow", "user_released")        -- recent user message matches explicit-stop set
-  ("block", "no_completion_or_resumption_proof") -- none of the above; contract exists
-  ("block", "no_contract")          -- no contract.json AND no wakeup AND no user release
+  ("block", "no_completion_or_resumption_proof") -- none of the above; contract EXISTS (committed task, unverified)
+  ("allow", "conversational")       -- no contract = no committed task in flight = free to stop (teeth: a declared contract, ready bd work, and validate_no_shirking still block)
 """
 
 from __future__ import annotations
@@ -173,8 +173,18 @@ def would_block_stop(thread_state: dict) -> Tuple[str, str]:
         return ("allow", "wakeup_registered")
     if _user_released(recent_user_message):
         return ("allow", "user_released")
-    if not isinstance(contract, dict):
-        return ("block", "no_contract")
+    if contract is None:
+        # No contract = no committed task in flight = conversational. Stopping is
+        # free (no magic word needed). This deliberately relaxes the old "no
+        # contract → block" rule, which nagged every conversational turn. Teeth
+        # remain: a DECLARED-but-unverified contract still blocks below, ready bd
+        # work still blocks in task mode, and the sibling Stop hook
+        # (validate_no_shirking) still blocks "edited code but didn't verify".
+        return ("allow", "conversational")
+    # Contract PRESENT but not verified: either a declared dict that didn't pass,
+    # OR a malformed/unreadable contract.json surfaced as a non-dict marker by
+    # load_thread_state. Both fail SAFE → block (a corrupt contract must NOT read
+    # as "no contract → allow"; that would let a work session sneak out).
     return ("block", "no_completion_or_resumption_proof")
 
 
@@ -221,9 +231,18 @@ def load_thread_state(
     thread_dir: pathlib.Path,
     recent_user_message: Optional[str] = None,
 ) -> dict:
-    """Load thread state from filesystem. Convenience for Stop-hook adapter."""
+    """Load thread state from filesystem. Convenience for Stop-hook adapter.
+
+    A contract.json that EXISTS but is unparseable is surfaced as a non-dict
+    marker (not None) so the gate fails SAFE (blocks) on a corrupt contract,
+    rather than treating it as 'no contract' and allowing a conversational stop.
+    """
+    contract_path = thread_dir / "contract.json"
+    contract = _load_json(contract_path)
+    if contract is None and contract_path.exists():
+        contract = "__unreadable_contract__"  # present-but-corrupt → fail safe (block)
     return {
-        "contract": _load_json(thread_dir / "contract.json"),
+        "contract": contract,
         "scheduled": _load_json(thread_dir / "scheduled.json"),
         "recent_user_message": recent_user_message,
     }

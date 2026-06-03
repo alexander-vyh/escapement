@@ -70,13 +70,6 @@ _TASK_MODE_DISPLAY: dict[str, str] = {
         "they record WHAT to resume and bring you back. ScheduleWakeup WITHOUT filing the "
         "remaining work is pause-and-evaporate; that is the stall this gate exists to prevent."
     ),
-    "all_remaining_tasks_blocked": (
-        "continuation-harness [task-mode]: all_remaining_tasks_blocked. bd ready is empty but "
-        "open tasks remain blocked on dependencies. Do NOT stop to ask the user what to do next — "
-        "call the ScheduleWakeup tool for when the blockers clear, which both releases this "
-        "turn and brings you back to continue. Stop without that only if the user has already "
-        "said 'stop'."
-    ),
 }
 
 
@@ -191,15 +184,12 @@ def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
     if len(ready) > 0:
         return ("block", "tasks_remain_in_queue")
 
-    # bd ready empty: distinguish "all done" from "all remaining tasks blocked".
-    open_items = run_bd(["list"])
-    if open_items is None:
-        if has_beads_dir:
-            return ("block", "task_mode_bd_list_failed")
-        return ("allow", "task_mode_bd_unavailable")
-    if len(open_items) > 0:
-        return ("block", "all_remaining_tasks_blocked")
-
+    # bd ready empty: NOTHING is actionable right now → allow stop. Blocked or
+    # deferred tasks are PARKED, not work-in-flight; they must not gate stopping
+    # (that over-reach made the gate demand a literal "stop" on conversational
+    # turns). The agent can still VOLUNTARILY ScheduleWakeup when it is genuinely
+    # waiting on a blocker — it just isn't forced to. The gate keeps its teeth via
+    # the `tasks_remain_in_queue` block above: actually-ready work still blocks.
     return ("allow", "queue_drained")
 
 
@@ -370,8 +360,13 @@ def main() -> int:
             "recent_user_message": recent_user_message,
         }
         override_decision, override_reason = would_block_stop(override_state)
-        if override_decision == "allow":
-            # user_released or wakeup_registered — universal overrides apply in task mode too.
+        # Only the GENUINE universal overrides (wakeup / user-release) short-circuit
+        # the task-mode queue check. would_block_stop is called with contract=None
+        # here, which now also returns ("allow", "conversational") — that must NOT
+        # bypass the queue gate (it would let a task-mode session with ready work
+        # stop). Gate strictly on the two real overrides.
+        if override_decision == "allow" and override_reason in ("wakeup_registered", "user_released"):
+            # universal overrides apply in task mode too.
             # Tag a wakeup-allow as scope_wakeup_pause so half-life review can count
             # pacing-pause fires vs genuine completion (858.6 / design Step 4 signal).
             _log_incident({
