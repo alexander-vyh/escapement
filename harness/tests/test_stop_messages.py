@@ -45,13 +45,11 @@ import stop_hook  # noqa: E402
 # Every agent-facing BLOCK message, by name.
 RESUMPTION = stop_hook.RESUMPTION_PROMPT.format(reason="no_completion_or_resumption_proof")
 TASKS_REMAIN = stop_hook._TASK_MODE_DISPLAY["tasks_remain_in_queue"]
-ALL_BLOCKED = stop_hook._TASK_MODE_DISPLAY["all_remaining_tasks_blocked"]
 IMPLICIT = stop_hook._IMPLICIT_QUEUE_DISPLAY
 
 ALL_MESSAGES = {
     "resumption": RESUMPTION,
     "tasks_remain": TASKS_REMAIN,
-    "all_blocked": ALL_BLOCKED,
     "implicit": IMPLICIT,
 }
 
@@ -93,14 +91,6 @@ def test_work_messages_demand_continuation() -> None:
             f"{name} blocks the stop but gives no forward push; agents need an explicit "
             f"continue-imperative, got: {ALL_MESSAGES[name]!r}"
         )
-
-
-def test_blocked_message_points_to_wakeup() -> None:
-    """With nothing ready (deps-blocked), the forward action is ScheduleWakeup, not asking."""
-    low = ALL_BLOCKED.lower().replace(" ", "")
-    assert "schedulewakeup" in low or "wakeup" in low, (
-        "all_remaining_tasks_blocked must route to ScheduleWakeup as the forward exit."
-    )
 
 
 def test_legit_exits_preserved() -> None:

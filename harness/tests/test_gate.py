@@ -101,7 +101,7 @@ CASES = [
                 }
             ],
         },
-        "expect": ("block", "no_contract"),
+        "expect": ("allow", "conversational"),
     },
     # User release variants.
     {
@@ -117,13 +117,15 @@ CASES = [
     {
         "name": "non-release message does not release",
         "state": {"contract": None, "recent_user_message": "what's next?"},
-        "expect": ("block", "no_contract"),
+        "expect": ("allow", "conversational"),
     },
-    # Negative control #2 — empty state defaults to block.
+    # Empty state = no committed task in flight = conversational → allow.
+    # (The reason 'conversational', not 'verification_passed', proves it did not
+    # sneak through as verified — the control survives in the reason field.)
     {
-        "name": "empty state defaults to block",
+        "name": "empty state is conversational → allow",
         "state": {},
-        "expect": ("block", "no_contract"),
+        "expect": ("allow", "conversational"),
     },
     # Invariant: contract present but no proof at all.
     {
@@ -153,16 +155,19 @@ CASES = [
         },
         "expect": ("allow", "wakeup_registered"),
     },
-    # Malformed state should not allow stop.
+    # A contract that is PRESENT but malformed (non-dict) fails SAFE → block.
+    # (load_thread_state surfaces a corrupt contract.json as a non-dict marker, so
+    # a corrupt contract never reads as "no contract → conversational allow".)
     {
-        "name": "malformed contract treated as null",
+        "name": "malformed/present contract fails safe → block",
         "state": {"contract": "this is not a dict"},
-        "expect": ("block", "no_contract"),
+        "expect": ("block", "no_completion_or_resumption_proof"),
     },
+    # contract genuinely absent (None) + malformed scheduled → conversational allow.
     {
-        "name": "malformed scheduled treated as null",
+        "name": "no contract + malformed scheduled → conversational allow",
         "state": {"contract": None, "scheduled": "not a list"},
-        "expect": ("block", "no_contract"),
+        "expect": ("allow", "conversational"),
     },
     # Custom expected_exit honored.
     {
@@ -360,17 +365,17 @@ def run_stop_hook() -> int:
     import tempfile as _tf
     tmp = pathlib.Path(_tf.mkdtemp(prefix="harness-hook-"))
     try:
-        # B2: no contract.json AND no universal-override signal → block.
-        # The prior B2 carve-out (silent allow when contract.json was absent) was an
-        # unspec'd inversion of the contract-or-resumption invariant; this test
-        # locks in the corrected behavior. Conversational sessions release via
-        # user_released (covered by the B1 test below), not via "no contract".
+        # No contract.json AND no claimed work = conversational → ALLOW (no magic
+        # word needed). The harness keeps its teeth on the committed-task path: a
+        # DECLARED-but-unverified contract still blocks (test_wired_gate_blocks_
+        # unverified_stop), ready bd work still blocks, and validate_no_shirking
+        # still blocks "edited code but didn't verify".
         td = tmp / "no-contract"
         td.mkdir(parents=True)
         out = call_hook({"session_id": "x", "transcript_path": ""}, td)
         _assert(
-            out is not None and out.get("decision") == "block",
-            "B2: no contract.json + no release signal → block (no_contract)",
+            out is None,
+            "no contract.json + no claimed work → allow (conversational)",
             results,
         )
 
@@ -561,7 +566,10 @@ def run_task_mode() -> int:
         _assert(out is not None and out.get("decision") == "block",
                 "task mode: bd ready non-empty → block (tasks remain)", results)
 
-        # Task mode + empty ready + open tasks → block (all blocked, register wakeup).
+        # Task mode + empty ready + open(blocked) tasks → ALLOW. Nothing is
+        # actionable now; blocked/deferred tasks are parked, not work-in-flight,
+        # so they must not gate stopping. (Actually-ready work still blocks, tested
+        # just above.)
         td = tmp / "queue-empty-but-open"
         td.mkdir(parents=True)
         (td / ".beads").mkdir()
@@ -570,9 +578,8 @@ def run_task_mode() -> int:
         out = call_hook({"session_id": "x", "transcript_path": ""},
                         td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
         _assert(
-            out is not None and out.get("decision") == "block"
-            and "all_remaining_tasks_blocked" in out.get("reason", ""),
-            "task mode: bd ready empty + open tasks → block (all blocked, reason in display)",
+            out is None,
+            "task mode: bd ready empty + blocked tasks open → allow (parked, not actionable)",
             results,
         )
 
