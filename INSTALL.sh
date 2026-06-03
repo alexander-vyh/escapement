@@ -87,6 +87,7 @@ declare -a PLAN=(
   "claude/skills/behavioral-test-oracle-review|$CLAUDE_DIR/skills/behavioral-test-oracle-review"
   "claude/skills/dispatching-parallel-agents|$CLAUDE_DIR/skills/dispatching-parallel-agents"
   "claude/skills/subagent-driven-development|$CLAUDE_DIR/skills/subagent-driven-development"
+  "claude/skills/beads-worktree|$CLAUDE_DIR/skills/beads-worktree"
 
   # Rules (individual files so user can keep their own alongside)
   "claude/rules/planning-discipline.md|$CLAUDE_DIR/rules/planning-discipline.md"
@@ -95,7 +96,9 @@ declare -a PLAN=(
   "claude/rules/agent-teams-default.md|$CLAUDE_DIR/rules/agent-teams-default.md"
   "claude/rules/outcome-ownership.md|$CLAUDE_DIR/rules/outcome-ownership.md"
   "claude/rules/evidence-provenance.md|$CLAUDE_DIR/rules/evidence-provenance.md"
-  "claude/rules/beads-worktree-integration.md|$CLAUDE_DIR/rules/beads-worktree-integration.md"
+  # beads-worktree-integration.md retired as an always-on rule — its enforcement
+  # moved to the beads_worktree_guard.py PreToolUse hook (mechanical, zero
+  # resident tokens) and its how-to to the `beads-worktree` skill (on-demand).
   "claude/rules/never-suppress.md|$CLAUDE_DIR/rules/never-suppress.md"
   "claude/rules/serena-first.md|$CLAUDE_DIR/rules/serena-first.md"
   "claude/rules/continuation-harness.md|$CLAUDE_DIR/rules/continuation-harness.md"
@@ -134,6 +137,7 @@ declare -a PLAN=(
   "claude/hooks/review_gate.py|$CLAUDE_DIR/hooks/review_gate.py"
   "claude/hooks/review_nudge.py|$CLAUDE_DIR/hooks/review_nudge.py"
   "claude/hooks/no_direct_send_guard.py|$CLAUDE_DIR/hooks/no_direct_send_guard.py"
+  "claude/hooks/beads_worktree_guard.py|$CLAUDE_DIR/hooks/beads_worktree_guard.py"
   "claude/hooks/validate_no_shirking.py|$CLAUDE_DIR/hooks/validate_no_shirking.py"
   "claude/hooks/context_burn_detector.py|$CLAUDE_DIR/hooks/context_burn_detector.py"
   "claude/hooks/session_cleanup.py|$CLAUDE_DIR/hooks/session_cleanup.py"
