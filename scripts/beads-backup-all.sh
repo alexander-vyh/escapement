@@ -42,6 +42,18 @@ if [ ! -d "$BACKUP_CLONE/.git" ]; then
     || { log "FATAL: could not clone $BACKUP_SLUG"; exit 1; }
 fi
 cd "$BACKUP_CLONE" || { log "FATAL: cannot cd $BACKUP_CLONE"; exit 1; }
+
+# Pin the clone's push credential to the backup repo's owning account, headlessly.
+# launchd has no GH_TOKEN and ~/.local/share is outside any ~/GitHub includeIf scope,
+# so without this the clone falls back to the global (work) credential -> 404.
+# Uses the user's own per-account helper (gh-cred) if present; idempotent.
+ACCOUNT="${BACKUP_SLUG%%/*}"
+if [ -x "$HOME/.local/bin/gh-cred" ]; then
+  git config --local --unset-all credential.https://github.com.helper 2>/dev/null || true
+  git config --local --add credential.https://github.com.helper ""
+  git config --local --add credential.https://github.com.helper "!$HOME/.local/bin/gh-cred --user $ACCOUNT"
+fi
+
 git pull --quiet --ff-only 2>/dev/null || true
 
 # --- 2. Snapshot each discovered repo -----------------------------------------
