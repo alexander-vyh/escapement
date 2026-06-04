@@ -15,6 +15,7 @@ both can block. Additive coverage.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -122,6 +123,214 @@ def _read_last_user_message(transcript_path: str) -> Optional[str]:
         if parts:
             last_user_text = "\n".join(parts)
     return last_user_text
+
+
+def _read_last_assistant_message(transcript_path: str) -> Optional[str]:
+    """Most recent ASSISTANT text from the transcript tail (mirror of the user reader).
+
+    This is the wind-down rung's input: the assistant's turn-final message, where a
+    wrap/decision-punt offer lives. Returns None if unavailable.
+    """
+    if not transcript_path:
+        return None
+    path = pathlib.Path(transcript_path)
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    tail = raw[-_TRANSCRIPT_WINDOW:] if len(raw) > _TRANSCRIPT_WINDOW else raw
+    last_text: Optional[str] = None
+    for line in tail.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("isSidechain"):  # subagent turn, not the main assistant
+            continue
+        msg = entry.get("message", entry)
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", [])
+        parts: list[str] = []
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for blk in content:
+                if isinstance(blk, dict) and blk.get("type") == "text":
+                    parts.append(blk.get("text", ""))
+                elif isinstance(blk, str):
+                    parts.append(blk)
+        if parts:
+            last_text = "\n".join(parts)
+    return last_text
+
+
+# Wind-down rung (winddown_judge + winddown_gate). Imported fail-open: if the modules
+# or httpx are unavailable the rung simply never fires — it must NEVER break the gate.
+try:
+    import winddown_judge as _wj  # noqa: E402
+    import winddown_gate as _wg  # noqa: E402
+except Exception:  # pragma: no cover - defensive
+    _wj = None
+    _wg = None
+
+_WINDDOWN_VERDICT_FRESH_SECONDS = 300
+# Bounded — this runs in the Stop critical path (not a daemon), so it must be snappy.
+# Fail-open on timeout means a slow/cold model just defers to the regex floor.
+_INLINE_JUDGE_TIMEOUT = 6
+
+
+def _text_sha(text: str) -> str:
+    """Short stable hash used to scope a cached verdict to the message it judged."""
+    return hashlib.sha256((text or "").encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _read_cached_winddown_verdict(thread_dir, text: Optional[str] = None) -> Optional[bool]:
+    """Read a cached model verdict for this session (monitor- or inline-written).
+
+    {thread_dir}/winddown_verdict.json = {"verdict": bool, "ts": ISO, "text_sha"?: str}.
+    Returns the bool only if fresh (within the current-turn window); else None so the
+    Stop hook falls back to the deterministic regex floor.
+
+    MESSAGE-SCOPED: a verdict tagged with `text_sha` applies ONLY to that message, so a
+    still-fresh verdict for an EARLIER turn cannot mis-fire as a false-positive block on
+    a later, different message. A verdict written without `text_sha` (e.g. by a future
+    monitor that omits it) degrades to time-freshness only — backward/forward compatible.
+    """
+    data = _load_json(pathlib.Path(thread_dir) / "winddown_verdict.json")
+    if not isinstance(data, dict):
+        return None
+    ts = _parse_iso(data.get("ts", ""))
+    if ts is None:
+        return None
+    age = (_dt2.datetime.now(_dt2.timezone.utc) - ts).total_seconds()
+    if age > _WINDDOWN_VERDICT_FRESH_SECONDS:
+        return None
+    stored_sha = data.get("text_sha")
+    if stored_sha is not None and text is not None and stored_sha != _text_sha(text):
+        return None  # verdict was for a different message — do not apply it here
+    v = data.get("verdict")
+    return v if isinstance(v, bool) else None
+
+
+def _write_winddown_verdict(thread_dir, verdict: bool, *, text: Optional[str] = None, now=None) -> None:
+    """Persist a computed verdict so it warms the cache for the rest of the turn-window
+    and is observable (and forward-compatible with a future background monitor reading
+    the same file). Tags the message hash so the cache is message-scoped. Best-effort."""
+    ts = (now or _dt2.datetime.now(_dt2.timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rec = {"verdict": bool(verdict), "ts": ts}
+    if text is not None:
+        rec["text_sha"] = _text_sha(text)
+    try:
+        (pathlib.Path(thread_dir) / "winddown_verdict.json").write_text(json.dumps(rec))
+    except OSError:
+        pass
+
+
+def _compute_winddown_verdict_inline(text, thread_dir, *, judge=None, now=None) -> Optional[bool]:
+    """Run the local-LLM judge INLINE (bounded timeout, fail-open) and cache its result.
+
+    This is what makes the model layer LIVE without a daemon: the SWE-PRM judge that was
+    wired-but-dormant (nothing wrote the verdict file) now runs on demand, in the narrow
+    slice where it adds recall over the regex floor. Returns the bool verdict or None on
+    any error/unclear — a judge problem must NEVER block or crash the hook.
+    """
+    fn = judge or (lambda t: _wj.model_verdict(t, timeout=_INLINE_JUDGE_TIMEOUT))
+    try:
+        v = fn(text)
+    except Exception:
+        return None  # fail-open
+    if isinstance(v, bool):
+        _write_winddown_verdict(thread_dir, v, text=text, now=now)
+        return v
+    return None
+
+
+def _git_work_remains(cwd: str, run_git=None) -> bool:
+    """True iff the repo at `cwd` has uncommitted changes to TRACKED files OR commits not
+    pushed to its upstream. Pure-untracked files (scratch/artifacts) do NOT count — they
+    would nag nearly every stop in a live working tree (deliberate, documented scope).
+
+    FAIL-OPEN to False: not a git repo / git error / no upstream → no git work detected
+    (mirrors _check_bd_queue_implicit degrading to allow; never fabricates a block, never
+    raises). The cake veiled-stop — drained bead queue but 4 unpushed commits — is exactly
+    the case this exists to catch, so the unpushed-commit signal is load-bearing.
+    """
+    if not cwd:
+        return False
+    if run_git is None:
+        def run_git(args):
+            try:
+                r = subprocess.run(
+                    ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=10,
+                )
+                return r if r.returncode == 0 else None
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError, NotADirectoryError):
+                return None
+
+    status = run_git(["status", "--porcelain"])
+    if status is not None:
+        for line in status.stdout.splitlines():
+            if line and not line.startswith("??"):  # tracked change (staged/modified/del)
+                return True
+
+    # Unpushed: revisions ahead of the tracking upstream. No upstream → git errors → None
+    # → not counted (a branch with no upstream cannot meaningfully be called "unpushed").
+    ahead = run_git(["rev-list", "--count", "@{u}..HEAD"])
+    if ahead is not None:
+        try:
+            if int(ahead.stdout.strip() or "0") > 0:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+def _winddown_override(
+    reason: str,
+    transcript_path: str,
+    cwd: str,
+    thread_dir,
+    *,
+    work_check=None,
+    judge=None,
+) -> Optional[str]:
+    """If a `conversational` stop is really a wind-down offer with reversible work
+    remaining, return the recovery display to BLOCK with; else None.
+
+    Reversible work = the bd session-scoped queue (work_check) OR git state (unpushed
+    commits / dirty tracked files). The model layer is LIVE: when the regex floor missed
+    the text AND no fresh cached verdict exists, the judge runs inline (bounded, fail-open).
+
+    Scoped DELIBERATELY to the `conversational` allow (would_block_stop.py:176-183) —
+    the free-pass hole. Genuine terminals (verification_passed / user_released /
+    wakeup_registered) and ordinary conversational turns are untouched.
+    """
+    if reason != "conversational" or _wj is None:
+        return None
+    text = _read_last_assistant_message(transcript_path)
+    if not text:
+        return None
+    if work_check is None:  # resolved here, not at def-time (forward ref)
+        work_check = _check_bd_queue_implicit
+    work_remains = work_check(cwd or "", thread_dir=thread_dir)[0] == "block"
+    if not work_remains and cwd:
+        # bd queue drained — but unpushed commits / dirty tracked files are also reversible
+        # work the agent owns (the cake "nothing outstanding" with 4 unpushed commits).
+        work_remains = _git_work_remains(cwd)
+    if not work_remains:
+        return None  # nothing reversible (bd or git) → legitimate stop; never nag, never judge
+    model_offer = _read_cached_winddown_verdict(thread_dir, text=text)
+    if model_offer is None and not _wg.is_winddown_offer(text):
+        # cache cold AND regex missed it → exactly where the live judge earns its keep.
+        model_offer = _compute_winddown_verdict_inline(text, thread_dir, judge=judge)
+    decision, _ = _wj.decide(text, work_remains, model_offer=model_offer)
+    return _wg.RECOVERY_PROMPT if decision == "block" else None
 
 
 def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
@@ -417,21 +626,39 @@ def main() -> int:
         if bd_decision == "block":
             decision, reason = bd_decision, bd_reason
 
+    # Wind-down rung: a `conversational` allow that is actually a wind-down / decision-
+    # punt offer WITH reversible work remaining is overridden to a block (closes the
+    # would_block_stop.py:176-183 free-pass). Surgical: only the conversational path.
+    winddown_display = None
+    if decision == "allow" and reason == "conversational":
+        try:
+            cwd_now = os.getcwd()
+        except OSError:
+            cwd_now = ""
+        winddown_display = _winddown_override(reason, transcript_path, cwd_now, thread_dir)
+        if winddown_display:
+            decision, reason = "block", "winddown_offer_work_remains"
+
     _log_incident({
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "session_id": session_id,
         "decision": decision,
         "reason": reason,
         "was_correct": None,
-        "notes": "implicit_queue_check" if reason.startswith("implicit_queue_") else "",
+        "notes": (
+            "winddown_rung" if reason == "winddown_offer_work_remains"
+            else "implicit_queue_check" if reason.startswith("implicit_queue_")
+            else ""
+        ),
     })
 
     if decision == "block":
-        display = (
-            _IMPLICIT_QUEUE_DISPLAY
-            if reason.startswith("implicit_queue_")
-            else RESUMPTION_PROMPT.format(reason=reason)
-        )
+        if winddown_display:
+            display = winddown_display
+        elif reason.startswith("implicit_queue_"):
+            display = _IMPLICIT_QUEUE_DISPLAY
+        else:
+            display = RESUMPTION_PROMPT.format(reason=reason)
         out = {"decision": "block", "reason": display}
         print(json.dumps(out))
         return 0
