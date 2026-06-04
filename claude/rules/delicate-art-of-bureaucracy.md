@@ -11,8 +11,9 @@ enabling from coercive bureaucracy (Adler & Borys, 1996). Walk them before
 adding or modifying any gate.
 
 For the implementation patterns that make a gate satisfy these features —
-escape paths, persistent signal, value-not-presence validation — see
-`claude/rules/gate-design.md`.
+escape paths, persistent signal, value-not-presence validation — load the
+`gate-design` skill (its 3-rule checklist also stays resident at
+`claude/rules/gate-design.md`).
 
 ## When this rule applies
 

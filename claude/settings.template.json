@@ -170,6 +170,11 @@
             "type": "command",
             "command": "python3 ~/.claude/hooks/discovery_input_gate.py",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/gate_design_nudge.py",
+            "timeout": 5000
           }
         ]
       },
@@ -189,6 +194,11 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/discovery_input_gate.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/gate_design_nudge.py",
             "timeout": 5000
           }
         ]

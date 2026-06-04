@@ -88,6 +88,7 @@ declare -a PLAN=(
   "claude/skills/dispatching-parallel-agents|$CLAUDE_DIR/skills/dispatching-parallel-agents"
   "claude/skills/subagent-driven-development|$CLAUDE_DIR/skills/subagent-driven-development"
   "claude/skills/beads-worktree|$CLAUDE_DIR/skills/beads-worktree"
+  "claude/skills/gate-design|$CLAUDE_DIR/skills/gate-design"
 
   # Rules (individual files so user can keep their own alongside)
   "claude/rules/planning-discipline.md|$CLAUDE_DIR/rules/planning-discipline.md"
@@ -138,6 +139,7 @@ declare -a PLAN=(
   "claude/hooks/review_nudge.py|$CLAUDE_DIR/hooks/review_nudge.py"
   "claude/hooks/no_direct_send_guard.py|$CLAUDE_DIR/hooks/no_direct_send_guard.py"
   "claude/hooks/beads_worktree_guard.py|$CLAUDE_DIR/hooks/beads_worktree_guard.py"
+  "claude/hooks/gate_design_nudge.py|$CLAUDE_DIR/hooks/gate_design_nudge.py"
   "claude/hooks/validate_no_shirking.py|$CLAUDE_DIR/hooks/validate_no_shirking.py"
   "claude/hooks/context_burn_detector.py|$CLAUDE_DIR/hooks/context_burn_detector.py"
   "claude/hooks/session_cleanup.py|$CLAUDE_DIR/hooks/session_cleanup.py"
