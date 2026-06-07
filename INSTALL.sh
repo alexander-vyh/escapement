@@ -89,6 +89,7 @@ declare -a PLAN=(
   "claude/skills/subagent-driven-development|$CLAUDE_DIR/skills/subagent-driven-development"
   "claude/skills/beads-worktree|$CLAUDE_DIR/skills/beads-worktree"
   "claude/skills/gate-design|$CLAUDE_DIR/skills/gate-design"
+  "claude/skills/vocab|$CLAUDE_DIR/skills/vocab"
 
   # Rules (individual files so user can keep their own alongside)
   "claude/rules/planning-discipline.md|$CLAUDE_DIR/rules/planning-discipline.md"
@@ -105,6 +106,7 @@ declare -a PLAN=(
   "claude/rules/continuation-harness.md|$CLAUDE_DIR/rules/continuation-harness.md"
   "claude/rules/delicate-art-of-bureaucracy.md|$CLAUDE_DIR/rules/delicate-art-of-bureaucracy.md"
   "claude/rules/gate-design.md|$CLAUDE_DIR/rules/gate-design.md"
+  "claude/rules/research-findings-persistence.md|$CLAUDE_DIR/rules/research-findings-persistence.md"
 
   # Agents (workflow-integral only — personal advisor agents live in the user's
   # own config, not in this framework. adversarial-reviewer is dispatched by
