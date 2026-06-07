@@ -17,6 +17,13 @@ Use `/discovery` when you have a problem or feature idea but no structured plan 
 This skill produces a design document that is ready to execute — or reveals that you
 need a spike first.
 
+> **Before the Input Gate, in an unfamiliar domain:** discovery requires a confirmed
+> problem framing to start — but if the domain is unfamiliar and a load-bearing
+> distinction hinges on terminology you don't command, the framing itself may be
+> wrong. Recover the field's vocabulary first via the **`vocab`** skill (`/vocab`);
+> it runs *pre-framing* and feeds a real frame back in. Skip for familiar domains,
+> codebase/org-internal questions, or one-fact lookups.
+
 **This skill replaces `/opsx:propose`.** Both create OpenSpec changes, but `/discovery`
 adds adversarial thinking, draft-and-react interaction, and schema-aware scaling. If
 the project has an `openspec-propose` skill installed, `/discovery` supersedes it for

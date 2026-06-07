@@ -38,6 +38,14 @@ Follow steps 1-3 of the superpowers brainstorming skill (explore context, ask cl
 2. **Ask clarifying questions** — One at a time, wait for answers before continuing.
 3. **Propose 2-3 approaches** — Each with trade-offs clearly stated.
 
+> **Unfamiliar domain? Recover its vocabulary first.** If the problem turns on an
+> external field whose terminology encodes a distinction your default framing would
+> get *wrong* (e.g. entitlement vs ownership, queue vs group) — and the output is
+> load-bearing — load the **`vocab`** skill (`/vocab`) to recover the field's real
+> terms before proposing approaches, then bring those terms back in. Skip for
+> familiar domains, codebase/org-internal questions, or one-fact lookups. Self-test:
+> if you can't name the wrong prior the vocabulary would correct, don't.
+
 SKIP superpowers steps 4-6 (present design, write design doc, transition to implementation) — this skill handles routing differently in Section 5 below.
 
 **This skill replaces the superpowers brainstorming terminal routing. Do NOT invoke writing-plans automatically — Section 5 below determines the next step.**

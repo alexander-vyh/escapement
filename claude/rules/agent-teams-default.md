@@ -51,6 +51,23 @@ Agent(prompt="Investigate OAuth patterns...")
 # Fire-and-forget, no coordination possible
 ```
 
+### Shared terminology before a design fan-out (gated)
+
+**Most research does NOT need this.** But before a multi-agent **design** effort
+in an **unfamiliar** domain whose terminology encodes a distinction the model's
+default framing would get **wrong** (e.g. entitlement vs ownership, queue vs
+group) **and** the output is load-bearing — dispatch a single **living
+vocab-scout** to establish the team's shared glossary *before* the design agents
+fan out, then have them work from (and challenge) that glossary. Load the
+**`vocab`** skill (`/vocab`) for the full protocol. (vocab-first is the one case
+this rule's point-to-point SendMessage doesn't cover: a shared living glossary
+the whole team queries.)
+
+**Skip** for familiar domains, codebase/org-internal questions, urgent one-fact
+lookups, or topics with no external literature. Self-test: if you can't name the
+specific wrong prior the field's vocabulary would correct, don't run it. Opt-in
+guidance, not a gate.
+
 ### Vocabulary — What the User Means
 
 > Canonical definitions for these and all cross-system terms live in
