@@ -9,7 +9,7 @@
 # straight into the source working tree ($REPO_DIR).
 #
 # Offline + isolated: runs the installer against a throwaway HOME, pinning from the
-# LOCAL repo as the remote (CWS_PIN_REMOTE) so no network and no touch to real ~/.claude.
+# LOCAL repo as the remote (ESCAPEMENT_PIN_REMOTE) so no network and no touch to real ~/.claude.
 #
 # Run: bash tests/test_install_pinned.sh
 set -uo pipefail
@@ -22,19 +22,19 @@ bad()  { printf '  FAIL: %s\n' "$*"; fail=1; }
 
 # --- default install: symlinks must point into the pinned checkout --------------
 T1="$(mktemp -d)"; trap 'rm -rf "$T1" "${T2:-}"' EXIT
-HOME="$T1" CWS_PIN_REMOTE="$REPO" CWS_PIN_REF="main" \
+HOME="$T1" ESCAPEMENT_PIN_REMOTE="$REPO" ESCAPEMENT_PIN_REF="main" \
   bash "$REPO/INSTALL.sh" >"$T1/out.log" 2>&1 || { cat "$T1/out.log"; bad "installer exited non-zero"; }
 
-PIN="$T1/.claude/.cws-pinned"
+PIN="$T1/.claude/.escapement-pinned"
 LINK="$T1/.claude/hooks/spec_id_enforcement.py"
 
-[ -d "$PIN/.git" ] && ok "pinned checkout created at ~/.claude/.cws-pinned" \
+[ -d "$PIN/.git" ] && ok "pinned checkout created at ~/.claude/.escapement-pinned" \
                    || bad "no pinned checkout created (expected $PIN/.git)"
 
 if [ -L "$LINK" ]; then
   tgt="$(readlink "$LINK")"
   case "$tgt" in
-    *"/.cws-pinned/"*) ok "deployed hook points into the pinned checkout" ;;
+    *"/.escapement-pinned/"*) ok "deployed hook points into the pinned checkout" ;;
     *)                 bad "deployed hook points outside pinned checkout: $tgt" ;;
   esac
   # Negative control: must NOT point into the live source working tree.

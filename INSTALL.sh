@@ -1,5 +1,5 @@
 #!/bin/bash
-# INSTALL.sh — Symlinks claude-workflow-setup into ~/.claude/ and ~/.beads/
+# INSTALL.sh — Symlinks Escapement into ~/.claude/ and ~/.beads/
 #
 # Usage:
 #   ./INSTALL.sh              # install: symlink ~/.claude into a PINNED checkout (default)
@@ -9,8 +9,8 @@
 #   ./INSTALL.sh --dry-run    # show what would happen, change nothing
 #
 # Default deploy model (bead ft1): ~/.claude symlinks resolve into a pinned clone
-# (CWS_PIN_DIR, default ~/.claude/.cws-pinned) of this repo at CWS_PIN_REF (default
-# main) — NOT the live working tree. This way a branch switch or mid-edit in this
+# (ESCAPEMENT_PIN_DIR, default ~/.claude/.escapement-pinned) of this repo at
+# ESCAPEMENT_PIN_REF (default main) — NOT the live working tree. This way a branch switch or mid-edit in this
 # repo can't break hooks machine-wide across all your repos. The price: edits go
 # live only after they reach main AND you run `./INSTALL.sh --update`. Use --dev to
 # opt back into instant-edit-from-working-tree (the old, fragile-but-convenient model).
@@ -25,9 +25,10 @@ BEADS_DIR="$HOME/.beads"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 
 # Pinned-checkout deploy (bead ft1). Overridable via env for testing/relocation.
-CWS_PIN_DIR="${CWS_PIN_DIR:-$CLAUDE_DIR/.cws-pinned}"
-CWS_PIN_REF="${CWS_PIN_REF:-main}"
-CWS_PIN_REMOTE="${CWS_PIN_REMOTE:-$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || echo "$REPO_DIR")}"
+# The old CWS_* variables remain accepted for existing scripts.
+ESCAPEMENT_PIN_DIR="${ESCAPEMENT_PIN_DIR:-${CWS_PIN_DIR:-$CLAUDE_DIR/.escapement-pinned}}"
+ESCAPEMENT_PIN_REF="${ESCAPEMENT_PIN_REF:-${CWS_PIN_REF:-main}}"
+ESCAPEMENT_PIN_REMOTE="${ESCAPEMENT_PIN_REMOTE:-${CWS_PIN_REMOTE:-$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || echo "$REPO_DIR")}}"
 
 # --- Arg parsing ---
 MODE="install"
@@ -48,7 +49,7 @@ for arg in "$@"; do
 done
 
 # Where symlinks point: the pinned checkout (default) or the live working tree (--dev).
-if [[ "$DEV_MODE" == true ]]; then DEPLOY_SRC="$REPO_DIR"; else DEPLOY_SRC="$CWS_PIN_DIR"; fi
+if [[ "$DEV_MODE" == true ]]; then DEPLOY_SRC="$REPO_DIR"; else DEPLOY_SRC="$ESCAPEMENT_PIN_DIR"; fi
 
 run() {
   if [[ "$DRY_RUN" == true ]]; then
@@ -59,11 +60,11 @@ run() {
 }
 
 # --- Pre-flight ---
-echo "==> claude-workflow-setup installer"
+echo "==> Escapement installer"
 echo "    repo:   $REPO_DIR"
 echo "    claude: $CLAUDE_DIR"
 echo "    beads:  $BEADS_DIR"
-echo "    deploy: $([ "$DEV_MODE" == true ] && echo "live working tree (--dev)" || echo "pinned checkout ($CWS_PIN_DIR @ $CWS_PIN_REF)")"
+echo "    deploy: $([ "$DEV_MODE" == true ] && echo "live working tree (--dev)" || echo "pinned checkout ($ESCAPEMENT_PIN_DIR @ $ESCAPEMENT_PIN_REF)")"
 echo "    mode:   $MODE$([ "$DRY_RUN" == true ] && echo ' (dry-run)')"
 echo
 
@@ -260,18 +261,18 @@ PY
 }
 
 # Create or refresh the pinned checkout that ~/.claude symlinks resolve into.
-# Idempotent: clone if absent, else fast-forward to CWS_PIN_REF. Never rewrites
+# Idempotent: clone if absent, else fast-forward to ESCAPEMENT_PIN_REF. Never rewrites
 # local edits (ff-only) — the pinned checkout is deploy state, not a dev tree.
 ensure_pinned_checkout() {
-  if [[ -d "$CWS_PIN_DIR/.git" ]]; then
-    echo "==> refreshing pinned checkout: $CWS_PIN_DIR -> $CWS_PIN_REF"
-    run "git -C '$CWS_PIN_DIR' fetch --quiet '$CWS_PIN_REMOTE' '$CWS_PIN_REF'"
-    run "git -C '$CWS_PIN_DIR' checkout --quiet '$CWS_PIN_REF'"
-    run "git -C '$CWS_PIN_DIR' merge --ff-only FETCH_HEAD"
+  if [[ -d "$ESCAPEMENT_PIN_DIR/.git" ]]; then
+    echo "==> refreshing pinned checkout: $ESCAPEMENT_PIN_DIR -> $ESCAPEMENT_PIN_REF"
+    run "git -C '$ESCAPEMENT_PIN_DIR' fetch --quiet '$ESCAPEMENT_PIN_REMOTE' '$ESCAPEMENT_PIN_REF'"
+    run "git -C '$ESCAPEMENT_PIN_DIR' checkout --quiet '$ESCAPEMENT_PIN_REF'"
+    run "git -C '$ESCAPEMENT_PIN_DIR' merge --ff-only FETCH_HEAD"
   else
-    echo "==> creating pinned checkout: clone $CWS_PIN_REMOTE -> $CWS_PIN_DIR"
-    run "git clone --quiet '$CWS_PIN_REMOTE' '$CWS_PIN_DIR'"
-    run "git -C '$CWS_PIN_DIR' checkout --quiet '$CWS_PIN_REF'"
+    echo "==> creating pinned checkout: clone $ESCAPEMENT_PIN_REMOTE -> $ESCAPEMENT_PIN_DIR"
+    run "git clone --quiet '$ESCAPEMENT_PIN_REMOTE' '$ESCAPEMENT_PIN_DIR'"
+    run "git -C '$ESCAPEMENT_PIN_DIR' checkout --quiet '$ESCAPEMENT_PIN_REF'"
   fi
 }
 
@@ -280,7 +281,7 @@ if [[ "$MODE" == "update" ]]; then
   # Refresh the pinned checkout only; existing symlinks already point into it.
   ensure_pinned_checkout
   echo
-  echo "==> pinned checkout now at $CWS_PIN_REF; ~/.claude reflects the update."
+  echo "==> pinned checkout now at $ESCAPEMENT_PIN_REF; ~/.claude reflects the update."
 elif [[ "$MODE" == "install" ]]; then
   if [[ "$DEV_MODE" == true ]]; then
     echo "==> --dev: symlinking the LIVE working tree (instant edits; not branch-safe)"
