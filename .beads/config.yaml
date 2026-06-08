@@ -53,3 +53,7 @@
 # Secret keys (stored in this file but prefer env vars to avoid git exposure):
 # - linear.api_key  → use LINEAR_API_KEY env var instead
 # - github.token    → use GITHUB_TOKEN env var instead
+
+export.interval: 0
+
+sync.remote: "git+https://github.com/alexander-vyh/escapement.git"
