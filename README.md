@@ -1,6 +1,6 @@
-# Claude Workflow Setup
+# Escapement
 
-A workflow built **on top of [OpenSpec](https://github.com/Fission-AI/OpenSpec)**, adding:
+Escapement is an agentic workflow system built **on top of [OpenSpec](https://github.com/Fission-AI/OpenSpec)**, adding:
 
 - **Adversarial overlays** on OpenSpec's discovery step (riskiest-assumption, pre-mortem, red/blue team, walking-skeleton sections injected as internal prompts — not visible in the output docs).
 - **A bridge to [Beads](https://github.com/steveyegge/beads)** so OpenSpec's `tasks.md` becomes a real task graph (`bd create --spec-id ...`) that agents can execute against.
@@ -10,6 +10,12 @@ A workflow built **on top of [OpenSpec](https://github.com/Fission-AI/OpenSpec)*
 **This does not replace OpenSpec — it uses it.** The `/discovery` skill calls `openspec init`, `openspec instructions`, and `openspec status` under the hood. The `proposal.md` / `design.md` / `specs/*.md` files written are standard OpenSpec artifacts. Engineers comfortable with bare OpenSpec can read the changes a teammate produced through this workflow with no extra context.
 
 > ⚠️ This is a snapshot of one working setup, not a product. Read, adapt, cherry-pick. The opinions are strong.
+
+## Why "Escapement"?
+
+`Escapement` is named for the clock mechanism that turns stored energy into measured motion. It restrains runaway movement, gives the oscillator enough impulse to continue, and advances the train one tick at a time. This repo applies that model to agentic work: OpenSpec, Beads, hooks, test oracles, verification, and wakeups convert model effort into controlled, outcome-verified progress.
+
+See [docs/NAMING.md](docs/NAMING.md) for the naming rationale and collision notes.
 
 ---
 
@@ -80,12 +86,12 @@ Claude Code itself must be installed and working. [Serena MCP](https://github.co
 ## Install
 
 ```bash
-git clone https://github.com/alexander-vyh/claude-workflow-setup ~/GitHub/claude-workflow-setup
-cd ~/GitHub/claude-workflow-setup
+git clone https://github.com/alexander-vyh/escapement ~/GitHub/escapement
+cd ~/GitHub/escapement
 ./INSTALL.sh
 ```
 
-`INSTALL.sh` creates **symlinks** from `~/.claude/` and `~/.beads/` into a **pinned checkout** of this repo (`~/.claude/.cws-pinned`, tracking `main`) — *not* your live working tree. This is deliberate: `~/.claude` is machine-wide, so if it symlinked your working tree, a branch switch or mid-edit here could break hooks in **every** repo at once. With the pinned checkout, your day-to-day git work in this repo never disturbs your live config. Existing files are moved to `<file>.backup-<timestamp>` before being replaced — nothing is silently overwritten.
+`INSTALL.sh` creates **symlinks** from `~/.claude/` and `~/.beads/` into a **pinned checkout** of this repo (`~/.claude/.escapement-pinned`, tracking `main`) — *not* your live working tree. This is deliberate: `~/.claude` is machine-wide, so if it symlinked your working tree, a branch switch or mid-edit here could break hooks in **every** repo at once. With the pinned checkout, your day-to-day git work in this repo never disturbs your live config. Existing files are moved to `<file>.backup-<timestamp>` before being replaced — nothing is silently overwritten.
 
 Because the deploy is pinned, edits go live in two steps: land them on `main`, then run `./INSTALL.sh --update` (fast-forwards the pinned checkout). Prefer instant edits-from-working-tree (accepting the branch-fragility)? Install with `./INSTALL.sh --dev`.
 
