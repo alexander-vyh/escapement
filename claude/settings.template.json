@@ -88,6 +88,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 ~/.claude/hooks/openspec_task_reconciliation_gate.py"
+          },
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/discovery-close-gate.py"
           },
           {
