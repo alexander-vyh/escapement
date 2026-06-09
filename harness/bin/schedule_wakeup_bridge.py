@@ -35,11 +35,9 @@ a finished task list:
   wakeup is cancelled and cannot replay (on the harness side). Entries registered
   by other processes (supervisor / adapter fallbacks) are preserved.
 
-  Residual (documented, out of harness control): the Claude Code runtime's own
-  built-in firing of a ScheduleWakeup fallback is not driven by this file, so it
-  can still re-inject its prompt. The complete firing-side fix belongs to the
-  harness waker (continuation-harness.md "launchd waker", v0.1+), which will read
-  this — now correctly pruned — scheduled.json as its source of truth.
+  `wakeup_waker.py` reads this — now correctly pruned — scheduled.json as its
+  source of truth. Its default mode is dry-run; unattended firing requires the
+  daemon/launchd shell to invoke it with `--fire`.
 
 Fail-open: any malformed payload / IO error exits 0 without writing, so the
 bridge never blocks or corrupts the agent's tool flow.

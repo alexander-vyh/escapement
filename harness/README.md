@@ -15,6 +15,8 @@ harness/
 │   ├── would_block_stop.py     # pure gate fn + thread_dir_for_session + harness_home
 │   ├── verify                  # agent affordance — runs verification_command, writes last_run
 │   ├── stop_hook.py            # Claude Code Stop-hook adapter (self-locating)
+│   ├── wakeup_waker.py         # scheduled.json firing layer; dry-run by default
+│   ├── wakeup_dispatch.py      # pure check/resume dispatch logic
 │   ├── init_contract.py        # scaffold a contract
 │   └── baseline.py             # baseline metrics scanner
 ├── schemas/{contract,scheduled}.schema.json
@@ -39,12 +41,13 @@ harness/
    - **block** otherwise
 4. Block decisions return a constructive resumption prompt; the agent receives it and continues.
 
-> ⚠ **Wakeup caveat (until the launchd waker ships — see "Still v0.1+").** A
-> future-dated `scheduled.json` entry unlocks Stop, but nothing yet *fires* that
-> wakeup automatically. Treat a registered wakeup as **human-must-resume**: it lets
-> the turn end cleanly, but the agent will not be re-invoked on its own until the
-> waker daemon exists. Do not rely on a wakeup as autonomous resumption for
-> unattended work.
+`bin/wakeup_waker.py` is the firing layer for `scheduled.json`. By default it is a
+dry-run and must not execute check commands, rewrite schedules, or spawn Claude.
+With `--fire`, it claims each schedule file, polls due `kind="check"` entries,
+re-arms not-ready checks, and prunes only wakeups whose handoff/resume was spawned
+successfully. Long waits should use `kind="check"` so polling stays in cheap shell
+work and the eventual wake is a fresh cheap-model handoff, not a large-context
+`--resume`.
 
 Coexists with `~/.claude/hooks/validate_no_shirking.py` — both fire on Stop, both can block. Additive coverage.
 
@@ -60,4 +63,4 @@ Thread directories are keyed by session id: `harness/threads/{CLAUDE_CODE_SESSIO
 
 ## Still v0.1+
 
-Full 57-stall regression test, launchd waker firing scheduled wakeups (and carrying thread identity across respawns), bead-derived contracts, human-readable `(team_id, agent_name)` naming layered on top of session-id keying, and the supervisor daemon.
+Full 57-stall regression test, launchd installation for `wakeup_waker.py`, bead-derived contracts, human-readable `(team_id, agent_name)` naming layered on top of session-id keying, and the supervisor daemon.
