@@ -83,7 +83,14 @@ def _no_work(cwd, thread_dir=None):
 
 def test_override_blocks_winddown_offer_with_work(tmp_path):
     tp = _write_transcript(tmp_path, [_asst("It's late — want me to wrap for the night, or keep going?")])
-    disp = sh._winddown_override("conversational", tp, "/repo", tmp_path, work_check=_work_remains)
+    # HERMETICITY: under judge-only there is no regex pre-empt, so this offer would
+    # otherwise reach the live judge at localhost:8000 (passes when the model is up,
+    # fail-open-allows when it's down — an environment-dependent test). Inject the
+    # verdict so the block is driven deterministically by the judge layer's seam.
+    disp = sh._winddown_override(
+        "conversational", tp, "/repo", tmp_path,
+        work_check=_work_remains, judge=lambda t: True,
+    )
     assert disp is not None
     assert "proceed" in disp.lower() and "stop" in disp.lower()  # escape path present
 

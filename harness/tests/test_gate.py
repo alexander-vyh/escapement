@@ -566,10 +566,16 @@ def run_task_mode() -> int:
         _assert(out is not None and out.get("decision") == "block",
                 "task mode: bd ready non-empty → block (tasks remain)", results)
 
-        # Task mode + empty ready + open(blocked) tasks → ALLOW. Nothing is
-        # actionable now; blocked/deferred tasks are parked, not work-in-flight,
-        # so they must not gate stopping. (Actually-ready work still blocks, tested
-        # just above.)
+        # DEGRADED-PATH case (NOT the R2 invariant — see below). This `make_fake_bd`
+        # implements only `ready` and `list`; the `blocked` subcommand falls through
+        # to `exit 0` with empty stdout, which the production run_bd maps to [] for
+        # back-compat (old bd lacking the `blocked` subcommand). So this exercises:
+        # "task mode + a bd that cannot answer `blocked` + empty ready → allow
+        # (degraded, back-compat path)". It is NOT evidence that blocked beads don't
+        # gate stopping — under R2 a bd that DOES implement `blocked` and returns a
+        # scoped blocked bead → BLOCK. That R2 invariant is exercised separately in
+        # run_wakeup_blocker_wiring() ("R2 (F4 sibling)"), with a fake bd that
+        # implements the `blocked` subcommand.
         td = tmp / "queue-empty-but-open"
         td.mkdir(parents=True)
         (td / ".beads").mkdir()
@@ -579,7 +585,7 @@ def run_task_mode() -> int:
                         td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
         _assert(
             out is None,
-            "task mode: bd ready empty + blocked tasks open → allow (parked, not actionable)",
+            "task mode: empty ready + bd lacking `blocked` subcommand → allow (back-compat degraded path)",
             results,
         )
 
@@ -850,6 +856,183 @@ def run_implicit_queue() -> int:
     return 0 if failed == 0 else 1
 
 
+def run_wakeup_blocker_wiring() -> int:
+    """R3 main()-level WIRING tests (verifier Finding 1, the BLOCKER) + R2
+    integration with a bd that IMPLEMENTS the `blocked` subcommand (Finding 4).
+
+    WHY THIS SUITE EXISTS: every existing R3 test calls
+    `stop_hook._check_wakeup_blockers(...)` DIRECTLY. That verifies the function
+    but NOT that main() ever calls it. The verifier proved R3 is dead in
+    production: a task-mode session that registers a future wakeup and files a
+    bare-prose blocker bead receives an unconditional allow at the
+    `override_reason == "wakeup_registered"` branch — `_check_wakeup_blockers`
+    never runs. These tests drive the REAL stop_hook.py subprocess end to end so
+    the wiring cannot be satisfied by unit-testing the function in isolation; they
+    FAIL until main() actually calls the check.
+    """
+    results = []
+    bin_path = HARNESS_ROOT / "bin" / "stop_hook.py"
+
+    import shutil as _shutil
+    import tempfile as _tf
+
+    def call_hook(payload: dict, thread_dir: pathlib.Path, env_extra=None) -> "dict | None":
+        env = {**_os.environ, "HARNESS_THREAD_DIR": str(thread_dir), **(env_extra or {})}
+        r = _subprocess.run(
+            [sys.executable, str(bin_path)],
+            input=json.dumps(payload),
+            capture_output=True, text=True, env=env,
+        )
+        if r.stdout.strip():
+            try:
+                return json.loads(r.stdout)
+            except json.JSONDecodeError:
+                return {"raw": r.stdout}
+        return None
+
+    def make_fake_bd_blocked(bin_dir: pathlib.Path, blocked_beads: list) -> pathlib.Path:
+        """Fake bd that IMPLEMENTS the `blocked` subcommand (unlike make_fake_bd,
+        whose `blocked` falls through to exit 0 + empty stdout → back-compat []).
+
+        `ready` → []; `blocked` → the provided list (with id + description, so the
+        blocker-verify/waiver parsing has real text to read); `list` → [].
+
+        The `blocked` JSON is written to a SIDECAR FILE that the fake bd `cat`s,
+        NOT interpolated into a shell-quoted echo. Bead descriptions contain
+        apostrophes (e.g. "another team's ...") which would terminate a
+        single-quoted shell string early and corrupt the script (exit 2 → the
+        production run_bd sees a failure → None → no block, a false green/red).
+        A sidecar file sidesteps shell quoting entirely for arbitrary content."""
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        script = bin_dir / "bd"
+        blocked_file = bin_dir / "blocked.json"
+        blocked_file.write_text(json.dumps(blocked_beads), encoding="utf-8")
+        script.write_text(
+            "#!/bin/sh\n"
+            'if echo "$*" | grep -q "^ready"; then echo "[]"; exit 0; fi\n'
+            f'if echo "$*" | grep -q "blocked"; then cat "{blocked_file}"; exit 0; fi\n'
+            'if echo "$*" | grep -q "^list"; then echo "[]"; exit 0; fi\n'
+            "exit 0\n"
+        )
+        script.chmod(0o755)
+        return bin_dir
+
+    def _future_wakeup_json() -> str:
+        return json.dumps([{"wake_at": _future_iso(120), "prompt": "resume work",
+                            "reason": "waiting on external blocker"}])
+
+    INCIDENT = "Blocked on another team's Salesforce test."
+
+    tmp = pathlib.Path(_tf.mkdtemp(prefix="harness-wakeup-blocker-"))
+    try:
+        # --- F1 BLOCKER: wakeup registered + bare-prose blocked bead → BLOCK ----
+        # The exact incident reproduction: future wakeup in scheduled.json, a
+        # scoped blocked bead whose description is bare prose (no blocker-verify,
+        # no blocker-waiver). main() MUST route through _check_wakeup_blockers and
+        # emit block/wakeup_blocker_unverified. Current code returns 0 (allow) at
+        # the wakeup branch → this FAILS until the wiring lands.
+        td = tmp / "wakeup-unverified-blocker"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        mode_rec = {"mode": "task", "repo_cwd": str(td), "parent_id": "cake-m95.4",
+                    "entered_at": _now_iso(), "session_id": "x"}
+        (td / "session_mode.json").write_text(json.dumps(mode_rec))
+        (td / "scheduled.json").write_text(_future_wakeup_json())
+        fakebin = make_fake_bd_blocked(
+            tmp / "bin-unverified",
+            [{"id": "cake-m95.4.9", "description": INCIDENT}],
+        )
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(
+            out is not None and out.get("decision") == "block"
+            and "wakeup_blocker_unverified" in out.get("reason", "").lower().replace(" ", "_")
+            or (out is not None and out.get("decision") == "block"),
+            "WIRING (F1): wakeup + bare-prose blocker bead → BLOCK via main() "
+            "(the incident must not reproduce; _check_wakeup_blockers must run)",
+            results,
+        )
+        # Stronger, separate assertion on the reason so a generic block elsewhere
+        # cannot satisfy this — the denial must be the blocker-unverified one and
+        # must name the fix paths.
+        reason_txt = (out or {}).get("reason", "")
+        _assert(
+            out is not None and out.get("decision") == "block"
+            and ("blocker-verify" in reason_txt.lower() or "schedulewakeup" in reason_txt.lower()),
+            "WIRING (F1): the wakeup-blocker denial names the escape (blocker-verify "
+            "/ ScheduleWakeup / waiver), not just any block",
+            results,
+        )
+
+        # --- F1 POSITIVE CONTROL: wakeup + bead with a VALID WAIVER → ALLOW ------
+        td = tmp / "wakeup-waivered-blocker"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        (td / "session_mode.json").write_text(json.dumps({**mode_rec, "repo_cwd": str(td)}))
+        (td / "scheduled.json").write_text(_future_wakeup_json())
+        waiver = ("blocker-waiver: SFDC sandbox refresh ETA 2026-06-12; no local "
+                  "repro available, manual reverify scheduled next session")
+        fakebin = make_fake_bd_blocked(
+            tmp / "bin-waivered",
+            [{"id": "cake-m95.4.9", "description": waiver}],
+        )
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(
+            out is None,
+            "WIRING (F1 positive control): wakeup + bead with a valid waiver → "
+            "ALLOW via main() (a real, substantive waiver releases the wakeup path)",
+            results,
+        )
+
+        # --- F4: bd that IMPLEMENTS `blocked` returning ≥1, NO wakeup → BLOCK ----
+        # The sibling to test_gate.py:569. That test passes only via the missing-
+        # `blocked`-subcommand back-compat path. With a bd that actually implements
+        # `blocked` and returns a scoped blocked bead, R2 says BLOCK. No wakeup is
+        # registered, so this exercises _check_task_mode_queue's R2 path through
+        # main(), not the wakeup branch.
+        td = tmp / "r2-real-blocked-subcommand"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        (td / "session_mode.json").write_text(json.dumps({**mode_rec, "repo_cwd": str(td)}))
+        # NO scheduled.json → no wakeup override.
+        fakebin = make_fake_bd_blocked(
+            tmp / "bin-r2-blocked",
+            [{"id": "cake-m95.4.9", "description": INCIDENT}],
+        )
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(
+            out is not None and out.get("decision") == "block",
+            "R2 (F4 sibling): bd implementing `blocked` returns a scoped blocked "
+            "bead + empty ready + no wakeup → BLOCK (not the back-compat allow)",
+            results,
+        )
+
+        # --- F4 negative control: same bd, ZERO blocked → ALLOW (queue drained) --
+        td = tmp / "r2-real-blocked-empty"
+        td.mkdir(parents=True)
+        (td / ".beads").mkdir()
+        (td / "session_mode.json").write_text(json.dumps({**mode_rec, "repo_cwd": str(td)}))
+        fakebin = make_fake_bd_blocked(tmp / "bin-r2-empty", [])
+        out = call_hook({"session_id": "x", "transcript_path": ""},
+                        td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
+        _assert(
+            out is None,
+            "R2 (F4 negative control): bd implementing `blocked` returns [] + empty "
+            "ready → ALLOW (genuine queue drain still permits Stop)",
+            results,
+        )
+
+    finally:
+        _shutil.rmtree(tmp, ignore_errors=True)
+
+    passed = sum(1 for ok, _ in results if ok)
+    failed = sum(1 for ok, _ in results if not ok)
+    print(f"\n[wakeup_blocker_wiring] {passed} passed, {failed} failed")
+    return 0 if failed == 0 else 1
+
+
 # --- pytest discovery -------------------------------------------------------
 # Thin wrappers exposing the run_*() suites to pytest. Previously this file
 # defined only run_*() functions + a __main__ runner, so `pytest` collected
@@ -876,6 +1059,9 @@ def test_task_mode():
 def test_implicit_queue():
     assert run_implicit_queue() == 0
 
+def test_wakeup_blocker_wiring():
+    assert run_wakeup_blocker_wiring() == 0
+
 
 if __name__ == "__main__":
     rc_gate = run()
@@ -884,4 +1070,5 @@ if __name__ == "__main__":
     rc_hook = run_stop_hook()
     rc_task = run_task_mode()
     rc_implicit = run_implicit_queue()
-    sys.exit(rc_gate or rc_iso or rc_port or rc_hook or rc_task or rc_implicit)
+    rc_wakeup = run_wakeup_blocker_wiring()
+    sys.exit(rc_gate or rc_iso or rc_port or rc_hook or rc_task or rc_implicit or rc_wakeup)

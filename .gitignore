@@ -25,3 +25,6 @@ __pycache__/
 .claude/scheduled_tasks.lock
 claude/hooks/agent-dispatch.log
 claude/hooks/state/
+
+# agent research artifacts (research-findings-persistence rule)
+.research/
