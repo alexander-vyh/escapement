@@ -215,6 +215,27 @@ def test_blocker_verify_module_exists():
     # lets them through as confirmed=True. The substance floor must be semantic,
     # not a literal-string match — these are all no-ops dressed up.
     "/bin/true", "/usr/bin/true", "true 2>/dev/null", "true && true", "[ 0 -eq 0 ]",
+    # SECOND-GENERATION BYPASSES (final review, BOTH reviewers' Finding 2): the
+    # round-3 set + the `true && true` / `true 2>/dev/null` patterns still let these
+    # through — confirmed empirically as confirmed=True, reason='exit_0'. Each is
+    # `true`/`:` reached through a builtin/wrapper/subshell/env-assignment, or a
+    # short-circuit / pipe / brace-group whose effective result is the no-op. The
+    # floor must recognise the no-op behind the wrapper, NOT enumerate string literals.
+    "command true",   # POSIX builtin wrapper (reviewer 1)
+    "env true",       # environment-stripped exec of true (reviewer 1)
+    "sh -c true",     # subshell whose only command is true (reviewer 1)
+    "true||false",    # `||` short-circuit (reviewer 1 + 2): different OPERATOR than
+                      # the caught `&&` form — `true` wins, exits 0
+    "TRUE=1 true",    # env-assignment prefix in front of the no-op (reviewer 1)
+    "bash -c true",   # subshell via bash (reviewer 2)
+    "(true)",         # parenthesised subshell (reviewer 2)
+    "exec true",      # exec builtin replacing the shell with true (reviewer 2)
+    # NOVEL no-op COMPOSITIONS — canaries against a pure-enumeration "fix" (just add
+    # the strings above to a bigger frozenset). These are unusual compositions a
+    # hand-written list would not anticipate; a SEMANTIC normalizer rejects them, an
+    # enumeration does not. Enumeration-only is the NAMED fragile implementation here.
+    ":|:",            # `:` piped to `:` — two no-op builtins, exits 0
+    "{ true; }",      # brace group around the no-op
 ])
 def test_trivial_verify_commands_rejected_without_execution(cmd):
     """F1/F2 KILLER: a trivial command must be rejected as non-substantive WITHOUT
@@ -237,6 +258,30 @@ def test_trivial_verify_commands_rejected_without_execution(cmd):
     )
     assert "trivial" in result.reason or result.reason == "no_command", (
         f"trivial command must be rejected as trivial/no-command; got {result.reason!r}"
+    )
+
+
+# --- over-rejection guard: a semantic floor must not swallow REAL commands ----
+
+@requires_bv
+@pytest.mark.parametrize("cmd", [
+    "test -f /etc/hosts",   # real filesystem check, exits 0 — must still confirm
+    "test -d /",            # real directory check, exits 0
+])
+def test_substantive_verify_commands_still_confirm(cmd):
+    """OVER-REJECTION GUARD (pairs with the trivial-rejection killer above): the
+    second-generation floor that rejects `command true` / `env true` / `sh -c true`
+    must NOT also start rejecting substantive commands that happen to share a token
+    (e.g. `test ...` vs the `[ 0 -eq 0 ]` bracket no-op). A real exit-0 command must
+    run and confirm. Defeats an over-broad fix that blacklists by prefix word."""
+    result = blocker_verify.verify_command(cmd)
+    assert result.confirmed is True, (
+        f"a substantive exit-0 verify command must still confirm: {cmd!r}; "
+        f"got confirmed={result.confirmed}, reason={result.reason!r}"
+    )
+    assert result.reason == "exit_0", (
+        f"{cmd!r} must confirm by being RUN (reason 'exit_0'), not be mistaken for "
+        f"a trivial no-op; got reason {result.reason!r}"
     )
 
 
@@ -465,6 +510,67 @@ def test_wakeup_with_zero_blocked_allows(tmp_path):
     decision, reason = stop_hook._check_wakeup_blockers(session_mode, run_bd=run_bd)
     assert decision == "allow", (
         f"a wakeup with no blocked beads must release unchanged; got {decision}/{reason}"
+    )
+
+
+# --- NOTE 3: back-compat parity between the two production run_bd helpers --------
+#
+# `_check_task_mode_queue`'s production run_bd maps `exit 0 + non-JSON stdout -> []`
+# (back-compat for an older bd whose `blocked` subcommand is absent), returning None
+# only on a genuine failure. `_check_wakeup_blockers`'s production run_bd lacks that
+# mapping (it returns None on any JSONDecodeError regardless of exit code). The
+# OBSERVABLE consequence is currently SAFE — both paths release on old bd (the wakeup
+# path because line `blocked is None or len==0 -> allow`). We pin that OBSERVABLE
+# CONTRACT (old bd degrades to a wakeup release) directly against the PRODUCTION
+# runner, so the cosmetic asymmetry can never silently become a behavioral divergence
+# (e.g. a future change that makes the wakeup path fail-toward-block on None would
+# regress old-bd installs into permanent traps — this test would catch it).
+
+@requires_wakeup_helper
+@pytest.mark.parametrize("stdout", ["", "usage: bd ...\n", "not json at all"])
+def test_wakeup_old_bd_exit0_nonjson_degrades_to_release(stdout, monkeypatch, tmp_path):
+    """NOTE 3 PARITY PIN: old bd (the `blocked` subcommand absent) exits 0 and prints
+    non-JSON. The PRODUCTION wakeup runner (run_bd=None) must degrade to a release —
+    identically to _check_task_mode_queue's back-compat — never trap the session.
+
+    Drives the real subprocess path (mocked) rather than the injected fake, so it pins
+    the production runner's old-bd handling, which is exactly where the asymmetry lives.
+    Green today (None->allow) and green after any alignment fix that adds the explicit
+    exit-0->[] mapping; RED only if a future change makes the wakeup path fail-toward-
+    block on old bd."""
+    class _FakeProc:
+        def __init__(self, rc, out):
+            self.returncode = rc
+            self.stdout = out
+            self.stderr = ""
+
+    monkeypatch.setattr(
+        stop_hook.subprocess, "run", lambda *a, **k: _FakeProc(0, stdout)
+    )
+    session_mode = {"repo_cwd": str(tmp_path), "parent_id": "cake-m95.4"}
+    decision, reason = stop_hook._check_wakeup_blockers(session_mode, run_bd=None)
+    assert decision == "allow", (
+        "old bd (exit 0, non-JSON stdout for the absent `blocked` subcommand) must "
+        "degrade the wakeup path to a release, mirroring _check_task_mode_queue's "
+        f"back-compat; got {decision}/{reason}"
+    )
+
+
+@requires_wakeup_helper
+def test_wakeup_genuine_bd_failure_still_releases_safely(monkeypatch, tmp_path):
+    """NOTE 3 companion: a GENUINE bd failure (missing binary) on the wakeup path also
+    degrades to release (None -> allow). Distinguishes 'old bd, no blocked subcommand'
+    from 'bd broken' — both safe-degrade here, so the parity pin above does not
+    accidentally demand a block on real failures."""
+    def _boom(*a, **k):
+        raise FileNotFoundError("bd")
+
+    monkeypatch.setattr(stop_hook.subprocess, "run", _boom)
+    session_mode = {"repo_cwd": str(tmp_path), "parent_id": "cake-m95.4"}
+    decision, reason = stop_hook._check_wakeup_blockers(session_mode, run_bd=None)
+    assert decision == "allow", (
+        f"a genuine bd failure on the wakeup path must safe-degrade to release; "
+        f"got {decision}/{reason}"
     )
 
 

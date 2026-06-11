@@ -201,7 +201,7 @@ except Exception:  # pragma: no cover - defensive
 
 _WINDDOWN_VERDICT_FRESH_SECONDS = 300
 # Bounded — this runs in the Stop critical path (not a daemon), so it must be snappy.
-# Fail-open on timeout means a slow/cold model just defers to the regex floor.
+# Fail-open on timeout means a slow/cold model yields None → allow (judge-only).
 _INLINE_JUDGE_TIMEOUT = 6
 
 
@@ -215,7 +215,7 @@ def _read_cached_winddown_verdict(thread_dir, text: Optional[str] = None) -> Opt
 
     {thread_dir}/winddown_verdict.json = {"verdict": bool, "ts": ISO, "text_sha"?: str}.
     Returns the bool only if fresh (within the current-turn window); else None so the
-    Stop hook falls back to the deterministic regex floor.
+    Stop hook treats it as allow (no classifier fired; judge-only architecture).
 
     MESSAGE-SCOPED: a verdict tagged with `text_sha` applies ONLY to that message, so a
     still-fresh verdict for an EARLIER turn cannot mis-fire as a false-positive block on
@@ -257,7 +257,7 @@ def _compute_winddown_verdict_inline(text, thread_dir, *, judge=None, now=None) 
 
     This is what makes the model layer LIVE without a daemon: the SWE-PRM judge that was
     wired-but-dormant (nothing wrote the verdict file) now runs on demand, in the narrow
-    slice where it adds recall over the regex floor. Returns the bool verdict or None on
+    slice where it runs the judge as the sole classifier. Returns the bool verdict or None on
     any error/unclear — a judge problem must NEVER block or crash the hook.
     """
     fn = judge or (lambda t: _wj.model_verdict(t, timeout=_INLINE_JUDGE_TIMEOUT))

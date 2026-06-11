@@ -272,6 +272,108 @@ def test_innocent_git_not_denied_in_beads_project(command, tmp_path):
     )
 
 
+# ===========================================================================
+# B1 — `worktree add` as STRING CONTENT (not a subcommand) must NOT deny.
+#
+# The wide `Bash(git:*)` matcher routes every git call through this hook, where
+# `_WORKTREE_ADD_RE` (`\bgit\b[^\n|;&]*?\bworktree\s+add\b`) matches the literal
+# token sequence "worktree" ... "add" ANYWHERE after `git` — including inside a
+# quoted argument. Empirically confirmed denied (wrongly):
+#   git log --grep="worktree add"
+# A developer searching their own history for the phrase, or committing docs that
+# mention it, gets a `bd worktree create` redirect that makes no sense in context.
+#
+# The fix direction (pinned by OUTCOME, not implementation): "worktree" then "add"
+# must be POSITIONAL git subcommand tokens (shlex tokenization, skipping git global
+# flags), never content inside a quoted / flag argument. A real `git worktree add`
+# invocation still denies; the phrase as an argument value passes.
+# ===========================================================================
+
+# Innocents: `worktree add` appears only as ARGUMENT CONTENT, never as the git
+# subcommand. Each MUST be allowed even inside a beads project.
+B1_STRING_ARG_INNOCENTS = [
+    'git log --grep="worktree add"',          # the empirically-confirmed FP
+    'git log --grep "worktree add"',          # space form of the same flag
+    'git commit -m "docs: worktree add guide"',  # phrase in a commit message
+    'git grep "worktree add"',                # searching tree content for the phrase
+    'git log -S "git worktree add"',          # pickaxe search for the phrase
+]
+
+
+@pytest.mark.parametrize("command", B1_STRING_ARG_INNOCENTS)
+def test_worktree_add_as_string_argument_not_denied(command, tmp_path):
+    """B1 NEGATIVE CONTROL: `worktree add` inside a quoted argument is not a real
+    worktree-create invocation — it must PASS even in a beads project. This is the
+    load-bearing control: it fails the current substring regex, which matches the
+    phrase anywhere after `git`."""
+    proj = _make_beads_project(tmp_path)
+    exit_code, parsed, raw = _run(command, proj)
+    assert exit_code == 0
+    assert parsed == {}, (
+        f"B1: `worktree add` as a quoted argument must pass untouched in a beads "
+        f"project (it is not a real worktree-create): {command!r}; got {raw!r}"
+    )
+
+
+def test_echo_worktree_add_is_not_git_allowed(tmp_path):
+    """B1 NEGATIVE CONTROL: `echo git worktree add` is not a git invocation at all
+    (the leading word is `echo`). It must PASS — defeats a fix that keys on the
+    bare tokens `worktree add` appearing anywhere rather than on `git` being the
+    actual command."""
+    proj = _make_beads_project(tmp_path)
+    exit_code, parsed, raw = _run("echo git worktree add", proj)
+    assert exit_code == 0
+    assert parsed == {}, (
+        f"B1: `echo git worktree add` is not a git command and must pass; got {raw!r}"
+    )
+
+
+# Positives: a REAL `git worktree add` where the two tokens ARE the positional
+# git subcommand. Each MUST stay denied (the guard's whole reason to exist).
+B1_REAL_CREATE_FORMS = [
+    "git worktree add ../x",
+    "git -C /repo worktree add ../x",
+    "git --git-dir=/repo/.git worktree add ../x",
+    "cd /repo && git worktree add ../x",
+]
+
+
+@pytest.mark.parametrize("command", B1_REAL_CREATE_FORMS)
+def test_real_worktree_add_subcommand_still_denied(command, tmp_path):
+    """B1 POSITIVE CONTROL: a genuine `git worktree add` (the tokens are the git
+    SUBCOMMAND, possibly after global flags / a `cd &&`) must still DENY in a beads
+    project. Guards against a B1 fix that over-corrects into letting real
+    invocations through."""
+    proj = _make_beads_project(tmp_path)
+    exit_code, parsed, raw = _run(command, proj)
+    assert exit_code == 0
+    decision = parsed.get("hookSpecificOutput", {}).get("permissionDecision")
+    assert decision == "deny", (
+        f"B1: a real `git worktree add` subcommand must still deny in a beads "
+        f"project: {command!r}; stdout was {raw!r}"
+    )
+    assert "bd worktree create" in raw, "B1: real-create denial must name the redirect"
+
+
+def test_unparseable_command_line_does_not_deny(tmp_path):
+    """B1 SAFE-DEFAULT: a command line shlex cannot tokenize (unbalanced quote)
+    must NOT deny. Once the wide `Bash(git:*)` matcher routes every git call
+    through this hook, a tokenization error must fail OPEN (allow) — this hook now
+    fires on EVERY git call, so a crash-or-deny default on weird input would wedge
+    ordinary git usage. The phrase is present inside the unbalanced quote precisely
+    to pin that the shlex error, not the absence of the phrase, drives the allow:
+    a tokenizing fix must treat an unparseable line as allow, never deny."""
+    proj = _make_beads_project(tmp_path)
+    # Unbalanced quote — shlex.split raises ValueError. The phrase is INSIDE the
+    # broken quote, so a fix that tokenizes must hit the error path and fail open.
+    exit_code, parsed, raw = _run('git log --grep="worktree add unterminated', proj)
+    assert exit_code == 0
+    assert parsed == {}, (
+        f"B1: an unparseable git command line must fail open (allow), not deny; "
+        f"got {raw!r}"
+    )
+
+
 def test_guard_registered_on_wide_git_matcher():
     """A1 STRUCTURAL FIX: the prefix matcher `Bash(git worktree add:*)` means the
     runtime never even invokes the hook for `git -C x worktree add`. Closing A1

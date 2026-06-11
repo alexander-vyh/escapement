@@ -638,4 +638,190 @@ pattern based. The user's "semantic or nothing" ruling arguably extends to it, b
 is a SEPARATE, larger change (a different hook, different corpus, its own judge wiring).
 Named here as KNOWN-OUT-OF-SCOPE so it lands as a follow-up bead rather than as silent
 inconsistency. Not touched by this change; no tests added for it here.
+---
 
+# Test Oracle Brief — final-review fix batch (B1 / C2 / N)
+
+Bead: claude-workflow-setup-v4u. Source of truth:
+`.research/stop-gate-hardening-2026-06-11/09-verify-sonnet-final.md`. Three findings
+from the final adversarial review, pinned tests-first (no production code). Rapid
+3-section form per finding — the fragile-implementation challenge passes against the
+3-section subset for each, so the short form is legitimate.
+
+## B1 (BLOCK) — worktree-guard denies `worktree add` inside string arguments
+
+**1. Business invariant.** The wide `Bash(git:*)` matcher routes every git call through
+`beads_worktree_guard.py`. `_WORKTREE_ADD_RE` (`\bgit\b[^\n|;&]*?\bworktree\s+add\b`)
+matches the token sequence "worktree"…"add" ANYWHERE after `git`, including inside a
+quoted argument. A developer's innocent git call whose ARGUMENTS mention the phrase must
+NOT be denied; only a real `git worktree add` SUBCOMMAND (worktree + add as positional
+git subcommand tokens, after global flags / a `cd &&`) must deny + redirect to
+`bd worktree create`. Empirically confirmed wrongly denied today:
+`git log --grep="worktree add"`, `git commit -m "docs: worktree add guide"`,
+`git grep "worktree add"`, `git log -S "git worktree add"`, `git log --grep "worktree add"`.
+
+**6. Negative control.** `test_worktree_add_as_string_argument_not_denied` (5 string-arg
+forms) + `test_echo_worktree_add_is_not_git_allowed` (`echo git worktree add` — not git at
+all) → MUST PASS (parsed == {}). `test_unparseable_command_line_does_not_deny`
+(`git log --grep="worktree add unterminated` — unbalanced quote, phrase inside the broken
+quote) → MUST PASS: a shlex tokenization error must fail OPEN (allow), never deny —
+this hook now fires on every git call, so crash/deny-on-weird-input is the worse failure.
+All 7 are RED against current code (it denies them via the substring regex), GREEN after
+the shlex-subcommand fix. Positive control `test_real_worktree_add_subcommand_still_denied`
+(`git worktree add ../x`; `git -C /repo worktree add ../x`;
+`git --git-dir=/repo/.git worktree add ../x`; `cd /repo && git worktree add ../x`) → MUST
+DENY, GREEN today and after the fix.
+
+**9. Final outcome verification.**
+`python3 -m pytest claude/hooks/tests/test_beads_worktree_guard.py -q` — the 7 reds turn
+green and the 4 real-create positives stay green once the matcher tokenizes the command
+(shlex, skipping git global flags) and denies only when "worktree" then "add" are the
+positional git subcommand.
+
+**Fragile-implementation challenge (passes against the 3-section subset):**
+- *Echo-test fix* (just whitelist `git log`/`git commit`/`git grep`): killed by the
+  unparseable-line case and by `echo git worktree add` (not in any git-subcommand
+  whitelist), which both require the tokenize-and-check-subcommand approach, not a
+  command-name allowlist.
+- *Over-correct fix* (drop the worktree-add check entirely / only match `^git worktree
+  add`): killed by `test_real_worktree_add_subcommand_still_denied`'s `-C` / `--git-dir`
+  / `cd &&` positives, which must still deny.
+- *Deny-on-shlex-error fix* (fail closed on unparseable input): killed by
+  `test_unparseable_command_line_does_not_deny` — the safe default is allow.
+
+## C2 — blocker_verify trivial-floor second-generation bypasses
+
+**1. Business invariant.** A `blocker-verify:` command must prove a real blocker. Trivial
+no-ops must be rejected WITHOUT execution (value-not-presence, gate-design Rule 3). The
+round-3 floor (`_TRIVIAL_COMMANDS` set + `_TRIVIAL_COMPOUND_RE`) is bypassed by `true`/`:`
+reached through a builtin/wrapper/subshell/env-assignment, a short-circuit, a pipe, or a
+brace-group — each confirmed empirically today as `confirmed=True, reason='exit_0'`. BOTH
+final reviewers' enumerations are folded in: reviewer 1 (`command true`, `env true`,
+`sh -c true`, `true||false`, `TRUE=1 true`) + reviewer 2 (`bash -c true`, `(true)`,
+`exec true`, `true||false` — noting `||` is a DIFFERENT operator than the caught `&&`).
+
+**6. Negative control.** Extended parametrize on
+`test_trivial_verify_commands_rejected_without_execution` (10 new cases): the 8 enumerated
+second-generation bypasses PLUS 2 NOVEL no-op compositions (`:|:` — `:` piped to `:`;
+`{ true; }` — brace group) MUST return `confirmed is False` and `reason != 'exit_0'`
+(rejected BEFORE execution). The novel compositions are CANARIES: a pure-enumeration fix
+(just grow the frozenset with the 8 named strings) lets `:|:` and `{ true; }` through, so
+they force a semantic normalizer. RED today (all confirm via exit_0), GREEN after a
+semantic floor. Over-rejection guard `test_substantive_verify_commands_still_confirm`
+(`test -f /etc/hosts`, `test -d /`) MUST stay `confirmed is True, reason == 'exit_0'` —
+the fix must not blacklist real commands. GREEN today and after.
+
+**9. Final outcome verification.**
+`python3 -m pytest harness/tests/test_blocked_bead_gate.py -q` — the 10 new reds turn
+green and the substantive-command positive controls (plus the existing `test -d /`
+positive) stay green once the floor recognises the no-op semantically (e.g. tokenise,
+resolve the first non-flag/non-env-assignment token, reject if it is `true`/`:`/a
+subshell/brace/pipe wrapper around the same).
+
+**Fragile-implementation challenge (passes against the 3-section subset):**
+- *Bigger literal whitelist* (NAMED fragile impl — add the 8 enumerated strings to the
+  frozenset): killed BY THE CANARIES — `:|:` and `{ true; }` are not in any hand-written
+  enumeration; the negative-control intent ("semantic, not a literal whitelist") plus the
+  over-rejection positive force a token-resolving approach. The 8 pinned strings are
+  representative of the wrapper/builtin/subshell/env-assignment/short-circuit classes, NOT
+  an exhaustive list — which is precisely why enumeration is the fragile impl.
+- *Blanket prefix blacklist* (reject anything starting `command`/`env`/`sh`/`bash`/`true`):
+  killed by `test_substantive_verify_commands_still_confirm` — `test ...` and other real
+  commands must still confirm.
+
+## NOTE 3 — back-compat parity between the two production `run_bd` helpers
+
+**1. Business invariant.** `_check_task_mode_queue`'s production `run_bd` maps an old bd
+(exit 0 + non-JSON stdout, because the `blocked` subcommand is absent) to `[]` — "zero
+blocked", degrade-to-drain. `_check_wakeup_blockers`'s production `run_bd` lacks that
+mapping (returns `None` on any JSONDecodeError regardless of exit code). The OBSERVABLE
+consequence is currently SAFE — the wakeup path treats `blocked is None or len==0` as
+allow, so old bd releases on both paths. The invariant: old bd must NEVER trap a
+session on the wakeup path; it must degrade to a release, identically to the queue path.
+
+**6. Negative control.** `test_wakeup_old_bd_exit0_nonjson_degrades_to_release`
+(parametrized over empty / usage-text / arbitrary non-JSON stdout, exit 0) drives the
+PRODUCTION runner (`run_bd=None`, `subprocess.run` mocked) and asserts `decision ==
+"allow"`. Companion `test_wakeup_genuine_bd_failure_still_releases_safely` (missing
+binary) asserts a genuine failure also safe-degrades to release — distinguishing
+"old bd, no subcommand" from "bd broken", both safe here. GREEN today (`None → allow`)
+and GREEN after any alignment fix that adds the explicit `exit-0 → []` mapping. RED only
+if a future change makes the wakeup path fail-toward-block on old bd.
+
+**9. Final outcome verification.** `python3 -m pytest
+harness/tests/test_blocked_bead_gate.py -k wakeup_old_bd -q` and `-k genuine_bd_failure`.
+
+**Oracle's decision (align vs document):** PIN THE OBSERVABLE CONTRACT (old bd → wakeup
+release), not the runner internals. The safe-degradation outcome is already correct, so
+the asymmetry is cosmetic *today* — but it is a latent trap (a future `None`-vs-`[]`
+divergence on the wakeup path would silently regress old-bd installs into permanent
+traps). Pinning the contract catches that divergence without forcing the dev to a
+specific runner implementation; aligning the two runners' source (adding the exit-0→[]
+mapping to the wakeup runner) is an OPTIONAL cleanup the test neither requires nor
+forbids. This is "align by pinning the observable contract", the never-suppress-safe form
+of NOTE 3.
+
+## N (+ NOTE 4) — stale floor-fallback docstrings (dev-sweep, with one guard)
+
+**1. Business invariant.** The regex/deterministic floor is DELETED (classification is
+"semantic or nothing" — the judge is the sole signal; None fails open to allow). Source
+docstrings/comments that still describe a floor the code "defers to" / "falls back to" /
+has "recall over" actively mislead a reader who greps the fallback path. NOTE 4 is folded
+in: `winddown_judge.model_verdict`'s "...→ defer to floor" uses the BARE word "floor"
+(not "regex floor"), so the guard must catch the fallback SENSE, not just the literal
+phrase. No behavioral oracle exists (documentation drift), so ONE cheap architecture
+guard pins the cleanup.
+
+**6. Negative control.** `test_floor_docstring_drift.py` matches the AFFIRMATIVE
+fallback SENSE via context patterns ("defers? to … floor", "falls? back to … floor",
+"recall over … floor", "sibling … floor", with an optional regex/deterministic
+qualifier) against the whitespace-collapsed module text (so docstring line-wrapping is
+irrelevant). It scrubs the correct-negation spans ("no … floor to fall back to") FIRST,
+so the two negation lines (winddown_judge.py:17; stop_hook.py:352) are NOT flagged —
+flagging them would push a dev to DELETE accurate documentation (the over-pin failure
+mode). It does NOT forbid the word "floor" wholesale — a future `math.floor` is untouched.
+RED today against the 6 stale sites (winddown_judge.py:28,72,91 — :91 is NOTE 4;
+stop_hook.py:204,218,260). GREEN after the dev sweep rewords the 6 affirmative mentions.
+
+**9. Final outcome verification.**
+`python3 -m pytest harness/tests/test_floor_docstring_drift.py -q` — both parametrized
+cases turn green once the 6 affirmative stale mentions are reworded to describe the
+judge-only architecture (the negation lines need no change). Verified: a simulated
+post-sweep rewording produces zero offenders.
+
+**Why a guard and not pure dev-sweep-with-review:** the phrases name a DELETED mechanism,
+so the guard is precise (matches the fallback-context sense with a negation carve-out, not
+the bare word) and never spuriously fires after the sweep. It is a legitimate
+documentation-consistency pin, not over-pinning wording the code is free to choose. The
+guard also catches future re-introduction of the deleted floor vocabulary.
+
+## Suite status
+
+`python3 -m pytest harness/tests/ claude/hooks/tests/ -q` → 849 passed, 19 failed.
+Baseline was 839 passed / 0 failed. The 19 reds are exactly the new negative controls
+(7 B1 + 10 C2 + 2 N); the 10 added greens are the positive / over-rejection / NOTE-3
+parity controls (4 B1 real-create + 2 C2 substantive + 4 NOTE-3 old-bd parity). No
+pre-existing test regressed (verified by green-delta accounting: 849−839 = +10, fully
+attributed). All 19 reds fail for the documented right reason (current production code
+exhibits the flagged behavior); each turns green under its named fix.
+
+## Addendum decisions (2026-06-11, post-dispatch supervisor guidance)
+
+- **B1 overturns a pinned tradeoff** — see the "A1 decision record (overturned)" above.
+  Reviewed re-decision, never-suppress-compliant (stronger oracle replaces the old one;
+  the compatible `&&` test stays green).
+- **Tokenization-failure default: fail-OPEN (allow), pinned.** Weighed against the
+  round-2 false-positive bias. Rationale: an unparseable command line is one bash itself
+  refuses to run (verified: `bash -c 'git log --grep="x'` → "unexpected EOF" and does NOT
+  execute), so there is NO real `git worktree add` to miss — the false-negative risk the
+  FP bias guards against is vacuous on unparseable input. Meanwhile deny-on-unparseable
+  punishes weird-but-innocent commands with an inapplicable redirect, and the hook now
+  fires on every git call (coercive friction; Adler & Borys repair test). The supervisor's
+  "retain FP bias under genuine ambiguity" does not apply: tokenization failure is not
+  genuine ambiguity about whether it's a real invocation — bash's own refusal settles it.
+  Pinned by `test_unparseable_command_line_does_not_deny` (phrase embedded INSIDE the
+  broken quote so the shlex error, not phrase-absence, drives the allow).
+- **C2: both reviewers' enumerations + novel canaries**; enumeration-only is the NAMED
+  fragile impl (see C2 section).
+- **NOTE 3: align-by-contract** (pin the observable old-bd→release contract; runner-source
+  alignment optional). **NOTE 4: folded into the N guard** (bare-"floor" fallback sense).

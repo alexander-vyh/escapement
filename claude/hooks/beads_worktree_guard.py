@@ -31,7 +31,7 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import NoReturn, Optional
+from typing import List, NoReturn, Optional
 
 # Shared signal capture per claude/rules/gate-design.md Rule 2.
 sys.path.insert(0, str(Path(__file__).parent))
@@ -42,16 +42,132 @@ except ImportError:  # pragma: no cover
         return None
 
 
-# A1 FIX: the original anchor (^\s*git\s+worktree\s+add) missed `git -C <path>
-# worktree add`, `git --git-dir=... worktree add`, `cd ... && git worktree add`,
-# and `env ... git worktree add`. The new pattern uses re.search with a non-greedy
-# span `[^\n|;&]*?` between `git` and `worktree add`, which:
-#   - crosses global flags and space-separated flag args (e.g. `-C /path`)
-#   - stops at shell separators (|, ;, &) and newlines so it does not cross
-#     into a different command in a pipeline
-#   - leaves innocent git commands (log, status, diff, branch, fetch) unmatched
-#     because they contain no `worktree add` token
-_WORKTREE_ADD_RE = re.compile(r"\bgit\b[^\n|;&]*?\bworktree\s+add\b")
+# B1 FIX: shlex tokenization replaces the substring regex detection for
+# `git worktree add`. The regex `\bgit\b[^\n|;&]*?\bworktree\s+add\b` matched
+# the phrase anywhere after `git`, including inside quoted arguments such as
+# `git log --grep="worktree add"` or `git commit -m "docs: worktree add guide"`.
+#
+# The tokenizer approach:
+#   1. Split the command string on shell separators (&&, ||, ;, |, newlines)
+#      using a simple regex. Each segment is a candidate command.
+#   2. For each segment, attempt shlex.split to tokenize it.
+#      - shlex error (unbalanced quote) → fail-open: allow (never deny on
+#        a command the hook can't parse; pinned by test_unparseable_command_line).
+#   3. Skip leading env-var assignments (TOKEN=value) and detect when the
+#      first non-assignment, non-env-cmd token is `git` (or an env/command
+#      prefix whose effective command is `git`).
+#   4. After `git`, skip global flags: bare flags (-x, --flag), value flags
+#      (-C <path>, --git-dir=<path>, --work-tree=<path>, -c key=val, etc.).
+#   5. Detect when the first two positional subcommand tokens are `worktree`
+#      then `add`. Quoted phrases and flag values are single tokens in the
+#      shlex output and will never match as subcommand tokens unless they
+#      literally are `worktree` or `add` (which only a real invocation is).
+
+# Shell separator pattern: splits on &&, ||, ;, |, newlines.
+_SHELL_SEP_RE = re.compile(r"&&|\|\||[;|\n]")
+
+# Git global flags that consume one additional token (space-separated value).
+_GIT_VALUE_FLAGS = frozenset({
+    "-C", "--work-tree", "--git-dir", "--git-common-dir",
+    "--namespace", "--super-prefix", "-c",
+})
+
+# Git global flags that stand alone (no following token consumed).
+_GIT_BARE_FLAG_RE = re.compile(
+    r"^(?:--version|--help|--html-path|--man-path|--info-path|"
+    r"-p|--paginate|--no-pager|--no-optional-locks|"
+    r"--list-cmds=\S+|--literal-pathspecs|--no-literal-pathspecs|"
+    r"--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs|"
+    r"-(?:v+|q+))$"
+)
+
+# A token is a shell env-var assignment if it matches NAME=VALUE.
+_ENVVAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _is_worktree_add_subcommand(tokens: List[str]) -> bool:
+    """Return True iff the token list represents a `git worktree add` invocation.
+
+    `worktree` and `add` must appear as POSITIONAL git subcommand tokens, NOT
+    inside a flag value or quoted argument. Supports global git flags (-C <path>,
+    --git-dir=..., -c key=val), env-var assignment prefixes, and `env` / `command`
+    prefixes before git.
+
+    Returns False (not a match) rather than raising on any unexpected input.
+    """
+    i = 0
+    n = len(tokens)
+
+    # Skip leading env-var assignments (PAGER=cat GIT_DIR=x git ...).
+    while i < n and _ENVVAR_RE.match(tokens[i]):
+        i += 1
+    if i >= n:
+        return False
+
+    # Handle `env [NAME=VAL ...] git` prefix: `env` strips env and executes the
+    # next non-assignment token as the command. Also handle `command git`.
+    # We allow multiple levels of these wrappers (e.g. `command env git`).
+    while i < n and tokens[i] in ("env", "command"):
+        i += 1
+        # Skip any assignments or flags after `env` / `command`.
+        while i < n and (_ENVVAR_RE.match(tokens[i]) or tokens[i].startswith("-")):
+            # `env -i`, `env -u NAME`, `command -p`, etc.
+            if tokens[i] in ("-u", "-S") and i + 1 < n:
+                i += 2  # consume flag + its argument
+            else:
+                i += 1
+        if i >= n:
+            return False
+
+    # The effective command must be `git` (bare or path-qualified like /usr/bin/git).
+    if tokens[i].split("/")[-1] not in ("git",):
+        return False
+    i += 1  # consumed `git`
+
+    # Skip git global flags.
+    while i < n:
+        tok = tokens[i]
+        if tok in _GIT_VALUE_FLAGS:
+            i += 2  # flag + its value
+            continue
+        # --git-dir=<path>, --work-tree=<path>, -C<path> (attached form), -c key=val
+        if (tok.startswith("--git-dir=") or tok.startswith("--work-tree=")
+                or tok.startswith("--git-common-dir=") or tok.startswith("--namespace=")
+                or tok.startswith("--super-prefix=") or tok.startswith("-c")
+                and len(tok) > 2 and tok[2:3] != " "):
+            i += 1
+            continue
+        if _GIT_BARE_FLAG_RE.match(tok):
+            i += 1
+            continue
+        break  # first non-flag token is the subcommand
+
+    # The next two positional tokens must be `worktree` then `add`.
+    if i + 1 < n and tokens[i] == "worktree" and tokens[i + 1] == "add":
+        return True
+    return False
+
+
+def _command_has_worktree_add(command: str) -> bool:
+    """Return True iff `command` contains a real `git worktree add` subcommand.
+
+    Uses shlex tokenization per segment so quoted argument values never match.
+    Fails OPEN (returns False) on any tokenization error.
+    """
+    # Split on shell separators; each segment is a candidate command.
+    segments = _SHELL_SEP_RE.split(command)
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        try:
+            tokens = shlex.split(seg)
+        except ValueError:
+            # Unbalanced quote or other shlex error — fail open.
+            return False
+        if _is_worktree_add_subcommand(tokens):
+            return True
+    return False
 
 
 def _in_beads_project(cwd: Path) -> bool:
@@ -281,8 +397,9 @@ def main() -> int:
     cwd_raw = data.get("cwd") or data.get("workingDirectory") or os.getcwd()
     cwd = Path(cwd_raw)
 
-    # A1: use re.search so git -C / --git-dir / compound forms are found.
-    if _WORKTREE_ADD_RE.search(command):
+    # B1: use shlex tokenization to detect `git worktree add` as a POSITIONAL
+    # subcommand (not inside a quoted argument). Fails open on parse errors.
+    if _command_has_worktree_add(command):
         if not _in_beads_project(cwd):
             return 0  # plain git repo — worktree add is fine
         _record_signal(
