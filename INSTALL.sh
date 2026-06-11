@@ -26,6 +26,14 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 
 # Pinned-checkout deploy (bead ft1). Overridable via env for testing/relocation.
 # The old CWS_* variables remain accepted for existing scripts.
+#
+# B egk fix: track whether ESCAPEMENT_PIN_DIR was explicitly provided by the
+# caller. In --update mode with no explicit override, we resolve the EFFECTIVE
+# pin dir from where a deployed sentinel symlink actually points (so a CWS-era
+# machine whose symlinks resolve into .cws-pinned gets THAT dir updated, not a
+# freshly created .escapement-pinned that nothing links to). An explicit
+# ESCAPEMENT_PIN_DIR always wins (B2), and no-symlinks falls back to the default.
+_PIN_DIR_EXPLICIT="${ESCAPEMENT_PIN_DIR+set}"  # "set" if caller exported it; else ""
 ESCAPEMENT_PIN_DIR="${ESCAPEMENT_PIN_DIR:-${CWS_PIN_DIR:-$CLAUDE_DIR/.escapement-pinned}}"
 ESCAPEMENT_PIN_REF="${ESCAPEMENT_PIN_REF:-${CWS_PIN_REF:-main}}"
 ESCAPEMENT_PIN_REMOTE="${ESCAPEMENT_PIN_REMOTE:-${CWS_PIN_REMOTE:-$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || echo "$REPO_DIR")}}"
@@ -261,25 +269,65 @@ PY
 }
 
 # Create or refresh the pinned checkout that ~/.claude symlinks resolve into.
-# Idempotent: clone if absent, else fast-forward to ESCAPEMENT_PIN_REF. Never rewrites
-# local edits (ff-only) — the pinned checkout is deploy state, not a dev tree.
+# Accepts an optional first arg: the pin dir to act on (defaults to
+# $ESCAPEMENT_PIN_DIR). Idempotent: clone if absent, else fast-forward to
+# ESCAPEMENT_PIN_REF. Never rewrites local edits (ff-only) — the pinned checkout
+# is deploy state, not a dev tree.
 ensure_pinned_checkout() {
-  if [[ -d "$ESCAPEMENT_PIN_DIR/.git" ]]; then
-    echo "==> refreshing pinned checkout: $ESCAPEMENT_PIN_DIR -> $ESCAPEMENT_PIN_REF"
-    run "git -C '$ESCAPEMENT_PIN_DIR' fetch --quiet '$ESCAPEMENT_PIN_REMOTE' '$ESCAPEMENT_PIN_REF'"
-    run "git -C '$ESCAPEMENT_PIN_DIR' checkout --quiet '$ESCAPEMENT_PIN_REF'"
-    run "git -C '$ESCAPEMENT_PIN_DIR' merge --ff-only FETCH_HEAD"
+  local pin_dir="${1:-$ESCAPEMENT_PIN_DIR}"
+  if [[ -d "$pin_dir/.git" ]]; then
+    echo "==> refreshing pinned checkout: $pin_dir -> $ESCAPEMENT_PIN_REF"
+    run "git -C '$pin_dir' fetch --quiet '$ESCAPEMENT_PIN_REMOTE' '$ESCAPEMENT_PIN_REF'"
+    run "git -C '$pin_dir' checkout --quiet '$ESCAPEMENT_PIN_REF'"
+    run "git -C '$pin_dir' merge --ff-only FETCH_HEAD"
   else
-    echo "==> creating pinned checkout: clone $ESCAPEMENT_PIN_REMOTE -> $ESCAPEMENT_PIN_DIR"
-    run "git clone --quiet '$ESCAPEMENT_PIN_REMOTE' '$ESCAPEMENT_PIN_DIR'"
-    run "git -C '$ESCAPEMENT_PIN_DIR' checkout --quiet '$ESCAPEMENT_PIN_REF'"
+    echo "==> creating pinned checkout: clone $ESCAPEMENT_PIN_REMOTE -> $pin_dir"
+    run "git clone --quiet '$ESCAPEMENT_PIN_REMOTE' '$pin_dir'"
+    run "git -C '$pin_dir' checkout --quiet '$ESCAPEMENT_PIN_REF'"
   fi
+}
+
+# B egk: resolve the EFFECTIVE pin dir for --update mode.
+# If the caller explicitly set ESCAPEMENT_PIN_DIR, use that (B2 override wins).
+# Otherwise read the sentinel symlink to find which checkout is actually live.
+# Falls back to the default ESCAPEMENT_PIN_DIR if no sentinel exists (B3 fresh).
+resolve_effective_pin_dir() {
+  if [[ "$_PIN_DIR_EXPLICIT" == "set" ]]; then
+    echo "$ESCAPEMENT_PIN_DIR"
+    return
+  fi
+  # Try to resolve from a deployed sentinel hook symlink.
+  local sentinel="$CLAUDE_DIR/hooks/spec_id_enforcement.py"
+  if [[ -L "$sentinel" ]]; then
+    local target
+    target="$(readlink "$sentinel")"
+    # The target is something like <checkout>/<relative-path>. Strip the
+    # relative suffix to get the checkout root. We look for the first component
+    # that is a git checkout (contains /.git/).
+    # Strategy: split on '/.git/' — everything before it is the checkout root.
+    local checkout_root
+    # Remove the path component from the sentinel's relative path inside the checkout.
+    # The sentinel symlink points to: <pin_dir>/claude/hooks/spec_id_enforcement.py
+    # We need to strip "/claude/hooks/spec_id_enforcement.py" to get <pin_dir>.
+    # Use parameter substitution: strip from '/claude/' onward.
+    checkout_root="${target%%/claude/*}"
+    if [[ -n "$checkout_root" && -d "$checkout_root/.git" ]]; then
+      echo "$checkout_root"
+      return
+    fi
+  fi
+  # No sentinel or unresolvable — fall through to the default.
+  echo "$ESCAPEMENT_PIN_DIR"
 }
 
 # --- Execute ---
 if [[ "$MODE" == "update" ]]; then
   # Refresh the pinned checkout only; existing symlinks already point into it.
-  ensure_pinned_checkout
+  # B egk fix: update the dir the deployed symlinks ACTUALLY point into, not the
+  # default dir (which may differ on CWS-era machines whose symlinks point into
+  # .cws-pinned rather than .escapement-pinned).
+  _effective_pin_dir="$(resolve_effective_pin_dir)"
+  ensure_pinned_checkout "$_effective_pin_dir"
   echo
   echo "==> pinned checkout now at $ESCAPEMENT_PIN_REF; ~/.claude reflects the update."
 elif [[ "$MODE" == "install" ]]; then

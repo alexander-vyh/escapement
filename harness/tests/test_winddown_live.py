@@ -50,16 +50,21 @@ def _no_work(cwd, thread_dir=None):
     return ("allow", "implicit_queue_scoped_drained")
 
 
-# A veiled stop the REGEX FLOOR does NOT match (no wrap/night/push tokens) — the
-# case only the model can catch. If winddown_gate's regex ever learns this string,
-# this test's premise breaks loudly (assert documents the dependency).
+# A veiled-stop offer. Post-refactor (judge-only) there is no regex floor, so the
+# judge is consulted for EVERY conversational stop with work remaining — this string
+# is just a representative offer the injected judge classifies. (Kept the name for
+# diff continuity; it no longer implies a regex blind spot.)
 _REGEX_BLIND_OFFER = "Everything's in a good state and there's nothing pressing left to do here."
 
 
-def test_regex_blind_offer_is_actually_regex_blind():
-    # Guard: the whole point of the inline judge is the text regex CANNOT catch.
+def test_regex_floor_is_removed():
+    # Architecture guard (replaces test_regex_blind_offer_is_actually_regex_blind):
+    # the regex floor is KILLED. is_winddown_offer must no longer exist on the gate
+    # module — the judge is the sole classifier.
     import winddown_gate as wg
-    assert wg.is_winddown_offer(_REGEX_BLIND_OFFER) is False
+    assert not hasattr(wg, "is_winddown_offer"), (
+        "is_winddown_offer (regex floor) must be removed — classification is judge-only"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -94,22 +99,30 @@ def test_inline_judge_writes_verdict_cache(tmp_path):
     assert cached["verdict"] is True and "ts" in cached
 
 
-def test_inline_judge_NOT_called_when_regex_already_caught_it(tmp_path):
-    """Fragile-impl reject: the judge must NOT run when regex already flagged
-    the offer — that would burn inline latency for no recall gain."""
+def test_judge_IS_consulted_for_obvious_offer_no_regex_preempt(tmp_path):
+    """REPLACES test_inline_judge_NOT_called_when_regex_already_caught_it.
+
+    Under judge-only there is no regex to pre-empt the judge. Even for an obvious
+    wrap offer that the OLD regex floor would have caught for free, the judge is now
+    the SOLE classifier and MUST be consulted (cold cache + work remains). The block
+    comes from the judge's verdict, not a regex. A surviving-regex impl would
+    short-circuit here and leave the judge uncalled — which this test rejects."""
     calls = []
 
     def spy_judge(text):
         calls.append(text)
-        return True
+        return True  # judge: this IS a wind-down
 
     tp = _write_transcript(tmp_path, [_asst("want me to wrap for the night, or keep going?")])
     disp = sh._winddown_override(
         "conversational", tp, "", tmp_path,
         work_check=_work_remains, judge=spy_judge,
     )
-    assert disp is not None          # still blocks (regex caught it)
-    assert calls == []               # but the judge was never consulted
+    assert disp is not None, "judge flagged the offer + work remains → must block"
+    assert calls == ["want me to wrap for the night, or keep going?"], (
+        "judge-only: the judge MUST be consulted even for an obvious wrap offer "
+        f"(no regex pre-empt); calls={calls}"
+    )
 
 
 def test_inline_judge_NOT_called_when_no_work_remains(tmp_path):
@@ -131,8 +144,9 @@ def test_inline_judge_NOT_called_when_no_work_remains(tmp_path):
 
 
 def test_inline_judge_fail_open_when_model_errors(tmp_path):
-    """Model raises → defer to regex floor; a regex-blind offer is NOT fabricated
-    into a block. (Fail-open: the gate never depends on the model being up.)"""
+    """Judge raises → ALLOW (no fabricated block). Under judge-only there is no regex
+    floor to defer to: 'semantic or nothing'. A judge problem must never block or
+    crash the hook — the offer is NOT fabricated into a block."""
     def boom_judge(text):
         raise RuntimeError("model down")
 
@@ -141,7 +155,45 @@ def test_inline_judge_fail_open_when_model_errors(tmp_path):
         "conversational", tp, "", tmp_path,
         work_check=_work_remains, judge=boom_judge,
     )
-    assert disp is None  # regex didn't catch it + model errored → no block (not fabricated)
+    assert disp is None  # judge errored, no regex floor → no block (fail-open, not fabricated)
+
+
+def test_fail_open_emits_judge_unavailable_signal(tmp_path, monkeypatch):
+    """NEW (gate-design Rule 2 / F5-class): when the judge is unavailable but work
+    remains, the fail-open ALLOW must NOT be silent — a `winddown_judge_unavailable`
+    signal must be recorded so judge outages are visible in the corpus (not an
+    invisible hole, the same class as the R3 ImportError fail-open).
+
+    Observable seam: the incidents log. We redirect sh.INCIDENTS_LOG to a tmp file
+    and assert a record carrying the unavailable reason lands. The judge returns None
+    (unclear/down) WITH reversible work remaining — the exact slice that must signal.
+
+    This is RED until the production fail-open path emits the signal; the current
+    code allows silently."""
+    incidents = tmp_path / "incidents.jsonl"
+    monkeypatch.setattr(sh, "INCIDENTS_LOG", incidents)
+    # Avoid touching the real .beads/.gate-signal store from the bridge.
+    monkeypatch.setenv("GATE_SIGNAL_FALLBACK_DIR", str(tmp_path / "sig"))
+
+    def unavailable_judge(text):
+        return None  # judge down / unclear → fail-open
+
+    tp = _write_transcript(tmp_path, [_asst(_REGEX_BLIND_OFFER)])
+    disp = sh._winddown_override(
+        "conversational", tp, str(tmp_path), tmp_path,
+        work_check=_work_remains, judge=unavailable_judge,
+    )
+    assert disp is None, "judge unavailable → fail-open allow (no block)"
+
+    assert incidents.exists(), (
+        "fail-open on an unavailable judge must record a signal, not stop silently "
+        "(gate-design Rule 2) — no incidents file was written"
+    )
+    body = incidents.read_text()
+    assert "winddown_judge_unavailable" in body, (
+        "the fail-open must be labeled `winddown_judge_unavailable` in the corpus so "
+        f"judge outages are countable; incidents body was: {body!r}"
+    )
 
 
 def test_cached_verdict_short_circuits_inline_judge(tmp_path):
@@ -264,6 +316,7 @@ def test_git_flips_bd_drained_to_block_in_override(tmp_path):
     tp = _write_transcript(tmp_path, [_asst("want me to wrap for the night, or keep going?")])
     disp = sh._winddown_override(
         "conversational", tp, str(repo), tmp_path,
-        work_check=_no_work,  # beads says nothing left
+        work_check=_no_work,        # beads says nothing left
+        judge=lambda t: True,       # judge-only: the verdict must be supplied (no regex)
     )
-    assert disp is not None  # git work-remains flips it to block
+    assert disp is not None  # git work-remains flips it to block (verdict says offer)

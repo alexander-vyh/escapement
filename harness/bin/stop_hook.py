@@ -71,6 +71,26 @@ _TASK_MODE_DISPLAY: dict[str, str] = {
         "they record WHAT to resume and bring you back. ScheduleWakeup WITHOUT filing the "
         "remaining work is pause-and-evaporate; that is the stall this gate exists to prevent."
     ),
+    "blocked_tasks_no_wakeup": (
+        "continuation-harness [task-mode]: blocked_tasks_no_wakeup. The ready queue is "
+        "empty but scoped blocked beads exist — Stop is NOT granted. A blocked bead is not "
+        "a clean queue drain; it is a laundering hole unless the blocker is real and "
+        "verifiable. Escape paths: (1) Call ScheduleWakeup to register a future check-in — "
+        "together with the blocked bead it records when and why you'll resume; (2) if the "
+        "blocker claim is refuted, unblock or close the bead and keep working; (3) add a "
+        "`blocker-verify: <cmd>` line to the bead's description so the claim can be "
+        "mechanically confirmed. The user can always release you by saying 'stop'."
+    ),
+    "wakeup_blocker_unverified": (
+        "continuation-harness [task-mode]: wakeup_blocker_unverified. A wakeup is "
+        "registered, but a scoped blocked bead carries an unverified blocker claim — the "
+        "wakeup does not release the gate. A blocker must be substantiated before it can "
+        "unlock a wakeup-path stop. Escape paths: (1) Add a `blocker-verify: <cmd>` line "
+        "to the bead description whose command exits 0 to confirm the blocker is real; "
+        "(2) add a `blocker-waiver: <reason>` line (≥20 chars, non-placeholder) if the "
+        "blocker genuinely cannot be scripted; (3) if the blocker claim is invalid, "
+        "unblock or close the bead. The user can always release you by saying 'stop'."
+    ),
 }
 
 
@@ -304,8 +324,9 @@ def _winddown_override(
     remaining, return the recovery display to BLOCK with; else None.
 
     Reversible work = the bd session-scoped queue (work_check) OR git state (unpushed
-    commits / dirty tracked files). The model layer is LIVE: when the regex floor missed
-    the text AND no fresh cached verdict exists, the judge runs inline (bounded, fail-open).
+    commits / dirty tracked files). Classification is judge-only: when the cache is cold
+    the judge runs inline (bounded, fail-open). A None verdict means no classifier fired
+    → allow, with a gate signal emitted so the outage is observable (gate-design Rule 2).
 
     Scoped DELIBERATELY to the `conversational` allow (would_block_stop.py:176-183) —
     the free-pass hole. Genuine terminals (verification_passed / user_released /
@@ -326,11 +347,57 @@ def _winddown_override(
     if not work_remains:
         return None  # nothing reversible (bd or git) → legitimate stop; never nag, never judge
     model_offer = _read_cached_winddown_verdict(thread_dir, text=text)
-    if model_offer is None and not _wg.is_winddown_offer(text):
-        # cache cold AND regex missed it → exactly where the live judge earns its keep.
+    if model_offer is None:
+        # Cache cold — consult the judge inline. Judge is the sole classifier; there is
+        # no regex floor to fall back to (classification is "semantic or nothing").
         model_offer = _compute_winddown_verdict_inline(text, thread_dir, judge=judge)
+    if model_offer is None:
+        # Judge unavailable after inline attempt. Fail open (gate-design Rule 2: emit
+        # signal so the outage is visible in the half-life review corpus, never silent).
+        _log_incident({
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "session_id": "",
+            "decision": "allow",
+            "reason": "winddown_judge_unavailable",
+            "was_correct": None,
+            "notes": "winddown_rung",
+        })
+        return None
     decision, _ = _wj.decide(text, work_remains, model_offer=model_offer)
     return _wg.RECOVERY_PROMPT if decision == "block" else None
+
+
+def _main_repo_has_beads(cwd: str) -> bool:
+    """A3: detect if `cwd` is a LINKED git worktree (`.git` is a FILE) and the
+    resolved main repo has `.beads/`. Used to widen the `has_beads_dir` check so
+    a foreign beads worktree (which lacks a literal `.beads/` at its own cwd)
+    still degrades to BLOCK rather than to the graceful-allow path when bd fails.
+
+    Returns False for:
+    - real repos (`.git` is a directory, not a file)
+    - plain-git linked worktrees (main repo has no `.beads/`)
+    - unreadable / malformed `.git` files
+
+    Fail-open: any OSError → False (never fabricates a block).
+    """
+    if not cwd:
+        return False
+    try:
+        git_path = pathlib.Path(cwd) / ".git"
+        if not git_path.is_file():
+            return False
+        content = git_path.read_text(encoding="utf-8", errors="replace").strip()
+        if not content.startswith("gitdir:"):
+            return False
+        gitdir_str = content[len("gitdir:"):].strip()
+        gitdir = pathlib.Path(gitdir_str)
+        if not gitdir.is_absolute():
+            gitdir = (pathlib.Path(cwd) / gitdir).resolve()
+        # <main>/.git/worktrees/<name> -> parent.parent = <main>/.git -> parent = <main>
+        main_repo = gitdir.parent.parent.parent
+        return (main_repo / ".beads").is_dir()
+    except OSError:
+        return False
 
 
 def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
@@ -366,19 +433,39 @@ def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
     # A real beads repo announces itself with a `.beads/` dir; a worktree does
     # not (it uses a redirect / BEADS_DIR). We use this ONLY to decide how to
     # degrade when bd is unavailable — never to skip the queue check.
-    has_beads_dir = (pathlib.Path(repo_cwd) / ".beads").exists()
+    # A3 FIX: also treat a linked worktree whose MAIN repo has `.beads/` as a
+    # beads context for degradation purposes — so bd-unavailable there still
+    # degrades to BLOCK rather than the graceful-allow that opens the laundering
+    # channel (the foreign-worktree incident, 2026-06).
+    has_beads_dir = (
+        (pathlib.Path(repo_cwd) / ".beads").exists()
+        or _main_repo_has_beads(repo_cwd)
+    )
 
     if run_bd is None:
         import json as _json
 
         def run_bd(args: list[str]) -> Optional[list]:
-            """Run bd with --json output; returns parsed list or None on failure."""
+            """Run bd with --json output; returns parsed list or None on failure.
+
+            Returns [] (empty list) when the subprocess exits 0 but produces no
+            parseable JSON (the `blocked` subcommand may not exist on older bd
+            versions — treat that as "zero blocked beads" rather than a failure).
+            Returns None only for genuine subprocess failures (timeout, missing
+            binary, non-zero exit with no parseable output).
+            """
             cmd = ["bd"] + args + ["--json"] + (["--parent", parent_id] if parent_id else [])
             try:
                 r = subprocess.run(cmd, cwd=repo_cwd, capture_output=True, text=True, timeout=15)
-                return _json.loads(r.stdout)
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
-                    _json.JSONDecodeError, ValueError):
+                try:
+                    return _json.loads(r.stdout)
+                except (_json.JSONDecodeError, ValueError):
+                    # Subprocess exited (possibly 0) but stdout is not JSON.
+                    # Treat exit 0 as an empty result; non-zero as a failure.
+                    if r.returncode == 0:
+                        return []
+                    return None
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 return None
 
     ready = run_bd(["ready"])
@@ -393,13 +480,85 @@ def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
     if len(ready) > 0:
         return ("block", "tasks_remain_in_queue")
 
-    # bd ready empty: NOTHING is actionable right now → allow stop. Blocked or
-    # deferred tasks are PARKED, not work-in-flight; they must not gate stopping
-    # (that over-reach made the gate demand a literal "stop" on conversational
-    # turns). The agent can still VOLUNTARILY ScheduleWakeup when it is genuinely
-    # waiting on a blocker — it just isn't forced to. The gate keeps its teeth via
-    # the `tasks_remain_in_queue` block above: actually-ready work still blocks.
+    # bd ready empty: check for scoped blocked beads before granting a drain.
+    # An empty ready list with ≥1 blocked bead is the laundering hole: the agent
+    # filed a blocker, drained ready, and called it a clean stop. We must probe
+    # blocked to distinguish a genuine drain from a manufactured one.
+    blocked_args = ["blocked"] + (["--parent", parent_id] if parent_id else [])
+    blocked = run_bd(blocked_args)
+    if blocked is None:
+        # bd failed on the blocked query. Inside a real beads repo, fail toward
+        # BLOCK — we cannot verify the drain. Outside one (worktree or older bd
+        # that lacks the `blocked` subcommand), treat the query as returning [] so
+        # the gate degrades gracefully to queue_drained rather than trapping sessions
+        # in environments where the blocked probe is unavailable.
+        if has_beads_dir:
+            return ("block", "task_mode_bd_ready_failed")
+        return ("allow", "queue_drained")
+    if len(blocked) > 0:
+        return ("block", "blocked_tasks_no_wakeup")
+    # Genuinely empty: no ready work, no blocked beads in scope — clean drain.
     return ("allow", "queue_drained")
+
+
+def _check_wakeup_blockers(session_mode: dict, run_bd=None) -> Tuple[str, str]:
+    """Gate the wakeup-release path on blocker verifiability (R3).
+
+    When a task-mode session would be released by a registered wakeup, this
+    function audits every scoped blocked bead for a substantiated blocker claim.
+    A bead is satisfied iff it carries a `blocker-verify:` command that exits 0
+    (not trivial) OR a substantive `blocker-waiver:` reason (≥20 chars, not a
+    placeholder).  Any unsatisfied blocked bead yields
+    ("block", "wakeup_blocker_unverified").
+
+    Zero blocked beads → ("allow", "wakeup_no_blockers") — nothing to verify.
+
+    `run_bd` is injectable for testing (same contract as _check_task_mode_queue).
+    `user_released` is unconditional and is handled upstream; this function is
+    only called when the wakeup path is being evaluated.
+    """
+    try:
+        from blocker_verify import blocker_satisfied  # noqa: PLC0415 — lazy import
+    except ImportError:
+        # blocker_verify not available — fail open: do not block what was previously
+        # allowed. This module is mandatory in R3-complete installs; the test suite
+        # ensures it exists. On older installs, degrade gracefully.
+        # F5 fix (gate-design Rule 2): emit a signal so the fail-open is observable
+        # in the half-life review corpus and never silent.
+        _record_gate_signal(
+            "allow", "blocker_verify_unavailable", "", "blocker_verify_import_error"
+        )
+        return ("allow", "blocker_verify_unavailable")
+
+    repo_cwd = session_mode.get("repo_cwd", "")
+    parent_id = session_mode.get("parent_id") or session_mode.get("task_id")
+
+    if run_bd is None:
+        import json as _json
+
+        def run_bd(args: list) -> Optional[list]:
+            cmd = ["bd"] + args + ["--json"] + (["--parent", parent_id] if parent_id else [])
+            try:
+                r = subprocess.run(cmd, cwd=repo_cwd, capture_output=True, text=True, timeout=15)
+                return _json.loads(r.stdout)
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
+                    _json.JSONDecodeError, ValueError):
+                return None
+
+    blocked_args = ["blocked"] + (["--parent", parent_id] if parent_id else [])
+    blocked = run_bd(blocked_args)
+    if blocked is None or len(blocked) == 0:
+        # No blocked beads (or bd unavailable): nothing to verify; wakeup stands.
+        return ("allow", "wakeup_no_blockers")
+
+    for bead in blocked:
+        if not isinstance(bead, dict):
+            continue
+        result = blocker_satisfied(bead)
+        if not result.confirmed:
+            return ("block", "wakeup_blocker_unverified")
+
+    return ("allow", "wakeup_blockers_verified")
 
 
 _IMPLICIT_QUEUE_DISPLAY = (
@@ -575,6 +734,29 @@ def main() -> int:
         # bypass the queue gate (it would let a task-mode session with ready work
         # stop). Gate strictly on the two real overrides.
         if override_decision == "allow" and override_reason in ("wakeup_registered", "user_released"):
+            # F1 wiring (verifier Finding 1): a wakeup override must pass through
+            # _check_wakeup_blockers before being allowed — a fabricated blocker bead
+            # can launder a permanent stop through the wakeup path.  user_released is
+            # unconditional and bypasses the check.
+            if override_reason == "wakeup_registered":
+                wakeup_blocker_decision, wakeup_blocker_reason = _check_wakeup_blockers(
+                    session_mode
+                )
+                if wakeup_blocker_decision == "block":
+                    _log_incident({
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "session_id": session_id,
+                        "decision": wakeup_blocker_decision,
+                        "reason": wakeup_blocker_reason,
+                        "was_correct": None,
+                        "notes": "task_mode_wakeup_blocker_check",
+                    })
+                    display = (
+                        _TASK_MODE_DISPLAY.get(wakeup_blocker_reason)
+                        or RESUMPTION_PROMPT.format(reason=wakeup_blocker_reason)
+                    )
+                    print(json.dumps({"decision": "block", "reason": display}))
+                    return 0
             # universal overrides apply in task mode too.
             # Tag a wakeup-allow as scope_wakeup_pause so half-life review can count
             # pacing-pause fires vs genuine completion (858.6 / design Step 4 signal).

@@ -141,6 +141,15 @@
         ]
       },
       {
+        "matcher": "Bash(git:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/beads_worktree_guard.py"
+          }
+        ]
+      },
+      {
         "matcher": "Agent",
         "hooks": [
           {

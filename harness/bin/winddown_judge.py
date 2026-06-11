@@ -5,14 +5,16 @@ Calls the local Rapid-MLX model (OpenAI-compatible API at localhost:8000, the sa
 backend the `local-llm` MCP server wraps) to classify whether an assistant turn-final
 message is a wind-down / decision-punt offer. This is the SWE-PRM pattern — a separate
 model judging the trajectory — and it validated 11/11 on the labeled set live, handling
-nuance the regex floor (winddown_gate.py) cannot.
+nuance that regex patterns cannot.
 
 Two invariants, both TESTED:
   - FAIL-OPEN: any model error / timeout / unparseable verdict → None, and `decide`
-    falls back to the deterministic regex floor. The gate NEVER depends on the model
-    being up (it was down at 01:41 the night this was built — that's the normal case).
-  - UNION RECALL: `decide` blocks if EITHER the regex floor OR the model flags an offer
-    (gated by reversible-work-remaining, which prevents nagging a legitimate stop).
+    returns ("allow", "no_winddown_offer"). The gate NEVER depends on the model being up.
+    The outage is signalled at the hook layer (stop_hook._winddown_override) per
+    gate-design Rule 2.
+  - JUDGE OWNS RECALL: `decide` blocks only when the model flags an offer (gated by
+    reversible-work-remaining, which prevents nagging a legitimate stop). There is no
+    regex floor to fall back to — None verdict means no classifier fired → allow.
 
 The model call belongs in a BACKGROUND monitor (so its latency never blocks the user's
 turn); the Stop hook reads the cached verdict and calls `decide`.
@@ -101,12 +103,15 @@ def decide(
     *,
     model_offer: Optional[bool] = None,
 ) -> Tuple[str, str]:
-    """Combine the regex floor with the (pre-computed) model verdict.
+    """Route the (pre-computed) model verdict through the wind-down rung.
 
-    Union on recall: an offer flagged by EITHER source counts. The reversible-work gate
-    in winddown_gate.winddown_decision prevents nagging a legitimate stop. `model_offer`
-    is the verdict from `model_verdict` (None = model unavailable → floor decides alone).
+    The judge is the sole classifier. `model_offer` is the verdict from `model_verdict`:
+      - True  → offer detected → rung decides based on reversible_work_remains
+      - False → not an offer → allow
+      - None  → model unavailable / unclear → fail open to allow ("semantic or nothing")
+
+    The reversible-work gate in winddown_gate.winddown_decision prevents nagging a
+    legitimate stop even when the model flags an offer.
     """
-    regex_offer = wg.is_winddown_offer(assistant_text)
-    offer = regex_offer or (model_offer is True)
+    offer = (model_offer is True)
     return wg.winddown_decision(assistant_text, reversible_work_remains, is_offer=offer)
