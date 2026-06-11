@@ -21,56 +21,193 @@ from dataclasses import dataclass
 from typing import Optional
 
 # ---------------------------------------------------------------------------
-# Trivial-command rejection set (value-not-presence, gate-design Rule 3).
-# These would exit 0 if run, but they prove nothing — they are the exact
-# bypass a presence-only implementation would accept.
+# Semantic no-op detection (value-not-presence, gate-design Rule 3).
 #
-# F2 (verifier Finding 2): the original narrow set {"true", ":", "exit 0"} is
-# bypassed by path-qualified variants (/bin/true, /usr/bin/true), shell-decorated
-# variants (true 2>/dev/null), compounds (true && true), and always-true bracket
-# expressions ([ 0 -eq 0 ]). The set is extended and the normaliser strips the
-# common wrappings before matching.
+# A trivial command is one whose every "atomic" component is a known no-op
+# after stripping wrappers and decomposing on shell operators.  We use a
+# recursive semantic normaliser rather than an enumeration because an
+# enumeration is always bypassable by novel compositions (confirmed canaries:
+# `:|:`, `{ true; }`).
+#
+# Atomic no-ops (the closed base set):
+#   true, :, exit 0
+#   path-qualified: /bin/true, /usr/bin/true, ...
+#   always-true expressions: [ n -eq n ], (( 1 ))
+#
+# Wrapper stripping (recursive):
+#   env/command [assignments/flags] <cmd>  →  strip prefix, recurse on <cmd>
+#   exec <cmd>                             →  strip exec, recurse on <cmd>
+#   sh -c <cmd> / bash -c <cmd>           →  recurse on the -c argument
+#   ( <cmd> ) or { <cmd>; }               →  recurse on inner content
+#
+# Decomposition (all parts must be trivial):
+#   cmd1 && cmd2, cmd1 || cmd2, cmd1 ; cmd2, cmd1 | cmd2  →  check each part
+#
+# Named fragile implementation (the test's stated canary): a pure frozenset
+# expansion of the named 8 strings (command true / env true / etc.) cannot
+# catch `:|:` or `{ true; }` without knowing what `:` means in composition.
 # ---------------------------------------------------------------------------
-_TRIVIAL_COMMANDS = frozenset({
-    "true", ":", "exit 0",
-    # path-qualified variants of true
-    "/bin/true", "/usr/bin/true",
-    # always-true bracket / arithmetic expressions
-    "[ 0 -eq 0 ]", "test 0 -eq 0",
+
+# Atomic no-ops after all wrappers are stripped (normalised lowercase).
+_ATOMIC_NOOP_EXACT = frozenset({
+    "true", ":", "exit 0", "exit",
 })
 
-# Regex patterns for compound no-op structures that are semantically trivial.
-# Any command matching one of these is rejected without execution.
-_TRIVIAL_COMPOUND_RE = re.compile(
-    r"^(?:"
-    r"(?:/\S+/)?true\s*(?:&&\s*(?:/\S+/)?true\s*)*"  # true && true (chained)
-    r"|(?:/\S+/)?true\s+2>/dev/null"                  # true 2>/dev/null
-    r"|exit\s+0\s*$"                                  # exit 0 (with optional space)
-    r")\s*$",
-    re.IGNORECASE,
+# Path-qualified variants of `true` (case-insensitive).
+_PATH_TRUE_RE = re.compile(r"^(/[^/\s]+)*/true$", re.IGNORECASE)
+
+# Always-true bracket: [ n -eq n ] or [ n == n ] — same literal on both sides.
+_BRACKET_TRUE_RE = re.compile(
+    r"^\[\s*([^\s\]]+)\s*(?:-eq|==)\s*\1\s*\]$"
 )
 
+# Shell operators that separate commands for decomposition.
+# Note: split on || and && before ; and |, so longer tokens match first.
+_OP_SPLIT_RE = re.compile(r"&&|\|\||[;|\n]")
 
-def _is_trivial_command(cmd: str) -> bool:
-    """Return True if cmd is a trivially passing no-op that proves nothing.
+# Shell redirections to strip before atom-checking (e.g. 2>/dev/null, >/tmp/x).
+_REDIRECT_RE = re.compile(r"\d*(?:>>|>&?|<&?|<<)(?:\S+)")
 
-    Normalisation: strip whitespace and trailing semicolons before comparing,
-    then do a case-insensitive membership check against the trivial set.
-    Then check compound no-op patterns.
+# Tokens/prefixes that wrap another command without changing its semantics.
+_WRAPPER_CMDS = frozenset({"env", "command", "exec"})
+
+# Name=value assignment at start of token.
+_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _is_atomic_noop(atom: str) -> bool:
+    """Return True iff `atom` (stripped, lowercased) is a known atomic no-op.
+
+    Strips shell redirections (e.g. 2>/dev/null) before checking, since they
+    do not change the semantic no-op nature of the command.
+    """
+    atom = atom.strip().rstrip(";").strip()
+    if not atom:
+        return True  # empty is trivially a no-op
+    # Strip shell redirections before comparing (e.g. true 2>/dev/null → true).
+    atom = _REDIRECT_RE.sub("", atom).strip()
+    if not atom:
+        return True
+    low = atom.lower()
+    if low in _ATOMIC_NOOP_EXACT:
+        return True
+    if _PATH_TRUE_RE.match(low):
+        return True
+    if _BRACKET_TRUE_RE.match(atom):
+        return True
+    # (( 1 )) or (( 0 == 0 )) — arithmetic always-true; treat as trivial.
+    if re.match(r"^\(\(\s*\d+\s*\)\)$", atom):
+        return True
+    return False
+
+
+def _is_trivial_command(cmd: str) -> bool:  # noqa: C901 — readable is worth more
+    """Return True iff cmd is a semantically trivial no-op that proves nothing.
+
+    Uses a recursive semantic normaliser: strip wrappers, decompose on shell
+    operators, check every atom.  Fails safe (returns False) on any input that
+    does not match a known trivial pattern so substantive commands are never
+    over-rejected.
     """
     if not cmd or not cmd.strip():
         return True
-    normalised = cmd.strip().rstrip(";").strip().lower()
-    if not normalised:
+
+    cmd = cmd.strip()
+
+    # ---------------------------------------------------------------
+    # Step 1 — strip outer brace group  { ...; }  →  recurse on inner
+    # ---------------------------------------------------------------
+    if cmd.startswith("{") and cmd.endswith("}"):
+        inner = cmd[1:-1].strip().rstrip(";").strip()
+        if inner:
+            return _is_trivial_command(inner)
+
+    # ---------------------------------------------------------------
+    # Step 2 — strip outer subshell  ( ... )  →  recurse on inner
+    # (Only when the parentheses are the outermost shell structure, not
+    # part of a compound expression like `(true) && something`.)
+    # ---------------------------------------------------------------
+    if cmd.startswith("(") and cmd.endswith(")"):
+        inner = cmd[1:-1].strip()
+        if inner:
+            return _is_trivial_command(inner)
+
+    # ---------------------------------------------------------------
+    # Step 3 — decompose on shell operators  &&  ||  ;  |
+    #
+    # For ||: if the LEFT operand is trivially a no-op (true/:), the
+    # right-hand side never executes — the whole expression is trivial.
+    # This catches `true||false`: `true` always succeeds so `false` is
+    # dead code, providing no real verification.
+    #
+    # For &&, ;, |: every part must be trivial for the whole to be trivial.
+    # ---------------------------------------------------------------
+    # Handle || specially before the generic split.
+    if "||" in cmd:
+        # Split only on ||, check if first part is trivially a no-op.
+        or_parts = [p.strip() for p in re.split(r"\|\|", cmd) if p.strip()]
+        if or_parts and _is_trivial_command(or_parts[0]):
+            return True
+        # If neither first trivial check works, fall through to all-parts check.
+        if all(_is_trivial_command(p) for p in or_parts if p.strip()):
+            return True
+    parts = [p.strip() for p in _OP_SPLIT_RE.split(cmd) if p.strip()]
+    if len(parts) > 1:
+        return all(_is_trivial_command(p) for p in parts)
+
+    # Single segment from here on.
+    # ---------------------------------------------------------------
+    # Step 4 — tokenize the segment (fail safe on shlex errors)
+    # ---------------------------------------------------------------
+    try:
+        import shlex
+        tokens = shlex.split(cmd)
+    except ValueError:
+        return False  # unparseable → treat as substantive (fail safe)
+
+    if not tokens:
         return True
-    if normalised in _TRIVIAL_COMMANDS:
-        return True
-    if _TRIVIAL_COMPOUND_RE.match(normalised):
-        return True
-    # Always-true bracket: [ <n> -eq <n> ] or [ 1 -eq 1 ] etc.
-    if re.match(r"^\[\s*(\d+)\s*-eq\s*\1\s*\]$", normalised):
-        return True
-    return False
+
+    # ---------------------------------------------------------------
+    # Step 5 — strip leading wrapper commands (env, command, exec)
+    # and env-var assignments, then recurse on the effective command.
+    # ---------------------------------------------------------------
+    i = 0
+    # Strip leading env-var assignments (NAME=VALUE tokens).
+    while i < len(tokens) and _ASSIGN_RE.match(tokens[i]):
+        i += 1
+    if i >= len(tokens):
+        return True  # only assignments — no effective command
+
+    # Strip `env`/`command`/`exec` wrappers.
+    while i < len(tokens) and tokens[i].lower() in _WRAPPER_CMDS:
+        i += 1
+        # Skip any flags/assignments that follow the wrapper.
+        while i < len(tokens) and (
+            _ASSIGN_RE.match(tokens[i]) or tokens[i].startswith("-")
+        ):
+            # Flags with a value argument (-u NAME, -i, -S ..., --arg=val).
+            if tokens[i] in ("-u", "-S") and i + 1 < len(tokens):
+                i += 2
+            else:
+                i += 1
+        if i >= len(tokens):
+            return True  # wrapper with no effective command
+
+    # After stripping, check if the remainder is `sh -c <cmd>` or `bash -c <cmd>`.
+    if i < len(tokens) and tokens[i].lower() in ("sh", "bash", "dash", "zsh"):
+        # Look for a `-c` flag followed by a command string to recurse on.
+        j = i + 1
+        # Skip any shell flags before -c.
+        while j < len(tokens) and tokens[j].startswith("-") and tokens[j] != "-c":
+            j += 1
+        if j < len(tokens) and tokens[j] == "-c" and j + 1 < len(tokens):
+            return _is_trivial_command(tokens[j + 1])
+        # No -c found — fall through to atom check on the shell name itself.
+
+    # Rejoin remaining tokens into the effective command and atom-check.
+    effective = " ".join(tokens[i:])
+    return _is_atomic_noop(effective)
 
 
 # ---------------------------------------------------------------------------

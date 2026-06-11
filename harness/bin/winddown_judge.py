@@ -25,7 +25,7 @@ import pathlib
 import sys
 from typing import Callable, Optional, Tuple
 
-# Make the sibling regex floor importable regardless of caller cwd (mirrors stop_hook).
+# Import the sibling winddown_gate regardless of caller cwd (mirrors stop_hook).
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import winddown_gate as wg  # noqa: E402
 
@@ -68,9 +68,9 @@ def model_verdict(
     """Ask the local model: is `text` a wind-down offer?
 
     Returns True (winddown) / False (not_winddown) / None (unclear, error, down, or
-    unparseable). FAIL-OPEN: never raises — a model problem yields None so the caller
-    falls back to the regex floor.
-    """
+    unparseable). FAIL-OPEN: never raises — a model problem yields None and the caller
+    treats it as allow (no classifier fired, judge-only architecture).
+"""
     if not text or not isinstance(text, str):
         return None
     payload = {
@@ -88,7 +88,7 @@ def model_verdict(
         else:
             content = post(payload)
     except Exception:
-        return None  # fail-open: down / timeout / network / parse → defer to floor
+        return None  # fail-open: down / timeout / network / parse → allow (judge-only)
     low = (content or "").strip().lower()
     if "not_winddown" in low or "not winddown" in low:
         return False
