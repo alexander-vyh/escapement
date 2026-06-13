@@ -27,13 +27,12 @@ digraph when_to_use {
     "Project has beads graph?" [shape=diamond];
     "Tasks from /work-breakdown?" [shape=diamond];
     "beads-execution" [shape=box, style=filled, fillcolor=lightgreen];
-    "superpowers:subagent-driven-development" [shape=box];
     "Run /work-breakdown first" [shape=box];
 
     "Project has beads graph?" -> "Tasks from /work-breakdown?" [label="yes"];
     "Project has beads graph?" -> "Run /work-breakdown first" [label="no"];
     "Tasks from /work-breakdown?" -> "beads-execution" [label="yes"];
-    "Tasks from /work-breakdown?" -> "superpowers:subagent-driven-development" [label="no — use plan file"];
+    "Tasks from /work-breakdown?" -> "Run /work-breakdown first" [label="no — run it first"];
 }
 ```
 
@@ -116,7 +115,7 @@ digraph process {
     "Run bd ready again" [shape=box];
     "All tasks complete" [shape=box];
     "Dispatch final code reviewer" [shape=box];
-    "superpowers:finishing-a-development-branch" [shape=box, style=filled, fillcolor=lightgreen];
+    "Finish: push + open PR" [shape=box, style=filled, fillcolor=lightgreen];
 
     "Check for interrupted tasks" -> "Run bd ready to get actionable tasks";
     "Run bd ready to get actionable tasks" -> "Any tasks ready?";
@@ -138,7 +137,7 @@ digraph process {
     "Close task: bd close" -> "Run bd ready again";
     "Run bd ready again" -> "Any tasks ready?";
     "All tasks complete" -> "Dispatch final code reviewer";
-    "Dispatch final code reviewer" -> "superpowers:finishing-a-development-branch";
+    "Dispatch final code reviewer" -> "Finish: push + open PR";
 }
 ```
 
@@ -532,8 +531,9 @@ or confidence scores.
 
 ### 2f. Code Quality Review
 
-Only after spec compliance passes. Dispatch using the
-`superpowers:requesting-code-review` skill template with:
+Only after spec compliance passes. Dispatch a code-quality reviewer using the
+repo's own review template (the `adversarial-reviewer` agent / the
+`dispatching-parallel-agents` review prompt) with:
 - WHAT_WAS_IMPLEMENTED: from implementer's report
 - PLAN_OR_REQUIREMENTS: task description from beads
 - BASE_SHA: commit before this task
@@ -725,7 +725,12 @@ When all tasks are complete:
 
 1. Run `bd list` to confirm everything is closed
 2. Dispatch a final code reviewer for the entire implementation
-3. Use `superpowers:finishing-a-development-branch` to complete the work
+3. Finish the branch — **PR-only** (this repo never merges to main directly):
+   - Confirm tests / quality gates pass.
+   - `git push` the feature branch.
+   - Open a PR with `gh pr create` (if it 403s on a read-only account, print the
+     `compare/main...<branch>` URL instead — see the gh-account memory).
+   - Do **not** merge to main locally. If not ready to PR: keep the branch, or discard it.
 
 ## Model Selection
 
@@ -814,21 +819,16 @@ authorized to make product decisions — only implementation decisions.
 
 ## Integration
 
-**Required workflow skills:**
-- **superpowers:using-git-worktrees** — REQUIRED: set up isolated workspace
-  before starting
-- **superpowers:requesting-code-review** — code review template for quality gate
-- **superpowers:finishing-a-development-branch** — complete development after all
-  tasks
+**Required workflow setup:**
+- **Isolated workspace** — REQUIRED: create the worktree with `bd worktree create <path> -b <branch>`. This is a beads project; never use `git worktree add` (it leaves a broken `.beads/` skeleton — see `beads-worktree-integration.md`).
+- **Code review** — use the repo's own review template (the `adversarial-reviewer` agent / the `dispatching-parallel-agents` review prompt) for the quality gate (Step 2f).
+- **Finish** — PR-only branch finish, inline in Step 4 (push + open PR; never merge to main).
 
 **Prerequisite skills:**
 - **/discovery** — creates design doc
 - **/work-breakdown** — populates beads graph from design doc
 
-**Replaces:**
-- **superpowers:subagent-driven-development** — for beads-managed projects, use
-  this skill instead. Falls back to subagent-driven-development if project has no
-  beads graph.
+**Supersedes:** this skill is the beads-native execution loop — the role generic per-task subagent dispatch plays in non-beads projects. Beads is the source of truth, and this project always has a beads graph (it auto-installs everywhere), so there is no non-beads fallback path.
 
 **Spec amendment flow (Feature C):**
 - Implemented in §2h. Triggers on `bad_spec` findings, assumption failures,
