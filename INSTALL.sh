@@ -159,6 +159,7 @@ declare -a PLAN=(
   "claude/hooks/serena_preference_injection.py|$CLAUDE_DIR/hooks/serena_preference_injection.py"
   "claude/hooks/serena_onboarding_check.sh|$CLAUDE_DIR/hooks/serena_onboarding_check.sh"
   "claude/hooks/_gate_signal.py|$CLAUDE_DIR/hooks/_gate_signal.py"
+  "claude/hooks/cache_write_guard.py|$CLAUDE_DIR/hooks/cache_write_guard.py"
   "claude/hooks/tests|$CLAUDE_DIR/hooks/tests"
 
   # Bin scripts (invokable from any repo cwd; resolve their own project root)
