@@ -25,7 +25,14 @@ jobs:
         run: |
           mkdir -p "$HOME/.claude"
           ln -s "$GITHUB_WORKSPACE/claude/hooks" "$HOME/.claude/hooks"
-      - name: Run hook + harness test suites
+      - name: Run hook + harness + agent-surface test suites
         # -p no:cacheprovider keeps the runner clean; fail on skips that hide
-        # collection gaps by reporting the skip count explicitly.
-        run: python -m pytest claude/hooks/tests harness/tests -q -rs
+        # collection gaps by reporting the skip count explicitly. `tests` carries
+        # the agent-surfaces parity suite (test_agent_surfaces.py).
+        run: python -m pytest claude/hooks/tests harness/tests tests -q -rs
+      - name: Agent-surfaces drift gate
+        # Fail closed if the rendered host surfaces (CLAUDE.md / AGENTS.md /
+        # .codex/hooks.json / .agents/**) have drifted from agent-surfaces/manifest.json.
+        # Without this, the renderer's --check is fail-open on the highest-traffic
+        # files (roundtable 2026-06-13, legalist lens).
+        run: python3 tools/render_agent_surfaces.py --check

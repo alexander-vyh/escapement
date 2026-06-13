@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 TEST_DIR = Path(__file__).resolve().parent
 HOOK_PATH = TEST_DIR / "test_oracle_brief_gate.py"
@@ -57,6 +59,13 @@ def init_repo(tmp_path: Path) -> Path:
 
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     return tmp_path
+
+
+def write_changed_code(repo: Path) -> Path:
+    target = repo / "src" / "app.py"
+    target.parent.mkdir()
+    target.write_text("print('x')\n", encoding="utf-8")
+    return target
 
 
 def test_required_section_detection_accepts_markdown_headings(tmp_path):
@@ -132,9 +141,7 @@ def test_claude_edit_allows_docs_without_brief(tmp_path):
 
 def test_codex_commit_blocks_changed_code_without_brief(tmp_path):
     repo = init_repo(tmp_path)
-    target = repo / "src" / "app.py"
-    target.parent.mkdir()
-    target.write_text("print('x')\n", encoding="utf-8")
+    write_changed_code(repo)
 
     payload = {
         "hook_event_name": "PreToolUse",
@@ -149,12 +156,105 @@ def test_codex_commit_blocks_changed_code_without_brief(tmp_path):
     assert "src/app.py" in output["hookSpecificOutput"]["permissionDecisionReason"]
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git commit -m 'title with x | y'",
+        "git commit -m 'title with x && y'",
+        "git commit -m 'title with x || y'",
+        "git commit -m 'title with x; y'",
+    ],
+)
+def test_codex_commit_with_quoted_shell_controls_still_blocks(tmp_path, command):
+    repo = init_repo(tmp_path)
+    write_changed_code(repo)
+
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": command},
+    }
+
+    code, output = run_hook(payload)
+
+    assert_denied(code, output)
+    assert "src/app.py" in output["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_codex_git_global_flags_still_block(tmp_path):
+    repo = init_repo(tmp_path)
+    write_changed_code(repo)
+
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": f"git -C {repo} commit -m ok"},
+    }
+
+    code, output = run_hook(payload)
+
+    assert_denied(code, output)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh pr create --title 'x | y' --body body",
+        "gh --repo owner/repo pr create --title 'x | y' --body body",
+        "gh -R owner/repo pr merge 12",
+        "gh --hostname github.example.com pr create --title title --body body",
+    ],
+)
+def test_codex_gh_pr_with_global_flags_still_blocks(tmp_path, command):
+    repo = init_repo(tmp_path)
+    write_changed_code(repo)
+
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": command},
+    }
+
+    code, output = run_hook(payload)
+
+    assert_denied(code, output)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if git commit -m x; then echo ok; fi",
+        "echo `git commit -m x`",
+        "echo $(git commit -m x)",
+        "sh -c 'git commit -m x'",
+        "env FOO=1 git commit -m x",
+        "command git commit -m x",
+    ],
+)
+def test_codex_finishing_commands_inside_shell_syntax_still_block(tmp_path, command):
+    repo = init_repo(tmp_path)
+    write_changed_code(repo)
+
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": command},
+    }
+
+    code, output = run_hook(payload)
+
+    assert_denied(code, output)
+    assert "src/app.py" in output["hookSpecificOutput"]["permissionDecisionReason"]
+
+
 def test_codex_commit_allows_changed_code_with_valid_brief(tmp_path):
     repo = init_repo(tmp_path)
     write_valid_brief(repo)
-    target = repo / "src" / "app.py"
-    target.parent.mkdir()
-    target.write_text("print('x')\n", encoding="utf-8")
+    write_changed_code(repo)
 
     payload = {
         "hook_event_name": "PreToolUse",
@@ -171,9 +271,7 @@ def test_codex_commit_allows_changed_code_with_valid_brief(tmp_path):
 
 def test_codex_non_finishing_bash_allows_without_brief(tmp_path):
     repo = init_repo(tmp_path)
-    target = repo / "src" / "app.py"
-    target.parent.mkdir()
-    target.write_text("print('x')\n", encoding="utf-8")
+    write_changed_code(repo)
 
     payload = {
         "hook_event_name": "PreToolUse",

@@ -193,6 +193,26 @@ FINISHING_COMMANDS = (
     ("bd", "close"),
 )
 
+SHELL_CONTROL_TOKENS = {"&&", "||", ";", "|"}
+ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+SHELL_KEYWORDS_BEFORE_COMMAND = {"if", "then", "elif", "else", "while", "until", "do", "time", "!"}
+SHELL_EXECUTABLES = {"sh", "bash", "zsh", "dash"}
+
+GIT_VALUE_FLAGS = {
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--git-common-dir",
+    "--namespace",
+    "--super-prefix",
+}
+
+GH_VALUE_FLAGS = {"--repo", "-R", "--hostname"}
+BD_VALUE_FLAGS = {"--db", "-C", "--directory", "--actor", "--dolt-auto-commit"}
+ENV_VALUE_FLAGS = {"-u", "--unset", "-S", "--split-string"}
+ENV_BOOLEAN_FLAGS = {"-i", "--ignore-environment", "-0", "--null"}
+
 
 def allow() -> int:
     return 0
@@ -423,22 +443,184 @@ def command_from(data: dict) -> str:
 
 def split_command_segments(command: str) -> list[list[str]]:
     normalized = command.replace("\\\n", " ")
+    try:
+        lexer = shlex.shlex(normalized, posix=True, punctuation_chars=";&|()")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        # A malformed shell command should not silently launder a finishing
+        # action. Fall back to the broad regex splitter used by the old path.
+        tokens = []
+
+    if tokens:
+        segments: list[list[str]] = []
+        current: list[str] = []
+        for token in tokens:
+            if token in SHELL_CONTROL_TOKENS:
+                if current:
+                    segments.append(current)
+                    current = []
+                continue
+            if token in {"(", ")"}:
+                continue
+            current.append(token)
+        if current:
+            segments.append(current)
+        return segments
+
     segments: list[list[str]] = []
     for raw in re.split(r"\s*(?:&&|\|\||;|\|)\s*", normalized):
         try:
             parts = shlex.split(raw)
         except ValueError:
+            if re.search(r"\b(?:git\s+(?:[^\n;&|]*\s+)?(?:commit|push)|gh\s+pr\s+(?:create|merge)|bd\s+(?:[^\n;&|]*\s+)?close)\b", raw):
+                return [["__unparseable_finishing_command__"]]
             continue
         if parts:
             segments.append(parts)
     return segments
 
 
-def is_finishing_segment(parts: list[str]) -> bool:
-    for command in FINISHING_COMMANDS:
-        if tuple(parts[: len(command)]) == command:
-            return True
+def _skip_env_assignments(parts: list[str], index: int = 0) -> int:
+    while index < len(parts) and ENV_ASSIGNMENT_RE.match(parts[index]):
+        index += 1
+    return index
+
+
+def _clean_shell_token(token: str) -> str:
+    return token.strip("`")
+
+
+def _matches_executable(token: str, name: str) -> bool:
+    return Path(_clean_shell_token(token)).name == name
+
+
+def _skip_flag_values(parts: list[str], index: int, value_flags: set[str]) -> int:
+    while index < len(parts):
+        token = parts[index]
+        if token in value_flags:
+            index += 2
+            continue
+        if any(token.startswith(flag + "=") for flag in value_flags if flag.startswith("--")):
+            index += 1
+            continue
+        if token.startswith("-C") and "-C" in value_flags and len(token) > 2:
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        break
+    return index
+
+
+def _git_subcommand(parts: list[str], index: int) -> str | None:
+    index = _skip_flag_values(parts, index, GIT_VALUE_FLAGS)
+    return parts[index] if index < len(parts) else None
+
+
+def _gh_subcommand(parts: list[str], index: int) -> tuple[str | None, str | None]:
+    index = _skip_flag_values(parts, index, GH_VALUE_FLAGS)
+    if index + 1 >= len(parts):
+        return None, None
+    return parts[index], parts[index + 1]
+
+
+def _bd_subcommand(parts: list[str], index: int) -> str | None:
+    index = _skip_flag_values(parts, index, BD_VALUE_FLAGS)
+    return parts[index] if index < len(parts) else None
+
+
+def _env_command_index(parts: list[str], index: int) -> int:
+    index += 1
+    while index < len(parts):
+        token = _clean_shell_token(parts[index])
+        if token in ENV_BOOLEAN_FLAGS:
+            index += 1
+            continue
+        if token in ENV_VALUE_FLAGS:
+            index += 2
+            continue
+        if token.startswith("--unset=") or token.startswith("-u="):
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        if ENV_ASSIGNMENT_RE.match(token):
+            index += 1
+            continue
+        return index
+    return index
+
+
+def _shell_c_command(parts: list[str], index: int) -> str | None:
+    index += 1
+    while index < len(parts):
+        token = _clean_shell_token(parts[index])
+        if token == "-c":
+            return parts[index + 1] if index + 1 < len(parts) else None
+        if token.startswith("-"):
+            index += 1
+            continue
+        return None
+    return None
+
+
+def _is_finishing_at(parts: list[str], index: int) -> bool:
+    index = _skip_env_assignments(parts, index)
+    if index >= len(parts):
+        return False
+
+    token = _clean_shell_token(parts[index])
+
+    if token in {"command", "builtin"}:
+        return _is_finishing_at(parts, index + 1)
+
+    if token == "env":
+        return _is_finishing_at(parts, _env_command_index(parts, index))
+
+    if Path(token).name in SHELL_EXECUTABLES:
+        nested = _shell_c_command(parts, index)
+        return bool(nested and command_contains_finishing_action(nested))
+
+    if _matches_executable(token, "git"):
+        subcommand = _git_subcommand(parts, index + 1)
+        return subcommand in {"commit", "push"}
+
+    if _matches_executable(token, "gh"):
+        group, subcommand = _gh_subcommand(parts, index + 1)
+        return group == "pr" and subcommand in {"create", "merge"}
+
+    if _matches_executable(token, "bd"):
+        subcommand = _bd_subcommand(parts, index + 1)
+        return subcommand == "close"
+
     return False
+
+
+def _candidate_command_positions(parts: list[str]) -> set[int]:
+    positions = {0}
+    for index, token in enumerate(parts):
+        clean = _clean_shell_token(token)
+        if clean in SHELL_KEYWORDS_BEFORE_COMMAND and index + 1 < len(parts):
+            positions.add(index + 1)
+        if token == "$" and index + 1 < len(parts):
+            positions.add(index + 1)
+        if token.startswith("`"):
+            positions.add(index)
+    return positions
+
+
+def is_finishing_segment(parts: list[str]) -> bool:
+    if parts == ["__unparseable_finishing_command__"]:
+        return True
+    return any(_is_finishing_at(parts, index) for index in sorted(_candidate_command_positions(parts)))
+
+
+def command_contains_finishing_action(command: str) -> bool:
+    return any(is_finishing_segment(parts) for parts in split_command_segments(command))
 
 
 def git_files(repo_root: Path, args: list[str]) -> list[str]:
@@ -498,8 +680,7 @@ def handle_bash_landing_gate(data: dict) -> int:
     command = command_from(data)
     if not command:
         return allow()
-    segments = split_command_segments(command)
-    if not any(is_finishing_segment(parts) for parts in segments):
+    if not command_contains_finishing_action(command):
         return allow()
 
     cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else os.getcwd()
