@@ -38,7 +38,6 @@ _STATE_DIR = Path("/tmp/claude-review-gate")
 _REVIEWER_SUBAGENT_TYPES = {
     "adversarial-reviewer",
     "code-reviewer",
-    "superpowers:code-reviewer",
     "test-quality-reviewer",
 }
 

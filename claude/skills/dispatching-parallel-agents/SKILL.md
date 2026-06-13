@@ -5,7 +5,7 @@ description: Use when facing 2+ independent tasks that can be worked on without 
 
 # Dispatching Parallel Agents
 
-This skill wraps the superpowers dispatching-parallel-agents skill with mandatory TeamCreate + named-agent dispatch. All agents MUST be on a team so they can communicate via SendMessage and show up as selectable teammates.
+This skill provides mandatory TeamCreate + named-agent dispatch for parallel work. All agents MUST be on a team so they can communicate via SendMessage and show up as selectable teammates.
 
 ---
 

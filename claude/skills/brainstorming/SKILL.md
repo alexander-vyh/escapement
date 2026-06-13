@@ -3,12 +3,12 @@ name: brainstorming
 description: >
   Enhanced brainstorming — challenges whether work should be done at all,
   rotates creative lenses to fight semantic clustering, and routes to
-  /discovery or writing-plans based on complexity.
+  /discovery or work-breakdown based on complexity.
 ---
 
 # Enhanced Brainstorming
 
-This skill wraps the superpowers brainstorming skill with additional gates, adversarial probes, anti-bias mechanisms, and terminal routing. The sections below run in order.
+This is a self-contained brainstorming skill with gates, adversarial probes, anti-bias mechanisms, and terminal routing. The sections below run in order.
 
 ---
 
@@ -32,7 +32,7 @@ Do not proceed to the core brainstorming flow. The gate exists to prevent over-e
 
 ## Section 2: Core Brainstorming Flow
 
-Follow steps 1-3 of the superpowers brainstorming skill (explore context, ask clarifying questions, propose approaches):
+Core flow — explore context, ask clarifying questions, propose approaches:
 
 1. **Explore project context** — Read CLAUDE.md, relevant code, and existing docs to understand the landscape.
 2. **Ask clarifying questions** — One at a time, wait for answers before continuing.
@@ -46,15 +46,15 @@ Follow steps 1-3 of the superpowers brainstorming skill (explore context, ask cl
 > familiar domains, codebase/org-internal questions, or one-fact lookups. Self-test:
 > if you can't name the wrong prior the vocabulary would correct, don't.
 
-SKIP superpowers steps 4-6 (present design, write design doc, transition to implementation) — this skill handles routing differently in Section 5 below.
+Do NOT present a design doc, write a design doc, or transition to implementation here — Section 5 handles routing.
 
-**This skill replaces the superpowers brainstorming terminal routing. Do NOT invoke writing-plans automatically — Section 5 below determines the next step.**
+**Do NOT auto-route to planning — Section 5 below determines the next step.**
 
 ---
 
 ## Section 3: Adversarial Probe
 
-This probe is injected AFTER the superpowers flow proposes 2-3 approaches, BEFORE the user picks one. Present it under this heading:
+This probe is injected AFTER the core flow proposes 2-3 approaches, BEFORE the user picks one. Present it under this heading:
 
 > **"Here's why this might be the wrong thing to build..."**
 
@@ -73,23 +73,15 @@ The user must respond to at least one specific point from the probe, even if the
 
 ## Section 4: Anti-Bias Domain Rotation
 
-When proposing the 2-3 approaches (superpowers step 3), use a different lens for each approach. If generating more than 3 approaches or doing extended ideation, rotate lenses every ~10 ideas. LLMs tend to generate ideas that are semantically similar — rotating lenses forces divergent thinking.
+When proposing the 2-3 approaches (the propose-approaches step), use a different lens for each approach. If generating more than 3 approaches or doing extended ideation, rotate lenses every ~10 ideas. LLMs tend to generate ideas that are semantically similar — rotating lenses forces divergent thinking.
 
-**Lenses (rotate through these in order):**
+**The lenses (and structured methods) live in the shared method block:
+[`references/methods.md`](references/methods.md)** — Part A is the 9 rotating
+lenses, Part B the structured methods. This is the single source the `mol-feature`
+brainstorm step also references, so the method vocabulary does not drift between
+the conversational skill and the molecule's team dispatch.
 
-1. **User perspective** — "What does the user actually experience?"
-2. **Technical constraint** — "What does the technology make easy or hard?"
-3. **First principles** — "What is the irreducible core need? What would we build with 1/10th the budget?"
-4. **Business impact** — "What moves the needle on the actual goal?"
-5. **Failure mode** — "How does this break? What goes wrong?"
-6. **Inversion** — "What if we inverted the main constraint? What if the opposite were true?"
-7. **Competitor approach** — "How would [adjacent tool/product] solve this?"
-8. **Simplification** — "What if we removed half of this?"
-9. **Adjacent domain analogy** — "What problem in [other domain] is structurally similar?"
-
-**Announce each rotation explicitly:** "Switching lens to [X]" — so the user can see the shift and engage with the new perspective.
-
-After cycling through all seven, start over. The point is never to stay in one frame long enough for clustering to take hold.
+**Announce each rotation explicitly:** "Switching lens to [X]" — so the user can see the shift and engage with the new perspective. After cycling through all nine, start over; never stay in one frame long enough for clustering to take hold.
 
 ---
 
@@ -229,11 +221,11 @@ The idea is well-defined if ALL of these are true:
 - No risky assumptions remaining
 - Small, contained change
 
-**Action:** Announce the routing decision, then **invoke the writing-plans skill directly** — do NOT tell the user to run it themselves:
+**Action:** Announce the routing decision, then **invoke the work-breakdown skill directly** — do NOT tell the user to run it themselves:
 
 > "This is well-defined enough for direct planning. Here's why: [specific reason]."
 
 Then immediately invoke the Skill tool:
 ```
-Skill(skill="superpowers:writing-plans")
+Skill(skill="work-breakdown")
 ```
