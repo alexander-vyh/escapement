@@ -71,9 +71,6 @@ _PATTERNS: list[str] = [
     r"CI\s+(?:infra(?:structure)?\s+)?(?:issue|problem|failure|error|bug)",
     r"(?:infra(?:structure)?|pipeline|build\s+system|environment|deploy(?:ment)?|runner)\s+(?:issue|problem|failure|error|bug)",
     r"(?:the\s+)?(?:CI|pipeline|build|runner)\s+(?:is|seems?|appears?)\s+(?:broken|flaky|unstable|down)",
-    # "works locally" — implying the problem is elsewhere
-    r"works?\s+(?:fine\s+)?(?:locally|on\s+(?:my|our)\s+(?:machine|environment|setup|end))",
-    r"pass(?:es|ing)?\s+(?:fine\s+)?locally",
     # Deferral — punting to future work instead of fixing now
     r"(?:needs?|requires?)\s+(?:a\s+)?separate\s+(?:investigation|fix|ticket|PR|issue|effort|task|attention)",
     r"(?:can|will|should)\s+(?:be\s+)?(?:fixed|addressed|resolved|handled|investigated)\s+(?:later|separately|in\s+(?:a\s+)?(?:follow[- ]?up|separate|different|another))",
@@ -116,8 +113,6 @@ _CATEGORIES: list[str] = [
     "infrastructure-blame",    # CI issue/problem/...
     "infrastructure-blame",    # infra/pipeline/build/environment issue
     "infrastructure-blame",    # CI/pipeline/build/runner is broken/flaky
-    "infrastructure-blame",    # works locally
-    "infrastructure-blame",    # passes locally
     "deferral",                # needs separate investigation/fix/...
     "deferral",                # will be fixed later/separately
     "deferral",                # leaving this for now / as-is
