@@ -540,11 +540,15 @@ def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
     return ("allow", "queue_drained")
 
 
-def _check_wakeup_blockers(session_mode: dict, run_bd=None) -> Tuple[str, str]:
+def _check_wakeup_blockers(session_mode: dict, run_bd=None, thread_dir=None) -> Tuple[str, str]:
     """Gate the wakeup-release path on blocker verifiability (R3).
 
     When a task-mode session would be released by a registered wakeup, this
-    function audits every scoped blocked bead for a substantiated blocker claim.
+    function audits every SESSION-FRESH blocked bead for a substantiated blocker
+    claim. Scoping (created_at >= the session watermark, via `thread_dir`) mirrors
+    `_check_bd_queue_implicit`: a pre-existing dependency-blocked bead from another
+    session is not this session's responsibility and must not hold the wakeup gate
+    indefinitely. Without a watermark, all blocked beads are audited (fail-safe).
     A bead is satisfied iff it carries a `blocker-verify:` command that exits 0
     (not trivial) OR a substantive `blocker-waiver:` reason (≥20 chars, not a
     placeholder).  Any unsatisfied blocked bead yields
@@ -590,9 +594,24 @@ def _check_wakeup_blockers(session_mode: dict, run_bd=None) -> Tuple[str, str]:
         # No blocked beads (or bd unavailable): nothing to verify; wakeup stands.
         return ("allow", "wakeup_no_blockers")
 
-    for bead in blocked:
-        if not isinstance(bead, dict):
-            continue
+    # Scope to session-fresh blocked beads (created_at >= watermark), matching
+    # _check_bd_queue_implicit. A pre-existing dependency-blocked bead from another
+    # session is not this session's responsibility and must not hold the wakeup gate.
+    watermark = (
+        resolve_watermark(pathlib.Path(thread_dir)) if thread_dir is not None else None
+    )
+    if watermark is None:
+        scoped_blocked = [b for b in blocked if isinstance(b, dict)]
+    else:
+        scoped_blocked = [
+            b for b in blocked
+            if isinstance(b, dict) and _created_at_in_scope(b, watermark)
+        ]
+    if not scoped_blocked:
+        # All blocked beads predate this session → not ours to verify; wakeup stands.
+        return ("allow", "wakeup_no_blockers")
+
+    for bead in scoped_blocked:
         result = blocker_satisfied(bead)
         if not result.confirmed:
             return ("block", "wakeup_blocker_unverified")
@@ -779,7 +798,7 @@ def main() -> int:
             # unconditional and bypasses the check.
             if override_reason == "wakeup_registered":
                 wakeup_blocker_decision, wakeup_blocker_reason = _check_wakeup_blockers(
-                    session_mode
+                    session_mode, thread_dir=thread_dir
                 )
                 if wakeup_blocker_decision == "block":
                     _log_incident({
