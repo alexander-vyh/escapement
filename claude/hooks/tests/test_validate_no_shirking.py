@@ -608,14 +608,17 @@ class TestNewShirkingPatterns:
     def test_build_seems_unstable(self) -> None:
         assert find_shirking_phrase("The build seems unstable") is not None
 
-    def test_works_locally(self) -> None:
-        assert find_shirking_phrase("It works fine locally") is not None
+    # Negative controls: the works/passes-locally patterns were removed (0 lifetime
+    # true catches, fired opposite to intent — flagging honest local verification as
+    # deflection). These phrases must NOT be flagged as shirking.
+    def test_works_locally_not_flagged(self) -> None:
+        assert find_shirking_phrase("It works fine locally") is None
 
-    def test_works_on_my_machine(self) -> None:
-        assert find_shirking_phrase("It works on my machine") is not None
+    def test_works_on_my_machine_not_flagged(self) -> None:
+        assert find_shirking_phrase("It works on my machine") is None
 
-    def test_passes_locally(self) -> None:
-        assert find_shirking_phrase("The test passes locally") is not None
+    def test_passes_locally_not_flagged(self) -> None:
+        assert find_shirking_phrase("The test passes locally") is None
 
     def test_needs_separate_investigation(self) -> None:
         assert find_shirking_phrase("This needs a separate investigation") is not None
