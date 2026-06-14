@@ -61,6 +61,15 @@ RESUMPTION_PROMPT = (
 # Task-mode-specific display text, keyed by reason code.
 # Reason codes are short log-friendly strings; display text carries the guidance.
 _TASK_MODE_DISPLAY: dict[str, str] = {
+    "verification_passed_git_work_remains": (
+        "continuation-harness: verification_passed_git_work_remains. Your contract's "
+        "verify passed, but uncommitted/unpushed git work remains in this repo — a green "
+        "oracle on one goal is not a finished session (the 'Harness cleared, then stopped "
+        "with work left' miss). Do NOT stop on the strength of the verify alone. Escape "
+        "paths: (1) commit AND push the remaining tracked changes, then stop; (2) if the "
+        "work is genuinely paused, call ScheduleWakeup so it resumes; (3) the user can "
+        "release you by saying 'stop'."
+    ),
     "tasks_remain_in_queue": (
         "continuation-harness [task-mode]: tasks_remain_in_queue. In-scope work is ready "
         "under this session's goal — keep working it. Do NOT stop to summarize or to ask the "
@@ -309,6 +318,36 @@ def _git_work_remains(cwd: str, run_git=None) -> bool:
         except ValueError:
             pass
     return False
+
+
+def _verification_work_remains(
+    cwd: str,
+    thread_dir,
+    *,
+    bd_check=None,
+    git_check=None,
+) -> Optional[Tuple[str, str]]:
+    """After a `verification_passed` allow, decide whether open work still blocks.
+
+    A passing contract verifies its own narrow oracle; it does NOT prove the
+    session is finished. The B3 fix already re-checks the bd queue here — this
+    brings the verification_passed path to parity with the conversational
+    `_winddown_override` by ALSO checking git work (dirty tracked files / unpushed
+    commits): the index-0 shirking miss ("Harness cleared." then stopped with work
+    remaining, a drained bead queue but uncommitted git). Returns (decision,
+    reason) to block, or None to allow. Deterministic — no LLM-judge dependency,
+    so it holds even when the wind-down model is down (fail-open).
+    """
+    if bd_check is None:
+        bd_check = _check_bd_queue_implicit
+    if git_check is None:
+        git_check = _git_work_remains
+    bd_decision, bd_reason = bd_check(cwd or "", thread_dir=thread_dir)
+    if bd_decision == "block":
+        return (bd_decision, bd_reason)
+    if cwd and git_check(cwd):
+        return ("block", "verification_passed_git_work_remains")
+    return None
 
 
 def _winddown_override(
@@ -795,18 +834,21 @@ def main() -> int:
     state = load_thread_state(thread_dir, recent_user_message=recent_user_message)
     decision, reason = would_block_stop(state)
 
-    # B3 fix: after verification_passed, check bd queue in cwd.
-    # Catches sessions where task-mode was not entered via the PreToolUse hook
-    # (e.g., bd claims made inside subagents) but bd work is still in-flight.
-    # Universal overrides (user_released, wakeup_registered) bypass this check.
+    # B3 fix + Fix 1: after verification_passed, check for remaining work in cwd —
+    # the bd queue (sessions where task-mode wasn't entered, e.g. bd claims inside
+    # subagents) AND git work (dirty tracked files / unpushed commits). A green
+    # contract verifies one narrow oracle, not a finished session; the git half
+    # closes the index-0 shirking miss ("Harness cleared." then stopped with a
+    # drained bead queue but uncommitted work). Deterministic — holds when the
+    # wind-down judge is down. Universal overrides (user_released, wakeup) bypass.
     if decision == "allow" and reason == "verification_passed":
         try:
             cwd = os.getcwd()
         except OSError:
             cwd = ""
-        bd_decision, bd_reason = _check_bd_queue_implicit(cwd, thread_dir=thread_dir)
-        if bd_decision == "block":
-            decision, reason = bd_decision, bd_reason
+        blocked = _verification_work_remains(cwd, thread_dir)
+        if blocked is not None:
+            decision, reason = blocked
 
     # Wind-down rung: a `conversational` allow that is actually a wind-down / decision-
     # punt offer WITH reversible work remaining is overridden to a block (closes the
