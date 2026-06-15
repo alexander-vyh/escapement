@@ -1,0 +1,42 @@
+{
+  "name": "escapement",
+  "version": "1.0.0",
+  "description": "Host-neutral agentic workflow layer: beads issue tracking, oracle-discipline gates, TDD enforcement, and outcome-bias continuation for Codex sessions.",
+  "author": {
+    "name": "alexander-vyh",
+    "url": "https://github.com/alexander-vyh"
+  },
+  "homepage": "https://github.com/alexander-vyh/escapement",
+  "repository": "https://github.com/alexander-vyh/escapement",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "oracle",
+    "tdd",
+    "beads",
+    "gates",
+    "agentic"
+  ],
+  "hooks": "./.codex-plugin/hooks.json",
+  "skills": "./.agents/skills/",
+  "interface": {
+    "displayName": "Escapement",
+    "shortDescription": "Agentic workflow gates: oracle discipline, TDD enforcement, beads tracking",
+    "longDescription": "Escapement is a host-neutral workflow layer for agentic coding sessions. Oracle-discipline gates block implementation-echo tests and oracle downgrades. TDD enforcement requires a Test Oracle Brief before writing code. Beads provides durable issue tracking. Works alongside your existing workflow.",
+    "developerName": "alexander-vyh",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Workflow gates",
+      "TDD enforcement",
+      "Issue tracking",
+      "Oracle discipline"
+    ],
+    "websiteURL": "https://github.com/alexander-vyh/escapement",
+    "defaultPrompt": [
+      "Show me what work is ready in this repo.",
+      "Check if I have a Test Oracle Brief before writing code.",
+      "What escapement gates are active in this session?"
+    ],
+    "brandColor": "#2D6A4F"
+  }
+}
