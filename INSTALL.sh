@@ -42,12 +42,14 @@ ESCAPEMENT_PIN_REMOTE="${ESCAPEMENT_PIN_REMOTE:-${CWS_PIN_REMOTE:-$(git -C "$REP
 MODE="install"
 DRY_RUN=false
 DEV_MODE=false
+ALLOW_PINNED_DRIFT=false
 for arg in "$@"; do
   case "$arg" in
     --uninstall) MODE="uninstall" ;;
     --update)    MODE="update" ;;
     --dev)       DEV_MODE=true ;;
     --dry-run)   DRY_RUN=true ;;
+    --allow-pinned-drift) ALLOW_PINNED_DRIFT=true ;;
     --help|-h)
       sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
@@ -278,6 +280,27 @@ PY
 ensure_pinned_checkout() {
   local pin_dir="${1:-$ESCAPEMENT_PIN_DIR}"
   if [[ -d "$pin_dir/.git" ]]; then
+    # Guardrail: detect deploy-dir drift (uncommitted edits made directly in the
+    # pinned checkout). These bypass review and are invisible until they conflict
+    # with a future update — surface them with an escape path rather than silently
+    # stranding them (recovered two such drifts on 2026-06-14).
+    local _drift
+    _drift="$(git -C "$pin_dir" status --porcelain 2>/dev/null)"
+    if [[ -n "$_drift" ]]; then
+      echo "" >&2
+      echo "⚠  pinned checkout has uncommitted local edits (deploy-dir drift):" >&2
+      printf '%s\n' "$_drift" | sed 's/^/       /' >&2
+      echo "   Direct edits here bypass review and are invisible until they conflict." >&2
+      echo "   Resolve one of:" >&2
+      echo "     • upstream:  git -C '$pin_dir' diff <file>  → open a PR to $ESCAPEMENT_PIN_REF, then re-run --update" >&2
+      echo "     • discard:   git -C '$pin_dir' checkout -- <file>" >&2
+      echo "     • proceed:   re-run with --allow-pinned-drift (ff-only keeps non-conflicting edits)" >&2
+      if [[ "$ALLOW_PINNED_DRIFT" != true ]]; then
+        echo "   Aborting to avoid silently stranding the drift." >&2
+        exit 1
+      fi
+      echo "   --allow-pinned-drift set: proceeding." >&2
+    fi
     echo "==> refreshing pinned checkout: $pin_dir -> $ESCAPEMENT_PIN_REF"
     run "git -C '$pin_dir' fetch --quiet '$ESCAPEMENT_PIN_REMOTE' '$ESCAPEMENT_PIN_REF'"
     run "git -C '$pin_dir' checkout --quiet '$ESCAPEMENT_PIN_REF'"
