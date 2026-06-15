@@ -247,6 +247,37 @@ def find_git_root(start: str | Path) -> Path | None:
     return Path(result.stdout.strip())
 
 
+def git_target_dir(command: str, fallback_cwd: str) -> str:
+    """Resolve the directory a finishing git command actually targets.
+
+    The hook's own cwd is the session's primary repo, but a commit may
+    target a DIFFERENT repo via `git -C <path>` or a leading `cd <path> &&`
+    (e.g. committing inside a git worktree). Resolving repo_root from the
+    session cwd in that case scans the wrong repo's files (a cross-repo
+    false positive that flags untracked scratch files in the session repo,
+    never the staged change being committed). Honor the command's target.
+    """
+    import shlex
+
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return fallback_cwd
+    target: str | None = None
+    for i, tok in enumerate(tokens):  # prefer an explicit `git -C <path>`
+        if tok == "-C" and i + 1 < len(tokens):
+            target = tokens[i + 1]
+            break
+    if target is None and tokens and tokens[0] == "cd" and len(tokens) > 1:
+        target = tokens[1]  # else a leading `cd <path> && ...`
+    if not target:
+        return fallback_cwd
+    p = Path(target)
+    if not p.is_absolute():
+        p = Path(fallback_cwd) / p
+    return str(p)
+
+
 def git_files(repo_root: Path, args: list[str]) -> list[str]:
     try:
         result = subprocess.run(
@@ -586,7 +617,9 @@ def main() -> int:
         return allow()
 
     cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else os.getcwd()
-    repo_root = find_git_root(cwd)
+    # Resolve repo_root from the repo the command actually targets (e.g.
+    # `git -C <worktree>`), not the session cwd, to avoid cross-repo misfires.
+    repo_root = find_git_root(git_target_dir(command, cwd))
     if repo_root is None:
         return allow()
 
