@@ -280,10 +280,24 @@ def _compute_winddown_verdict_inline(text, thread_dir, *, judge=None, now=None) 
     return None
 
 
+# Derived/churny beads telemetry: rewritten as a side-effect of ordinary `bd`
+# commands and (on a protected main) unpushable, so a modification here is NOT
+# "work to finish" — counting it false-positives the Stop gate after any bd call
+# (dogfood finding 2026-06-14). issues.jsonl is deliberately NOT here: it is real
+# issue state whose sync is legitimately work-remaining.
+_BEADS_TELEMETRY_PATHS = frozenset({
+    ".beads/interactions.jsonl",
+    ".beads/.gate-signal.jsonl",
+    ".beads/.gate-waivers.jsonl",
+    ".beads/.spec-index.json",
+})
+
+
 def _git_work_remains(cwd: str, run_git=None) -> bool:
     """True iff the repo at `cwd` has uncommitted changes to TRACKED files OR commits not
     pushed to its upstream. Pure-untracked files (scratch/artifacts) do NOT count — they
     would nag nearly every stop in a live working tree (deliberate, documented scope).
+    Churny beads telemetry (_BEADS_TELEMETRY_PATHS) is also excluded for the same reason.
 
     FAIL-OPEN to False: not a git repo / git error / no upstream → no git work detected
     (mirrors _check_bd_queue_implicit degrading to allow; never fabricates a block, never
@@ -305,8 +319,14 @@ def _git_work_remains(cwd: str, run_git=None) -> bool:
     status = run_git(["status", "--porcelain"])
     if status is not None:
         for line in status.stdout.splitlines():
-            if line and not line.startswith("??"):  # tracked change (staged/modified/del)
-                return True
+            if not line or line.startswith("??"):  # blank or pure-untracked → skip
+                continue
+            path = line[3:]  # porcelain: "XY <path>"
+            if " -> " in path:  # rename: take the destination path
+                path = path.split(" -> ", 1)[1]
+            if path.strip().strip('"') in _BEADS_TELEMETRY_PATHS:
+                continue  # churny derived beads telemetry — not work to finish
+            return True  # a real tracked change
 
     # Unpushed: revisions ahead of the tracking upstream. No upstream → git errors → None
     # → not counted (a branch with no upstream cannot meaningfully be called "unpushed").
