@@ -461,3 +461,82 @@ def test_integration_oracle_no_seams_epic_is_allowed(monkeypatch):
 
     assert code == 0
     assert payload is None, "an oracle-bearing, seam-free epic must close silently"
+
+
+# ===========================================================================
+# CODEX — end-to-end main() tests via the Codex hook payload contract
+#
+# These tests prove the gate enforces its behavioral contract when invoked as
+# Codex would invoke it: a JSON payload on stdin, full main() call, result via
+# stdout JSON or silent pass. Named test_codex_* so the manifest renderer can
+# reference them as Codex-specific fixture selectors.
+# ===========================================================================
+
+
+def test_codex_epic_close_blocked_without_oracle(monkeypatch):
+    """Negative control: closing an epic that has no own acceptance oracle is BLOCKED.
+
+    The cake-ta5.1 lesson: child-count is an intermediate artifact, not the
+    parent's outcome. An implementation that always allows would pass the positive
+    control but fail here. Driven through main() as Codex would call the hook.
+    """
+    issue = _epic("proj-codex-1", EPIC_DESC_NO_ORACLE)
+    children = [
+        _child("Extract parser create_parser argparse"),
+        _child("Extract dispatch command table"),
+    ]
+    _install_bd(monkeypatch, issue, children)
+
+    code, payload = _run_main_via_stdin(monkeypatch, "bd close proj-codex-1")
+
+    assert code == 0, "deny is signaled by stdout JSON, not by non-zero exit"
+    assert payload is not None, "gate must emit a JSON decision when blocking"
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "oracle" in reason.lower(), f"denial must name the missing oracle; got: {reason!r}"
+
+
+def test_codex_epic_close_blocked_on_uncovered_seam(monkeypatch):
+    """Negative control: the cake-ta5.1 shape (seam-naming epic with an uncovered seam) is BLOCKED.
+
+    The 'parser' seam's only covering child is still OPEN. An implementation that
+    only checks oracle presence (not seam coverage) would pass the oracle test but
+    fail here. Driven through main() as Codex would call the hook.
+    """
+    issue = _epic("proj-codex-2", EPIC_DESC_LEAKY)
+    children = [
+        _child("Extract parser create_parser argparse", status="open"),
+        _child("Extract dispatch command table", status="closed"),
+        _child("Extract handlers per-command functions", status="closed"),
+    ]
+    _install_bd(monkeypatch, issue, children)
+
+    code, payload = _run_main_via_stdin(monkeypatch, "bd close proj-codex-2")
+
+    assert code == 0
+    assert payload is not None
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "parser" in payload["hookSpecificOutput"]["permissionDecisionReason"].lower()
+
+
+def test_codex_fully_covered_epic_is_allowed(monkeypatch):
+    """Positive control: epic with oracle and all seams covered by closed children → allow.
+
+    Proves the gate does not block legitimate epic closes. Without this, an
+    implementation that always denies would pass only the negative controls.
+    Driven through main() as Codex would call the hook.
+    """
+    issue = _epic("proj-codex-3", EPIC_DESC_FULL)
+    children = [
+        _child("Extract parser create_parser argparse"),
+        _child("Extract dispatch command table"),
+        _child("Extract handlers per-command functions"),
+    ]
+    _install_bd(monkeypatch, issue, children)
+
+    code, payload = _run_main_via_stdin(monkeypatch, "bd close proj-codex-3")
+
+    assert code == 0
+    assert payload is None, (
+        f"a fully-covered epic must close silently (no deny JSON); got: {payload!r}"
+    )

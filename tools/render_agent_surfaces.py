@@ -182,9 +182,9 @@ def validate_manifest(root: Path, manifest: dict[str, Any]) -> list[str]:
         if codex.get("status") == "ready":
             source = hook.get("source")
             if source and source != "bd" and Path(source).suffix == ".py":
-                fixture_text = "\n".join(codex.get("fixtures", [])).lower()
-                source_stem = Path(source).stem.lower()
-                hook_id = item_id.lower()
+                fixture_text = "\n".join(codex.get("fixtures", [])).lower().replace("-", "_")
+                source_stem = Path(source).stem.lower().replace("-", "_")
+                hook_id = item_id.lower().replace("-", "_")
                 if source_stem not in fixture_text and hook_id not in fixture_text:
                     errors.append(f"hook {item_id}: Codex hook fixture must match hook source: {source}")
             for event in codex.get("events", []):

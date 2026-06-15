@@ -47,6 +47,30 @@
             "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/oracle_downgrade_warning_gate.py\"",
             "statusMessage": "Checking for oracle downgrade",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/discovery-gate.py\"",
+            "statusMessage": "Checking discovery gate (design doc required for feature creates)",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/outcome_assertion_gate.py\"",
+            "statusMessage": "Checking outcome assertion quality (on gh pr create)",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/spec_id_enforcement.py\"",
+            "statusMessage": "Checking spec-id backlink on mol-feature task creates",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/epic_coverage_gate.py\"",
+            "statusMessage": "Checking epic seam coverage before close",
+            "timeout": 10
           }
         ]
       },
