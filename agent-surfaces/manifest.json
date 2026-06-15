@@ -150,6 +150,812 @@
           ]
         }
       }
+    },
+    {
+      "id": "beads_worktree_guard",
+      "description": "Redirect `git worktree add` to `bd worktree create` so linked worktrees share the beads database.",
+      "source": "claude/hooks/beads_worktree_guard.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(git worktree add:*)",
+              "command": "python3 ~/.claude/hooks/beads_worktree_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(git:*)",
+              "command": "python3 ~/.claude/hooks/beads_worktree_guard.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_beads_worktree_guard.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "cache_write_guard",
+      "description": "Redirect trivial operations out of a heavy (bloated-context) session.",
+      "source": "claude/hooks/cache_write_guard.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 ~/.claude/hooks/cache_write_guard.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_cache_write_guard.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "context_burn_detector",
+      "description": "Detect excessive inline research without agent dispatch.",
+      "source": "claude/hooks/context_burn_detector.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Fires on Claude Agent-tool dispatch metadata (PreToolUse:Agent); Codex has no equivalent Agent dispatch event."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Agent",
+              "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Read",
+              "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Grep",
+              "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Glob",
+              "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "design_doc_location_guard",
+      "description": "Warn when writing design docs directly to docs/plans/ instead of openspec/changes/.",
+      "source": "claude/hooks/design_doc_location_guard.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "Write",
+              "command": "python3 ~/.claude/hooks/design_doc_location_guard.py"
+            },
+            {
+              "event": "PostToolUse",
+              "matcher": "Edit",
+              "command": "python3 ~/.claude/hooks/design_doc_location_guard.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "discovery-close-gate",
+      "description": "Nudge on bd close to verify discovery outcomes.",
+      "source": "claude/hooks/discovery-close-gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(bd close:*)",
+              "command": "python3 ~/.claude/hooks/discovery-close-gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_discovery_close_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "discovery-gate",
+      "description": "Enforce discovery (design doc) before feature/epic creation.",
+      "source": "claude/hooks/discovery-gate.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/discovery-gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_discovery_gate.py::test_codex_feature_create_blocked_without_design_doc",
+            "claude/hooks/tests/test_codex_discovery_gate.py::test_codex_feature_create_allowed_with_valid_design_doc"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(bd create:*)",
+              "command": "python3 ~/.claude/hooks/discovery-gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_discovery_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "discovery-nudge",
+      "description": "Nudge toward discovery when a prompt looks like new feature work.",
+      "source": "claude/hooks/discovery-nudge.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 ~/.claude/hooks/discovery-nudge.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "discovery_input_gate",
+      "description": "Gate solution artifacts on a confirmed problem framing.",
+      "source": "claude/hooks/discovery_input_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Write",
+              "command": "python3 ~/.claude/hooks/discovery_input_gate.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Edit",
+              "command": "python3 ~/.claude/hooks/discovery_input_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_discovery_input_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "enforce_named_agents",
+      "description": "Enforce named agents; block multi-agent dispatch without teams.",
+      "source": "claude/hooks/enforce_named_agents.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Inspects Claude Agent/TeamCreate tool payloads; Codex has no named-agent team dispatch tool to gate."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Agent",
+              "command": "python3 ~/.claude/hooks/enforce_named_agents.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_enforce_named_agents.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "epic_coverage_gate",
+      "description": "Block false-closing an epic whose scope is not delivered.",
+      "source": "claude/hooks/epic_coverage_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/epic_coverage_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_epic_coverage_gate.py::test_codex_epic_close_blocked_without_oracle",
+            "claude/hooks/tests/test_epic_coverage_gate.py::test_codex_fully_covered_epic_is_allowed"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(bd close:*)",
+              "command": "python3 ~/.claude/hooks/epic_coverage_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_epic_coverage_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "gate_design_nudge",
+      "description": "Nudge toward the gate-design skill when editing a gate-ish file.",
+      "source": "claude/hooks/gate_design_nudge.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Write",
+              "command": "python3 ~/.claude/hooks/gate_design_nudge.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Edit",
+              "command": "python3 ~/.claude/hooks/gate_design_nudge.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_gate_design_nudge.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "implementation_echo_test_gate",
+      "description": "Reject high-confidence implementation-echo tests.",
+      "source": "claude/hooks/implementation_echo_test_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 ~/.claude/hooks/implementation_echo_test_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_implementation_echo_test_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "mol_status_check",
+      "description": "Inject active molecule state on session start.",
+      "source": "claude/hooks/mol_status_check.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 ~/.claude/hooks/mol_status_check.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "no_direct_send_guard",
+      "description": "Block direct Slack/email send tools; drafts are allowed.",
+      "source": "claude/hooks/no_direct_send_guard.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Matches Claude Slack-MCP tool names (mcp__*_Slack__*); Codex tool routing differs and needs a dedicated adapter."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__plugin_slack_slack__slack_send_message",
+              "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__plugin_slack_slack__slack_schedule_message",
+              "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__claude_ai_Slack__slack_send_message",
+              "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__claude_ai_Slack__slack_schedule_message",
+              "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_no_direct_send_guard.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "openspec_init_guard",
+      "description": "Block openspec commands when openspec/ doesn't exist.",
+      "source": "claude/hooks/openspec_init_guard.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(openspec:*)",
+              "command": "python3 ~/.claude/hooks/openspec_init_guard.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "openspec_task_reconciliation_gate",
+      "description": "Prevent linked bead closes from leaving tasks.md stale.",
+      "source": "claude/hooks/openspec_task_reconciliation_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(bd close:*)",
+              "command": "python3 ~/.claude/hooks/openspec_task_reconciliation_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_openspec_task_reconciliation_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "oracle_downgrade_warning_gate",
+      "description": "Landing-time warning for likely test-oracle downgrades.",
+      "source": "claude/hooks/oracle_downgrade_warning_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 ~/.claude/hooks/oracle_downgrade_warning_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_oracle_downgrade_warning_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "outcome_assertion_gate",
+      "description": "Outcome assertion quality gate on test files in the PR diff.",
+      "source": "claude/hooks/outcome_assertion_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/outcome_assertion_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_outcome_assertion_gate.py::test_codex_pr_create_asks_on_structural_only_tests",
+            "claude/hooks/tests/test_codex_outcome_assertion_gate.py::test_codex_pr_create_allows_outcome_assertions"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(gh pr create:*)",
+              "command": "python3 ~/.claude/hooks/outcome_assertion_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_outcome_assertion_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "review_nudge",
+      "description": "Nudge toward /review when a prompt looks like a review request.",
+      "source": "claude/hooks/review_nudge.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 ~/.claude/hooks/review_nudge.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "serena_preference_gate",
+      "description": "Block full-file Read on source-code files when Serena is available.",
+      "source": "claude/hooks/serena_preference_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Depends on Serena (MCP) availability detection; Serena is not part of the Codex adapter."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Read",
+              "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_serena_preference_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "serena_preference_injection",
+      "description": "Inject Serena-preference guidance at turn start.",
+      "source": "claude/hooks/serena_preference_injection.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Injects Serena-preference guidance; Serena is not part of the Codex adapter."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 ~/.claude/hooks/serena_preference_injection.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "session_cleanup",
+      "description": "Clean up stale temp files on session start.",
+      "source": "claude/hooks/session_cleanup.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 ~/.claude/hooks/session_cleanup.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "session_status",
+      "description": "Emit one-line project status based on bd queue state.",
+      "source": "claude/hooks/session_status.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 ~/.claude/hooks/session_status.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_session_status.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "spec_id_enforcement",
+      "description": "Enforce --spec-id on bd create under mol-feature molecules.",
+      "source": "claude/hooks/spec_id_enforcement.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/spec_id_enforcement.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_spec_id_enforcement.py::test_codex_bd_create_missing_spec_id_under_mol_feature_denied",
+            "claude/hooks/tests/test_codex_spec_id_enforcement.py::test_codex_bd_create_with_spec_id_allowed"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(bd create:*)",
+              "command": "python3 ~/.claude/hooks/spec_id_enforcement.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "tdd-gate",
+      "description": "TDD enforcement \u2014 require test changes before implementation edits.",
+      "source": "claude/hooks/tdd-gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Gates Claude Serena symbol-edit tools (mcp__serena__*) alongside Write/Edit; Serena matchers are not portable to Codex."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Write",
+              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Edit",
+              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "NotebookEdit",
+              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__serena__replace_symbol_body",
+              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__serena__insert_after_symbol",
+              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__serena__insert_before_symbol",
+              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_tdd_gate.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "test_reminder",
+      "description": "PostToolUse test reminder after code-file edits.",
+      "source": "claude/hooks/test_reminder.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "Write",
+              "command": "python3 ~/.claude/hooks/test_reminder.py"
+            },
+            {
+              "event": "PostToolUse",
+              "matcher": "Edit",
+              "command": "python3 ~/.claude/hooks/test_reminder.py"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "validate_no_shirking",
+      "description": "Block outcome-shirking (\"pre-existing failure\" evasion) at commit/push and Stop.",
+      "source": "claude/hooks/validate_no_shirking.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Fires on the Claude-only Stop event and reads the Claude transcript path; Codex has no Stop lifecycle event."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+            },
+            {
+              "event": "Stop",
+              "matcher": "",
+              "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_validate_no_shirking.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "serena_onboarding_check",
+      "description": "Serena onboarding nudge on session start.",
+      "source": "claude/hooks/serena_onboarding_check.sh",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Checks Serena onboarding/memory state; Serena is not part of the Codex adapter."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "bash ~/.claude/hooks/serena_onboarding_check.sh"
+            }
+          ],
+          "fixtures": [
+            "claude/settings.template.json"
+          ]
+        }
+      }
     }
   ],
   "distribution": {
