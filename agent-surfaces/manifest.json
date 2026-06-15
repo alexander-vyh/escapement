@@ -152,6 +152,21 @@
       }
     }
   ],
+  "distribution": {
+    "claude": {
+      "mechanism": "plugin",
+      "status": "ready",
+      "manifest": ".claude-plugin/plugin.json",
+      "hooks_target": "hooks/hooks.json",
+      "source": "claude/settings.template.json",
+      "notes": "Full Claude hook set via ${CLAUDE_PLUGIN_ROOT} paths. Excludes ~/.claude/project-bootstrap.sh (user-specific, not repo-resident). Timeout values converted from milliseconds to seconds."
+    },
+    "codex": {
+      "mechanism": "repo-resident",
+      "status": "ready",
+      "notes": "AGENTS.md, .codex/hooks.json, and .agents/skills/ are committed to the repo root and auto-discovered by Codex. No user-local install needed."
+    }
+  },
   "skills": [
     {
       "id": "openspec-apply-change",
