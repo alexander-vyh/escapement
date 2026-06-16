@@ -17,6 +17,15 @@ EXPECTED_CODEX_GATE = {
     "command": "python3 claude/hooks/test_oracle_brief_gate.py",
     "timeout": 5,
 }
+MINIMUM_VERIFIED_DELIVERY_FRAGMENTS = (
+    "Escapement optimizes for minimum verified delivery.",
+    "YAGNI forbids speculative",
+    "never weakens the outcome oracle",
+    "current user/business outcome still passes its independent verification",
+    "DRY targets duplicated authority, not similar text.",
+    "Preserve independent corroborating checks",
+    "Add gates only for repeated or high-severity failures with a replayable oracle",
+)
 
 
 def run_renderer(*args, root=ROOT):
@@ -31,6 +40,25 @@ def run_renderer(*args, root=ROOT):
 def test_generated_surfaces_are_current():
     result = run_renderer("--check")
     assert result.returncode == 0, result.stderr
+
+
+def test_generated_docs_include_minimum_verified_delivery_guidance():
+    assert_minimum_verified_delivery_guidance(ROOT)
+
+
+def test_minimum_verified_delivery_guidance_without_oracle_guardrail_fails(tmp_path):
+    temp_root = copy_repo(tmp_path)
+    for rel_path in ("agent-surfaces/onboarding/outcome-oracle.md", "AGENTS.md", "CLAUDE.md"):
+        path = temp_root / rel_path
+        path.write_text(
+            path.read_text().replace(
+                "never weakens the outcome oracle",
+                "prefers fewer files",
+            )
+        )
+
+    with pytest.raises(AssertionError):
+        assert_minimum_verified_delivery_guidance(temp_root)
 
 
 def test_codex_repo_marketplace_points_to_installable_wrapper():
@@ -325,6 +353,13 @@ def test_codex_skill_with_claude_only_token_fails(tmp_path):
 
     assert result.returncode != 0
     assert "Codex skill contains forbidden Claude-only token" in result.stderr
+
+
+def assert_minimum_verified_delivery_guidance(root):
+    for rel_path in ("agent-surfaces/onboarding/outcome-oracle.md", "AGENTS.md", "CLAUDE.md"):
+        text = " ".join((root / rel_path).read_text().split())
+        for fragment in MINIMUM_VERIFIED_DELIVERY_FRAGMENTS:
+            assert fragment in text, f"{rel_path} missing minimum verified delivery fragment: {fragment}"
 
 
 def copy_repo(tmp_path):
