@@ -57,6 +57,24 @@ enough when the tests only repeat private helpers, constants, generated IDs, or
 intermediate implementation details. Do not weaken an oracle to make a change
 pass; fix the implementation or update the spec with an explicit decision.
 
+## Minimum Verified Delivery
+
+Escapement optimizes for minimum verified delivery. YAGNI forbids speculative
+structure; it never weakens the outcome oracle. A YAGNI decision is valid only
+when the current user/business outcome still passes its independent
+verification, controls remain intact, and the skipped work has an observable
+trigger for adding it later.
+
+DRY targets duplicated authority, not similar text. Centralize when duplication
+creates drift, competing source-of-truth claims, repeated synchronized edits,
+reviewer confusion, repeated decision cost, or high-severity deterministic risk.
+Preserve independent corroborating checks, especially across implementation,
+tests, oracle review, mutation challenge, and outcome verification.
+
+Add gates only for repeated or high-severity failures with a replayable oracle
+that catches bad cases and allows good ones. Do not add workflow machinery just
+to prove that less workflow machinery should exist.
+
 # Non-Interactive Shell Commands
 
 Use non-interactive flags with file operations so aliases or prompts do not hang
