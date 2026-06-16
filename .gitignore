@@ -28,3 +28,6 @@ claude/hooks/state/
 
 # agent research artifacts (research-findings-persistence rule)
 .research/
+
+# Serena MCP per-project navigation cache + memories (user/machine-local, created on onboarding)
+.serena/
