@@ -1,0 +1,20 @@
+{
+  "name": "escapement-local",
+  "interface": {
+    "displayName": "Escapement Local"
+  },
+  "plugins": [
+    {
+      "name": "escapement",
+      "source": {
+        "source": "local",
+        "path": "./plugins/escapement"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

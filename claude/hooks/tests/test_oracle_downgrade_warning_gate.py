@@ -81,6 +81,23 @@ def test_strong_assertion_weakened_warns(tmp_path):
     assert "strong-assertion-weakened" in reason
 
 
+def test_codex_oracle_downgrade_warning_gate_warns_on_weakened_assertion(tmp_path):
+    repo = init_repo(tmp_path)
+    commit_file(repo, "tests/test_app.py", "def test_value():\n    assert result.status == 'active'\n")
+    (repo / "tests" / "test_app.py").write_text(
+        "def test_value():\n    assert result.status is not None\n",
+        encoding="utf-8",
+    )
+
+    code, output = run_hook(hook_payload(repo))
+
+    assert code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "ask"
+    reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "ORACLE DOWNGRADE WARNING" in reason
+    assert "strong-assertion-weakened" in reason
+
+
 def test_semantic_identity_replaced_by_generated_id_warns(tmp_path):
     repo = init_repo(tmp_path)
     commit_file(

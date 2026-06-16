@@ -17,8 +17,7 @@
     "gates",
     "agentic"
   ],
-  "hooks": "./.codex-plugin/hooks.json",
-  "skills": "./.agents/skills/",
+  "skills": "./skills/",
   "interface": {
     "displayName": "Escapement",
     "shortDescription": "Agentic workflow gates: oracle discipline, TDD enforcement, beads tracking",
@@ -35,7 +34,7 @@
     "defaultPrompt": [
       "Show me what work is ready in this repo.",
       "Check if I have a Test Oracle Brief before writing code.",
-      "What escapement gates are active in this session?"
+      "What Escapement gates are active in this session?"
     ],
     "brandColor": "#2D6A4F"
   }
