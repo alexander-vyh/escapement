@@ -10,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 RENDERER = ROOT / "tools" / "render_agent_surfaces.py"
 MANIFEST = ROOT / "agent-surfaces" / "manifest.json"
+CODEX_WRAPPER = ROOT / "plugins" / "escapement"
 EXPECTED_CODEX_GATE = {
     "event": "PreToolUse",
     "matcher": "Bash",
@@ -30,6 +31,95 @@ def run_renderer(*args, root=ROOT):
 def test_generated_surfaces_are_current():
     result = run_renderer("--check")
     assert result.returncode == 0, result.stderr
+
+
+def test_codex_repo_marketplace_points_to_installable_wrapper():
+    marketplace_path = ROOT / ".agents" / "plugins" / "marketplace.json"
+    assert marketplace_path.exists(), "repo marketplace must expose the Escapement Codex wrapper"
+
+    marketplace = json.loads(marketplace_path.read_text())
+    entries = [entry for entry in marketplace["plugins"] if entry["name"] == "escapement"]
+
+    assert marketplace["name"] == "escapement-local"
+    assert entries == [
+        {
+            "name": "escapement",
+            "source": {"source": "local", "path": "./plugins/escapement"},
+            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+            "category": "Developer Tools",
+        }
+    ]
+
+
+def test_codex_plugin_wrapper_manifest_uses_current_ingestion_contract():
+    legacy_manifest = ROOT / ".codex-plugin" / "plugin.json"
+    assert not legacy_manifest.exists(), "legacy root Codex manifest is invalid and must not be installable"
+
+    manifest_path = CODEX_WRAPPER / ".codex-plugin" / "plugin.json"
+    assert manifest_path.exists(), "Codex wrapper must include .codex-plugin/plugin.json"
+
+    manifest = json.loads(manifest_path.read_text())
+
+    assert manifest["name"] == "escapement"
+    assert manifest["version"] == "1.0.0"
+    assert manifest["skills"] == "./skills/"
+    assert "hooks" not in manifest, "current Codex plugin validation rejects a hooks manifest field"
+    assert (CODEX_WRAPPER / "skills").is_dir()
+    assert (CODEX_WRAPPER / "hooks" / "hooks.json").is_file()
+
+
+def test_codex_plugin_wrapper_contains_current_codex_skills():
+    source_skills = {
+        path.parent.name: path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md"))
+    }
+    wrapper_skills = {
+        path.parent.name: path.read_text(encoding="utf-8")
+        for path in sorted((CODEX_WRAPPER / "skills").glob("*/SKILL.md"))
+    }
+
+    assert wrapper_skills == source_skills
+    assert "openspec-apply-change" in wrapper_skills
+
+
+def test_codex_plugin_wrapper_hooks_are_self_contained_and_codex_shaped():
+    hooks_path = CODEX_WRAPPER / "hooks" / "hooks.json"
+    assert hooks_path.exists(), "Codex wrapper must package hooks/hooks.json for plugin discovery"
+
+    hooks_text = hooks_path.read_text()
+    for forbidden in ("${CLAUDE_PLUGIN_ROOT}", "~/.claude", "CLAUDE_CODE_SESSION_ID", "ScheduleWakeup", "TeamCreate"):
+        assert forbidden not in hooks_text
+
+    hooks = json.loads(hooks_text)["hooks"]
+    commands = [
+        hook["command"]
+        for event_items in hooks.values()
+        for item in event_items
+        for hook in item["hooks"]
+    ]
+
+    assert "bd prime" in commands
+    assert any("test_oracle_brief_gate.py" in command for command in commands)
+    assert any("implementation_echo_test_gate.py" in command for command in commands)
+    assert any("oracle_downgrade_warning_gate.py" in command for command in commands)
+
+    for command in commands:
+        if "${PLUGIN_ROOT}/" not in command:
+            continue
+        rel = command.split("${PLUGIN_ROOT}/", 1)[1].split('"', 1)[0]
+        assert (CODEX_WRAPPER / rel).is_file(), f"hook command references missing wrapper file: {rel}"
+
+    manifest = json.loads(MANIFEST.read_text())
+    ready_hook_sources = {
+        hook["source"]
+        for hook in manifest["hooks"]
+        if hook.get("source") != "bd" and hook["hosts"]["codex"]["status"] == "ready"
+    }
+    packaged_hook_sources = {
+        path.relative_to(CODEX_WRAPPER).as_posix()
+        for path in sorted((CODEX_WRAPPER / "claude" / "hooks").glob("*"))
+    }
+    assert ready_hook_sources <= packaged_hook_sources
 
 
 def test_codex_hooks_include_prime_and_behavioral_gate():

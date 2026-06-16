@@ -166,6 +166,30 @@ def test_commit_blocks_shared_generated_literal(tmp_path):
     assert "shared-generated-literal" in reason
 
 
+def test_codex_implementation_echo_test_gate_blocks_shared_generated_literal(tmp_path):
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "src" / "app.py").write_text("MEDIA_RECORD_TYPE_ID = '0124p000000ABCDEF1'\n", encoding="utf-8")
+    (repo / "tests" / "test_app.py").write_text(
+        "def test_media_filter():\n    assert record_type_id == '0124p000000ABCDEF1'\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": "git commit -m change"},
+    }
+
+    code, output = run_hook(payload)
+
+    assert_denied(code, output)
+    reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "IMPLEMENTATION-ECHO TEST GATE" in reason
+    assert "shared-generated-literal" in reason
+
+
 def test_non_finishing_command_allows_even_with_issue(tmp_path):
     repo = init_repo(tmp_path)
     (repo / "src").mkdir()

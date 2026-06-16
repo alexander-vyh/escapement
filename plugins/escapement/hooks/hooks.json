@@ -15,7 +15,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/test_oracle_brief_gate.py",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/test_oracle_brief_gate.py\"",
             "timeout": 5,
             "type": "command"
           }
@@ -25,7 +25,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/discovery-gate.py",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/discovery-gate.py\"",
             "timeout": 10,
             "type": "command"
           }
@@ -35,7 +35,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/epic_coverage_gate.py",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/epic_coverage_gate.py\"",
             "timeout": 10,
             "type": "command"
           }
@@ -45,7 +45,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/implementation_echo_test_gate.py",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/implementation_echo_test_gate.py\"",
             "timeout": 10,
             "type": "command"
           }
@@ -55,7 +55,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/oracle_downgrade_warning_gate.py",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/oracle_downgrade_warning_gate.py\"",
             "timeout": 10,
             "type": "command"
           }
@@ -65,7 +65,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/outcome_assertion_gate.py",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/outcome_assertion_gate.py\"",
             "timeout": 10,
             "type": "command"
           }
@@ -75,7 +75,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/spec_id_enforcement.py",
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/spec_id_enforcement.py\"",
             "timeout": 10,
             "type": "command"
           }

@@ -825,3 +825,58 @@ exhibits the flagged behavior); each turns green under its named fix.
   fragile impl (see C2 section).
 - **NOTE 3: align-by-contract** (pin the observable old-bd→release contract; runner-source
   alignment optional). **NOTE 4: folded into the N guard** (bare-"floor" fallback sense).
+
+# Test Oracle Brief: Codex Plugin Wrapper
+
+## Business invariant
+
+Escapement must provide a Codex-installable plugin wrapper from the repo itself, so a user can install `escapement` through Codex's marketplace flow and receive the Codex-ready skills and enforcement hooks without relying on stale global copies or Claude-only packaging. The wrapper must enable Codex support for the implementation-echo and oracle-downgrade gates, not omit them because they were previously unsupported.
+
+## Independent source of truth
+
+Correctness is determined by Codex's current plugin ingestion contract as represented by the local `plugin-creator` validator and the Codex manual: plugin manifests must validate, skills must live under a `skills/` contract path, lifecycle hooks must be packaged where Codex discovers plugin hooks, generated files must match `agent-surfaces/manifest.json`, and each Codex-ready gate must have Codex-specific fixture coverage.
+
+## Solution constraints
+
+- `agent-surfaces/manifest.json` remains the source of truth for generated host surfaces.
+- `tools/render_agent_surfaces.py` must generate/check all Codex wrapper files instead of leaving manual drift-prone copies.
+- Claude packaging must remain separate and must not be overwritten with Codex-specific `${PLUGIN_ROOT}` hook syntax.
+- Current Codex plugin validation rejects a `hooks` field in `.codex-plugin/plugin.json` and requires `skills` to resolve to `skills`.
+- Generated Codex hooks must use Codex-compatible paths and must avoid Claude-only tokens such as `~/.claude`, `CLAUDE_CODE_SESSION_ID`, `ScheduleWakeup`, and `TeamCreate`.
+- `implementation_echo_test_gate` and `oracle_downgrade_warning_gate` must be promoted to Codex-ready only with Codex-specific tests proving their `PreToolUse`/`Bash` behavior.
+- Existing user-local dirty state under `.beads/.gate-waivers.jsonl` is unrelated and must not be modified.
+
+## Invalid solution classes
+
+- Declaring the root plugin valid while `plugin.json` still contains unsupported fields.
+- Pointing `skills` at `.agents/skills` and assuming Codex will accept it.
+- Manually copying skills or hooks without generated-surface drift checks.
+- Reusing the Claude plugin hook bundle for Codex when it still contains `${CLAUDE_PLUGIN_ROOT}` or Claude-only events/tools.
+- Treating previously unsupported Codex gates as out of scope instead of adding the missing Codex fixture coverage and wrapper packaging.
+- Testing only that files exist rather than validating the install contract and content.
+
+## Fragile implementation to reject
+
+The tempting shortcut is to copy `.agents/skills` into `skills/` and remove the `hooks` field from `plugin.json`, but leave hook packaging out of the generated wrapper or package only the already-ready Test Oracle Brief gate. Tests must fail that implementation because Codex would install skills but still miss implementation-echo and oracle-downgrade enforcement.
+
+## Negative control
+
+A copied wrapper with `plugin.json` containing `hooks`, `skills: "./.agents/skills/"`, missing `hooks/hooks.json`, hooks containing `${CLAUDE_PLUGIN_ROOT}`, or no packaged `implementation_echo_test_gate.py` / `oracle_downgrade_warning_gate.py` Codex hooks must fail the generated-surface check and/or plugin validator contract check.
+
+## Positive control
+
+The existing OpenSpec Codex skills must appear in the installable wrapper under `skills/<skill>/SKILL.md`, and the wrapper must include Codex hooks that run `bd prime`, `test_oracle_brief_gate.py`, `implementation_echo_test_gate.py`, and `oracle_downgrade_warning_gate.py` using `${PLUGIN_ROOT}`.
+
+## Missing/unresolved handling
+
+Missing source skills, missing Codex hook events, missing generated wrapper files, or current Codex validator failures must fail closed. Unsupported Claude-only hooks remain explicitly unsupported for Codex rather than being silently ported.
+
+## Final outcome verification
+
+Run:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_agent_surfaces.py claude/hooks/tests/test_implementation_echo_test_gate.py::test_codex_implementation_echo_test_gate_blocks_shared_generated_literal claude/hooks/tests/test_oracle_downgrade_warning_gate.py::test_codex_oracle_downgrade_warning_gate_warns_on_weakened_assertion -o cache_dir=/private/tmp/escapement-pytest-cache`
+- `python3 tools/render_agent_surfaces.py --check`
+- `python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/escapement`
+
+Then, if filesystem/global config permissions allow, install through the repo marketplace and verify a new Codex thread loads `escapement@escapement-local`; otherwise report the exact install step that remains external.

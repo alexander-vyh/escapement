@@ -5,7 +5,7 @@ Escapement is an agentic workflow system built **on top of [OpenSpec](https://gi
 - **Adversarial overlays** on OpenSpec's discovery step (riskiest-assumption, pre-mortem, red/blue team, walking-skeleton sections injected as internal prompts — not visible in the output docs).
 - **A bridge to [Beads](https://github.com/steveyegge/beads)** so OpenSpec's `tasks.md` becomes a real task graph (`bd create --spec-id ...`) that agents can execute against.
 - **A molecule formula** (`mol-feature`) that orchestrates the full brainstorm → discovery → skeleton → build → retro lifecycle with two human gates.
-- **Claude Code hooks, rules, and skills** that enforce the workflow at the tool-call level: TDD-first, named-agent teams, outcome-verification, OpenSpec init checks, spec-ID linkage, never-suppress discipline, Serena-first navigation.
+- **Hooks, rules, and skills** that enforce the workflow at the tool-call level: TDD-first, named-agent teams, outcome-verification, OpenSpec init checks, spec-ID linkage, never-suppress discipline, Serena-first navigation. Claude Code is the primary adapter; **Codex is a supported host** via a generated `AGENTS.md`, project hooks in `.codex/hooks.json`, and skills in `.agents/skills` (see [Hosts](#hosts-claude-code-and-codex)).
 
 **This does not replace OpenSpec — it uses it.** The `/discovery` skill calls `openspec init`, `openspec instructions`, and `openspec status` under the hood. The `proposal.md` / `design.md` / `specs/*.md` files written are standard OpenSpec artifacts. Engineers comfortable with bare OpenSpec can read the changes a teammate produced through this workflow with no extra context.
 
@@ -68,6 +68,23 @@ Each layer adds value without requiring the ones above. You can install just the
 
 ---
 
+## Hosts: Claude Code and Codex
+
+Escapement is **host-neutral at the core** — beads, OpenSpec, test-oracle discipline, and outcome verification don't depend on which agent runs them. The host-specific surfaces are *generated* from one neutral manifest (`agent-surfaces/manifest.json`) by `tools/render_agent_surfaces.py`, and a `--check` mode fails CI if they drift, so the two hosts stay in sync:
+
+| Surface | Claude Code | Codex |
+|---------|-------------|-------|
+| Instructions | `CLAUDE.md` | `AGENTS.md` *(generated)* |
+| Project hooks | `claude/settings.template.json` → `~/.claude/` | `.codex/hooks.json` *(generated)* |
+| Skills | `claude/skills/` | `.agents/skills/` |
+| Plugin packaging | `.claude-plugin/plugin.json` | `plugins/escapement/.codex-plugin/` *(generated)* |
+
+The portable core runs on both: beads context loading (`bd prime`) and the TDD / oracle / outcome gates (Test Oracle Brief, discovery, spec-ID, implementation-echo, oracle-downgrade, outcome-assertion) are wired into `.codex/hooks.json` and **fixture-tested against Codex's payload shape**.
+
+**Claude Code is the richer adapter today.** Per the `agent-surface-parity` spec, Claude-only features — multi-agent `TeamCreate` teams and `ScheduleWakeup` continuation — are *excluded* from Codex surfaces rather than faked: a Codex hook is marked blocking only when a fixture proves it works against the current Codex payload. New shared behavior is added to the manifest first, then rendered to whichever host surface can actually enforce it.
+
+---
+
 ## Prerequisites
 
 | Tool | Install | Verify |
@@ -79,7 +96,7 @@ Each layer adds value without requiring the ones above. You can install just the
 | `jq` | `brew install jq` | `jq --version` |
 | `git`, `bash` | usually present | — |
 
-Claude Code itself must be installed and working. [Serena MCP](https://github.com/oraios/serena) is optional but the navigation hooks are silent unless `.serena/memories` exists in a project.
+Claude Code or Codex must be installed and working. The `Install` steps below are Claude Code's machine-wide setup; Codex instead reads the repo-relative surfaces committed in the project (`AGENTS.md`, `.codex/hooks.json`, `.agents/skills`), so it needs no symlink install. [Serena MCP](https://github.com/oraios/serena) is optional but the navigation hooks are silent unless `.serena/memories` exists in a project.
 
 ---
 
