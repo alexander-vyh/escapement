@@ -50,6 +50,13 @@ except ImportError:  # pragma: no cover
         # Fail-open: honor every non-empty override as before.
         return set(overrides), {}
 
+# Magic-number / business-constant echo detector (bead claude-workflow-setup-2o7).
+try:
+    from magic_number_echo import find_magic_number_echoes
+except ImportError:  # pragma: no cover
+    def find_magic_number_echoes(_source_files, _test_files):
+        return []
+
 
 # Per-file oracle override: an `# oracle: <reason>` or `// oracle: <reason>`
 # comment anywhere in a test file marks that file as having an explicit
@@ -591,6 +598,16 @@ def analyze(repo_root: Path, files: list[str]) -> tuple[list[Issue], dict[str, s
     issues: list[Issue] = []
     issues.extend(find_shared_generated_literals(source_files, test_files))
     issues.extend(find_mock_only_tests(test_files))
+    issues.extend(
+        Issue(
+            finding.filepath,
+            "magic-number-echo",
+            f"formatted number {finding.token!r} asserted in this test also "
+            f"appears inside description string(s) in: {', '.join(finding.sources)} "
+            f"— the test re-asserts documentation, not a computed value",
+        )
+        for finding in find_magic_number_echoes(source_files, test_files)
+    )
     return issues, test_files
 
 

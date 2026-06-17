@@ -248,6 +248,62 @@ def test_commit_allows_when_oracle_override_is_independent(tmp_path):
     assert output is None
 
 
+def test_commit_blocks_magic_number_echo(tmp_path):
+    """The 91% shape end-to-end: a test asserting a formatted number that lives
+    in a source description string is denied as a magic-number-echo.
+    """
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "src" / "metric_descriptions.py").write_text(
+        'PCT_AUTOMATED = "all-history snapshot reads ~91% because it carries older grants"\n',
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_metrics.py").write_text(
+        'def test_pct():\n    assert "91%" in describe("dw_x", "pct_automated")\n',
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": "git commit -m change"},
+    }
+
+    code, output = run_hook(payload)
+
+    assert_denied(code, output)
+    reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "magic-number-echo" in reason
+    assert "91%" in reason
+
+
+def test_commit_allows_bare_int_constant_assertion(tmp_path):
+    """Negative control: a legitimate constant assertion (bare ints, no string)
+    must NOT be flagged — this is what distinguishes the detector from a
+    flag-every-shared-number fragile implementation.
+    """
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "src" / "score.py").write_text("PASS_THRESHOLD = 91\n", encoding="utf-8")
+    (repo / "tests" / "test_score.py").write_text(
+        "def test_pass():\n    assert score == 91\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": "git commit -m change"},
+    }
+
+    code, output = run_hook(payload)
+
+    assert code == 0
+    assert output is None
+
+
 def test_non_finishing_command_allows_even_with_issue(tmp_path):
     repo = init_repo(tmp_path)
     (repo / "src").mkdir()
