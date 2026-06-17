@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# file-complexity-waiver: pre-existing 669-line file; this change only wires main() to the extracted oracle_reason_validation sibling module — full responsibility split tracked in claude-workflow-setup-55k
 """Hook gate for rejecting high-confidence implementation-echo tests.
 
 This is intentionally a landing-time scanner. It compares changed tests with
@@ -28,6 +29,26 @@ try:
 except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
+
+# Substance bar for the `# oracle:` override (gate-design.md Rule 3). Fail-open:
+# if the validator module is unavailable, keep the prior presence-only behavior
+# rather than letting an import error block a commit.
+try:
+    from oracle_reason_validation import (
+        asserted_tokens,
+        partition_overrides,
+        validate_oracle_reason,
+    )
+except ImportError:  # pragma: no cover
+    def asserted_tokens(_literals):
+        return set()
+
+    def validate_oracle_reason(_reason, _asserted):
+        return None
+
+    def partition_overrides(overrides, _asserted_by_file):
+        # Fail-open: honor every non-empty override as before.
+        return set(overrides), {}
 
 
 # Per-file oracle override: an `# oracle: <reason>` or `// oracle: <reason>`
@@ -573,16 +594,43 @@ def analyze(repo_root: Path, files: list[str]) -> tuple[list[Issue], dict[str, s
     return issues, test_files
 
 
-def build_message(issues: list[Issue]) -> str:
+_REJECTION_HINT = {
+    "circular": "names only this file's own asserted literals — that is the test "
+    "validating itself, not an independent oracle",
+    "placeholder": "is a placeholder (n/a, tbd, ...) — it names nothing",
+    "too-short": "is too short to name an independent source of truth",
+}
+
+
+def build_message(
+    issues: list[Issue],
+    rejected_overrides: dict[str, list[tuple[str, str]]] | None = None,
+) -> str:
     listed = "\n".join(
         f"  - {issue.filepath}: {issue.kind}: {issue.detail}" for issue in issues[:12]
     )
     if len(issues) > 12:
         listed += f"\n  - ... {len(issues) - 12} more"
+
+    rejected_block = ""
+    if rejected_overrides:
+        rows = []
+        for filepath, fails in list(rejected_overrides.items())[:12]:
+            for reason, category in fails:
+                hint = _REJECTION_HINT.get(category, "did not clear the substance bar")
+                rows.append(f'  - {filepath}: rejected ({category}) — the reason {hint}.\n'
+                            f'      reason was: "{reason.strip()[:160]}"')
+        rejected_block = (
+            "\nYour `# oracle:` override(s) were REJECTED (gate-design.md Rule 3 — "
+            "the reason must name a source of truth INDEPENDENT of the test's own "
+            "asserted literals):\n" + "\n".join(rows) + "\n"
+        )
+
     return (
         "IMPLEMENTATION-ECHO TEST GATE: changed tests contain high-confidence "
         "implementation-echo patterns.\n\n"
-        f"{listed}\n\n"
+        f"{listed}\n"
+        f"{rejected_block}\n"
         "Two paths forward:\n\n"
         "  (1) **Rewrite the tests** so they prove observable business/user "
         "behavior using an independent oracle. Do not repeat generated IDs, "
@@ -591,11 +639,12 @@ def build_message(issues: list[Issue]) -> str:
         "  (2) **Override the detection per file**: if the flagged constant or "
         "mock interaction IS the correct oracle for that test, add a comment "
         "anywhere in the file:\n"
-        "       # oracle: <one sentence why this constant/mock is the real oracle>\n"
+        "       # oracle: <why an INDEPENDENT source of truth makes this constant/mock correct>\n"
         "       // oracle: <same, for JS/TS>\n"
-        "     The override reason is captured as labeled training data — if "
-        "many files end up needing it for the same heuristic, the heuristic "
-        "is wrong and needs tuning.\n\n"
+        "     The reason must point OUTSIDE the test's own asserted literals (a "
+        "source report, upstream model, spec, or consumer contract) — a reason "
+        "that just restates the asserted column names/constants is rejected as "
+        "circular. The reason is captured as labeled training data.\n\n"
         "If neither path applies (truly exempt context), say 'proceed' to "
         "override — also captured."
     )
@@ -632,25 +681,44 @@ def main() -> int:
         )
         return allow()
 
-    # Apply per-file # oracle: <reason> overrides
+    # Apply per-file # oracle: <reason> overrides, but only honor a reason that
+    # clears the substance bar (gate-design.md Rule 3): a circular reason whose
+    # only referents are the file's own asserted literals, a placeholder, or a
+    # too-short reason does NOT exempt the file.
     overrides = find_oracle_overrides(test_files)
-    files_overridden = set(overrides.keys())
+    asserted_by_file = {
+        fp: asserted_tokens(string_literals(test_files.get(fp, ""))) for fp in overrides
+    }
+    files_overridden, rejected_overrides = partition_overrides(overrides, asserted_by_file)
 
     remaining_issues = [i for i in issues if i.filepath not in files_overridden]
     skipped_count = len(issues) - len(remaining_issues)
 
-    if overrides:
-        # Capture the override reasons as labeled training data
+    if files_overridden:
+        # Capture the honored override reasons as labeled training data
         _record_signal(
             gate_name="implementation_echo_test_gate",
             decision="override-applied",
             reason=f"{skipped_count} issue(s) overridden by oracle: comments",
-            override_reasons={fp: reasons for fp, reasons in overrides.items()},
+            override_reasons={fp: overrides[fp] for fp in files_overridden},
             skipped_issue_count=skipped_count,
         )
 
+    if rejected_overrides:
+        # Capture rejected (circular/placeholder/too-short) reasons — the corpus
+        # the half-life review uses to tune the bar.
+        _record_signal(
+            gate_name="implementation_echo_test_gate",
+            decision="override-rejected",
+            reason=f"{len(rejected_overrides)} oracle: override(s) failed the substance bar",
+            rejected_overrides={
+                fp: [{"reason": r, "category": c} for r, c in fails]
+                for fp, fails in rejected_overrides.items()
+            },
+        )
+
     if not remaining_issues:
-        # All issues were overridden — allow with the override capture above
+        # All issues were overridden by valid reasons — allow with the capture above.
         return allow()
 
     # Issues remain — deny the finishing command. The denial message itself
@@ -665,7 +733,7 @@ def main() -> int:
         issue_count=len(remaining_issues),
         issue_kinds=sorted({i.kind for i in remaining_issues}),
     )
-    return deny(build_message(remaining_issues))
+    return deny(build_message(remaining_issues, rejected_overrides))
 
 
 if __name__ == "__main__":

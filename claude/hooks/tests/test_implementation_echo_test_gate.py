@@ -190,6 +190,64 @@ def test_codex_implementation_echo_test_gate_blocks_shared_generated_literal(tmp
     assert "shared-generated-literal" in reason
 
 
+def test_commit_denies_when_oracle_override_is_circular(tmp_path):
+    """A flagged file whose `# oracle:` reason only restates its own asserted
+    literal is NOT exempted — the gate still denies and explains the rejection.
+    This is the substance bar: presence of a reason is not enough.
+    """
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "src" / "app.py").write_text("MEDIA_RECORD_TYPE_ID = '0124p000000ABCDEF1'\n", encoding="utf-8")
+    (repo / "tests" / "test_app.py").write_text(
+        "# oracle: the 0124p000000ABCDEF1 literal is the asserted oracle value\n"
+        "def test_media_filter():\n"
+        "    assert record_type_id == '0124p000000ABCDEF1'\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": "git commit -m change"},
+    }
+
+    code, output = run_hook(payload)
+
+    assert_denied(code, output)
+    reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "REJECTED" in reason
+    assert "circular" in reason
+
+
+def test_commit_allows_when_oracle_override_is_independent(tmp_path):
+    """A flagged file whose `# oracle:` reason names an INDEPENDENT source of
+    truth (tokens outside the file's own asserted literals) is exempted.
+    The escape path stays usable for legitimate overrides.
+    """
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "src" / "app.py").write_text("MEDIA_RECORD_TYPE_ID = '0124p000000ABCDEF1'\n", encoding="utf-8")
+    (repo / "tests" / "test_app.py").write_text(
+        "# oracle: cross-checked against the upstream Salesforce media report export totals\n"
+        "def test_media_filter():\n"
+        "    assert record_type_id == '0124p000000ABCDEF1'\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": "git commit -m change"},
+    }
+
+    code, output = run_hook(payload)
+
+    assert code == 0
+    assert output is None
+
+
 def test_non_finishing_command_allows_even_with_issue(tmp_path):
     repo = init_repo(tmp_path)
     (repo / "src").mkdir()
