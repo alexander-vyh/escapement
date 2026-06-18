@@ -103,6 +103,18 @@ _TASK_MODE_DISPLAY: dict[str, str] = {
 }
 
 
+
+_VERIFICATION_SUPPRESSED_DISPLAY = (
+    "continuation-harness: verification_suppressed. Your contract's verify command reached "
+    "exit 0, but the command is SELF-NEUTERING (e.g. `|| true`, a bare `true`/`:`, "
+    "`--no-verify`, or `SKIP=`) — a gamed green is not a pass, so re-running it will NOT "
+    "release this gate. Do NOT keep re-running it. Fix the verification_command so it actually "
+    "runs the check and propagates a real non-zero on failure, then re-run "
+    "`~/.claude/harness/bin/verify`. If a hook is genuinely broken, FIX the hook — do not "
+    "disable it in the verify command."
+)
+
+
 def _read_payload() -> dict:
     try:
         return json.load(sys.stdin)
@@ -920,6 +932,8 @@ def main() -> int:
             display = winddown_display
         elif reason.startswith("implicit_queue_"):
             display = _IMPLICIT_QUEUE_DISPLAY
+        elif reason == "verification_suppressed":
+            display = _VERIFICATION_SUPPRESSED_DISPLAY
         else:
             display = RESUMPTION_PROMPT.format(reason=reason)
         out = {"decision": "block", "reason": display}

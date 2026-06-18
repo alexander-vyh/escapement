@@ -24,6 +24,12 @@ import re
 import sys
 from typing import Optional, Tuple
 
+try:
+    from verify_integrity import is_suppressed_verification
+except ImportError:  # pragma: no cover — fail-open: never crash the Stop gate
+    def is_suppressed_verification(_command):
+        return None
+
 # State root: where contracts / wakeups / incidents live. Standard per-user
 # location, independent of where the harness CODE is installed or invoked from,
 # so concurrent sessions in any repo share one state dir and NOTHING is ever
@@ -125,11 +131,34 @@ def _verification_passed_this_turn(contract: Optional[dict]) -> bool:
         return False
     if last.get("exit_code") != contract.get("expected_exit", 0):
         return False
+    if is_suppressed_verification(contract.get("verification_command", "")):
+        # A green reached by gutting the check (|| true, bare true, --no-verify,
+        # SKIP=, ...) is not a real pass (move 1b, claude-workflow-setup-e9v.2).
+        return False
     ts = _parse_iso(last.get("timestamp", ""))
     if ts is None:
         return False
     age = (_now() - ts).total_seconds()
     return 0 <= age <= CURRENT_TURN_WINDOW_SECONDS
+
+
+def _suppressed_green(contract: Optional[dict]) -> Optional[str]:
+    """The contract WOULD pass (fresh, exit==expected) but its verify command is
+    self-neutering. Returns the suppression reason so the block can explain that
+    the verify COMMAND — not a missing run — is the problem (move 1b)."""
+    if not isinstance(contract, dict):
+        return None
+    last = contract.get("last_run")
+    if not isinstance(last, dict):
+        return None
+    if last.get("exit_code") != contract.get("expected_exit", 0):
+        return None
+    ts = _parse_iso(last.get("timestamp", ""))
+    if ts is None:
+        return None
+    if not (0 <= (_now() - ts).total_seconds() <= CURRENT_TURN_WINDOW_SECONDS):
+        return None
+    return is_suppressed_verification(contract.get("verification_command", ""))
 
 
 def _wakeup_registered(scheduled: Optional[list]) -> bool:
@@ -173,13 +202,19 @@ def would_block_stop(thread_state: dict) -> Tuple[str, str]:
         return ("allow", "wakeup_registered")
     if _user_released(recent_user_message):
         return ("allow", "user_released")
+    if _suppressed_green(contract):
+        # Fresh exit-0, but the verify command was gutted (|| true, bare true,
+        # --no-verify, ...). Distinct reason so the block explains the COMMAND is
+        # the problem — not a missing run — instead of looping the agent on a
+        # generic "unverified" message (move 1b, claude-workflow-setup-e9v.2).
+        return ("block", "verification_suppressed")
     if contract is None:
         # No contract = no committed task in flight = conversational. Stopping is
         # free (no magic word needed). This deliberately relaxes the old "no
         # contract → block" rule, which nagged every conversational turn. Teeth
         # remain: a DECLARED-but-unverified contract still blocks below, ready bd
-        # work still blocks in task mode, and the sibling Stop hook
-        # (validate_no_shirking) still blocks "edited code but didn't verify".
+        # work still blocks in task mode, and (move 1b) a suppressed-green
+        # contract blocks above with a distinct reason.
         return ("allow", "conversational")
     # Contract PRESENT but not verified: either a declared dict that didn't pass,
     # OR a malformed/unreadable contract.json surfaced as a non-dict marker by
