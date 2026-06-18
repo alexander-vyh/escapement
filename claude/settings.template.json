@@ -51,6 +51,10 @@
           },
           {
             "type": "command",
+            "command": "python3 ~/.claude/hooks/bypass_guard.py"
+          },
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/implementation_echo_test_gate.py",
             "timeout": 10000
           },
