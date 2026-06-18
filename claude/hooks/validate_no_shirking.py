@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# file-complexity-waiver: pre-existing 930-line gate; move-1 retires the verification-evidence machinery (~150 lines) but it stays >500 — full split tracked in claude-workflow-setup-e9v.7
 """Claude Code hook: block outcome-shirking ("pre-existing failure" evasion).
 
 Fires as:
@@ -208,155 +209,6 @@ def _is_docs_path(file_path: str) -> bool:
     if not isinstance(file_path, str) or not file_path:
         return False
     return file_path.lower().endswith(_DOCS_EXTENSIONS)
-
-_VERIFICATION_COMMANDS: list[str] = [
-    r"\bpytest\b",
-    r"\brspec\b",
-    r"\bjest\b",
-    r"\bmocha\b",
-    r"\bvitest\b",
-    r"\bcargo\s+test\b",
-    r"\bgo\s+test\b",
-    r"\bnpm\s+test\b",
-    r"\bnpm\s+run\s+test",
-    r"\byarn\s+test\b",
-    r"\bpnpm\s+test\b",
-    r"\bmake\s+test\b",
-    r"\bjust\s+test\b",
-    r"\bjust\s+check\b",
-    r"\bjust\s+smoke\b",
-    r"\bbundle\s+exec\s+rspec\b",
-    r"\buv\s+run\s+pytest\b",
-    r"\bdotnet\s+test\b",
-    r"\bruff\s+check\b",
-    r"\bmypy\b",
-    r"\bpyright\b",
-    r"\btsc\b",
-    r"\beslint\b",
-    r"\brubocop\b",
-    r"\bflake8\b",
-    r"\bjust\s+pre-commit\b",
-    r"\bjust\s+fix\b",
-]
-
-_COMPILED_VERIFICATION = [re.compile(p, re.IGNORECASE) for p in _VERIFICATION_COMMANDS]
-
-
-_VERIFICATION_BLOCK = """\
-🔍 VERIFICATION REQUIRED — you modified code but didn't verify the outcome.
-
-{reason}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RUN VERIFICATION NOW:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-1. Run the test suite or relevant verification command
-2. Confirm it produces the expected result
-3. If tests fail — fix them, don't dismiss them
-4. Then you may stop
-
-Do NOT stop without running tests after code changes.\
-"""
-
-
-def _deny_verification(reason: str) -> dict:
-    # Verification gate only fires on Stop — use top-level format
-    return {
-        "decision": "block",
-        "reason": _VERIFICATION_BLOCK.format(reason=reason),
-    }
-
-
-def block_verification(reason: str) -> NoReturn:
-    print(json.dumps(_deny_verification(reason)))
-    sys.exit(2)
-
-
-def check_verification_evidence(transcript_path: str) -> str | None:
-    """Check that code modifications were followed by verification or user approval.
-
-    Returns None if OK (no code mods, verification ran, or user approved).
-    Returns a reason string if verification is missing.
-    """
-    path = Path(transcript_path)
-    if not path.exists():
-        return None
-
-    try:
-        raw = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-
-    tail = raw[-TRANSCRIPT_WINDOW:] if len(raw) > TRANSCRIPT_WINDOW else raw
-
-    last_code_mod_line = -1
-    last_verification_line = -1
-    last_user_approval_line = -1
-
-    for line_num, line in enumerate(tail.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        msg = entry.get("message", entry)
-        if not isinstance(msg, dict):
-            continue
-
-        role = msg.get("role", "")
-        content = msg.get("content", [])
-
-        if role == "assistant" and isinstance(content, list):
-            for blk in content:
-                if not isinstance(blk, dict) or blk.get("type") != "tool_use":
-                    continue
-                tool_name = blk.get("name", "")
-                tool_input = blk.get("input", {})
-                if tool_name in _CODE_MOD_TOOLS:
-                    # Prose/docs edits via Edit/Write are not code modifications.
-                    if (
-                        tool_name in _PATH_CHECKED_TOOLS
-                        and isinstance(tool_input, dict)
-                        and _is_docs_path(tool_input.get("file_path", ""))
-                    ):
-                        continue
-                    last_code_mod_line = line_num
-                elif tool_name == "Bash" and isinstance(tool_input, dict):
-                    cmd = tool_input.get("command", "")
-                    if any(p.search(cmd) for p in _COMPILED_VERIFICATION):
-                        last_verification_line = line_num
-
-        elif role == "user":
-            text_parts: list[str] = []
-            if isinstance(content, str):
-                text_parts.append(content)
-            elif isinstance(content, list):
-                for blk in content:
-                    if isinstance(blk, dict) and blk.get("type") == "text":
-                        text_parts.append(blk.get("text", ""))
-                    elif isinstance(blk, str):
-                        text_parts.append(blk)
-            text = " ".join(text_parts)
-            if any(ap.search(text) for ap in _COMPILED_APPROVAL):
-                last_user_approval_line = line_num
-
-    if last_code_mod_line < 0:
-        return None  # No code modifications — nothing to verify
-
-    if last_verification_line > last_code_mod_line:
-        return None  # Verification ran after last code mod
-
-    if last_user_approval_line > last_code_mod_line:
-        return None  # User approved after last code mod
-
-    if last_verification_line < 0:
-        return "No verification commands were run after code modifications."
-
-    return "Code was modified after the last verification run — re-verify."
 
 
 # ---------------------------------------------------------------------------
@@ -917,11 +769,6 @@ def main() -> int:
             else:
                 block(hook_event, last_shirking_phrase, last_shirking_category or "uncategorized")
 
-    # ── Phase 2: Verification evidence (Stop only) ────────────────────────
-    if hook_event == "Stop":
-        verification_issue = check_verification_evidence(transcript_path)
-        if verification_issue:
-            block_verification(verification_issue)
 
     return 0
 
