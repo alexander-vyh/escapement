@@ -38,7 +38,7 @@ def _future_iso(seconds_ahead: int) -> str:
 def _contract(*, exit_code=None, ts=None, expected_exit=0):
     c = {
         "goal": "x",
-        "verification_command": "true",
+        "verification_command": "pytest -q",
         "expected_exit": expected_exit,
         "source": "agent-declared",
         "thread_id": "t",
@@ -273,7 +273,7 @@ def run_isolation() -> int:
         dir_b = thread_dir_for_session("sessB-2222", root)
         dir_a.mkdir(parents=True, exist_ok=True)
         dir_b.mkdir(parents=True, exist_ok=True)
-        contract_a = {"goal": "A's goal", "verification_command": "true", "expected_exit": 0,
+        contract_a = {"goal": "A's goal", "verification_command": "pytest -q", "expected_exit": 0,
                       "source": "agent-declared", "thread_id": "sessA-1111", "created_at": _now_iso(), "last_run": None}
         (dir_a / "contract.json").write_text(json.dumps(contract_a))
         a_bytes_before = (dir_a / "contract.json").read_bytes()
@@ -693,7 +693,7 @@ def run_implicit_queue() -> int:
         """A contract whose last_run is fresh and exit_code 0 — would_block_stop returns allow."""
         return {
             "goal": "test outcome",
-            "verification_command": "true",
+            "verification_command": "pytest -q",
             "expected_exit": 0,
             "source": "agent-declared",
             "thread_id": thread_id,
