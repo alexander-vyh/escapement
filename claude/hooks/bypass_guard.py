@@ -145,7 +145,7 @@ def detect_bypass(command: str) -> str | None:
             return "skip-env"
         if not is_git:
             continue
-        if _hookspath_disabled(argv):
+        if sub in ("commit", "push") and _hookspath_disabled(argv):
             return "hooks-path"
         if sub in ("commit", "push") and _has_no_verify(argv, sub):
             return "no-verify"

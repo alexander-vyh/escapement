@@ -81,6 +81,17 @@ def test_detect_hooks_path_disable():
     assert guard.detect_bypass('git -c core.hooksPath=/dev/null commit -m "x"') is not None
 
 
+def test_hooks_path_disable_on_pull_or_checkout_allowed():
+    # Disabling hooks on pull/checkout is the documented beads-jsonl-desync
+    # workaround, NOT a verification bypass at a finishing boundary (e9v.6).
+    assert guard.detect_bypass("git -c core.hooksPath=/dev/null pull") is None
+    assert guard.detect_bypass("git -c core.hooksPath=/dev/null checkout main") is None
+
+
+def test_detect_hooks_path_disable_on_push():
+    assert guard.detect_bypass("git -c core.hooksPath=/dev/null push") is not None
+
+
 def test_detect_push_no_verify():
     assert guard.detect_bypass("git push --no-verify") is not None
 
