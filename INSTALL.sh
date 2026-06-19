@@ -133,36 +133,9 @@ declare -a PLAN=(
   "claude/commands/brainstorm.md|$CLAUDE_DIR/commands/brainstorm.md"
   "claude/commands/review.md|$CLAUDE_DIR/commands/review.md"
 
-  # Hooks
-  "claude/hooks/openspec_init_guard.py|$CLAUDE_DIR/hooks/openspec_init_guard.py"
-  "claude/hooks/design_doc_location_guard.py|$CLAUDE_DIR/hooks/design_doc_location_guard.py"
-  "claude/hooks/discovery-gate.py|$CLAUDE_DIR/hooks/discovery-gate.py"
-  "claude/hooks/discovery_input_gate.py|$CLAUDE_DIR/hooks/discovery_input_gate.py"
-  "claude/hooks/discovery-nudge.py|$CLAUDE_DIR/hooks/discovery-nudge.py"
-  "claude/hooks/discovery-close-gate.py|$CLAUDE_DIR/hooks/discovery-close-gate.py"
-  "claude/hooks/mol_status_check.py|$CLAUDE_DIR/hooks/mol_status_check.py"
-  "claude/hooks/spec_id_enforcement.py|$CLAUDE_DIR/hooks/spec_id_enforcement.py"
-  "claude/hooks/enforce_named_agents.py|$CLAUDE_DIR/hooks/enforce_named_agents.py"
-  "claude/hooks/tdd-gate.py|$CLAUDE_DIR/hooks/tdd-gate.py"
-  "claude/hooks/test_oracle_brief_gate.py|$CLAUDE_DIR/hooks/test_oracle_brief_gate.py"
-  "claude/hooks/test_reminder.py|$CLAUDE_DIR/hooks/test_reminder.py"
-  "claude/hooks/implementation_echo_test_gate.py|$CLAUDE_DIR/hooks/implementation_echo_test_gate.py"
-  "claude/hooks/oracle_downgrade_warning_gate.py|$CLAUDE_DIR/hooks/oracle_downgrade_warning_gate.py"
-  "claude/hooks/outcome_assertion_gate.py|$CLAUDE_DIR/hooks/outcome_assertion_gate.py"
-  "claude/hooks/review_gate.py|$CLAUDE_DIR/hooks/review_gate.py"
-  "claude/hooks/review_nudge.py|$CLAUDE_DIR/hooks/review_nudge.py"
-  "claude/hooks/no_direct_send_guard.py|$CLAUDE_DIR/hooks/no_direct_send_guard.py"
-  "claude/hooks/beads_worktree_guard.py|$CLAUDE_DIR/hooks/beads_worktree_guard.py"
-  "claude/hooks/gate_design_nudge.py|$CLAUDE_DIR/hooks/gate_design_nudge.py"
-  "claude/hooks/validate_no_shirking.py|$CLAUDE_DIR/hooks/validate_no_shirking.py"
-  "claude/hooks/context_burn_detector.py|$CLAUDE_DIR/hooks/context_burn_detector.py"
-  "claude/hooks/session_cleanup.py|$CLAUDE_DIR/hooks/session_cleanup.py"
-  "claude/hooks/session_status.py|$CLAUDE_DIR/hooks/session_status.py"
-  "claude/hooks/serena_preference_gate.py|$CLAUDE_DIR/hooks/serena_preference_gate.py"
-  "claude/hooks/serena_preference_injection.py|$CLAUDE_DIR/hooks/serena_preference_injection.py"
-  "claude/hooks/serena_onboarding_check.sh|$CLAUDE_DIR/hooks/serena_onboarding_check.sh"
-  "claude/hooks/_gate_signal.py|$CLAUDE_DIR/hooks/_gate_signal.py"
-  "claude/hooks/cache_write_guard.py|$CLAUDE_DIR/hooks/cache_write_guard.py"
+  # Hooks: every claude/hooks/*.py and *.sh is symlinked by the glob below the
+  # array (e9v.8) so new hooks/modules can't drift out of the deploy. The tests
+  # dir is the one explicit entry.
   "claude/hooks/tests|$CLAUDE_DIR/hooks/tests"
 
   # Bin scripts (invokable from any repo cwd; resolve their own project root)
@@ -183,6 +156,15 @@ declare -a PLAN=(
   "beads/formulas/mol-rapid.formula.json|$BEADS_DIR/formulas/mol-rapid.formula.json"
   "beads/mol-status.sh|$BEADS_DIR/mol-status.sh"
 )
+
+# Hooks (e9v.8): glob every hook + support module so new files auto-deploy and
+# the install list can't drift. Per-file (not whole-dir) so a user's own hooks in
+# ~/.claude/hooks/ coexist; the tests dir is added explicitly in PLAN above.
+for _hook in "$REPO_DIR"/claude/hooks/*.py "$REPO_DIR"/claude/hooks/*.sh; do
+  [[ -e "$_hook" ]] || continue
+  _base="$(basename "$_hook")"
+  PLAN+=("claude/hooks/$_base|$CLAUDE_DIR/hooks/$_base")
+done
 
 backup_if_exists() {
   local dest="$1"
@@ -345,6 +327,22 @@ resolve_effective_pin_dir() {
   echo "$ESCAPEMENT_PIN_DIR"
 }
 
+# Merge the template's hooks block into the live settings.json so newly-registered
+# hooks actually fire (e9v.8) — additive, deduped, backup-first. Replaces the old
+# 'merge it manually' step.
+merge_settings() {
+  local template="$REPO_DIR/claude/settings.template.json"
+  local live="$CLAUDE_DIR/settings.json"
+  if [[ ! -f "$template" ]]; then
+    echo "    ⚠  settings template missing — skipping hooks merge."; return 0
+  fi
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "    (dry-run) would merge $template hooks into $live"; return 0
+  fi
+  python3 "$REPO_DIR/scripts/merge_settings_hooks.py" "$template" "$live" 2>&1 \
+    | sed 's/^/    /' || echo "    ⚠  settings merge failed — merge manually."
+}
+
 # --- Execute ---
 if [[ "$MODE" == "update" ]]; then
   # Refresh the pinned checkout only; existing symlinks already point into it.
@@ -353,6 +351,12 @@ if [[ "$MODE" == "update" ]]; then
   # .cws-pinned rather than .escapement-pinned).
   _effective_pin_dir="$(resolve_effective_pin_dir)"
   ensure_pinned_checkout "$_effective_pin_dir"
+  # e9v.8: re-run the symlink plan + settings merge so NEW hooks in the refreshed
+  # pin actually deploy (previously --update moved the pin but left new hooks
+  # un-symlinked and unregistered).
+  DEPLOY_SRC="$_effective_pin_dir"
+  install_plan
+  merge_settings
   echo
   echo "==> pinned checkout now at $ESCAPEMENT_PIN_REF; ~/.claude reflects the update."
 elif [[ "$MODE" == "install" ]]; then
@@ -362,10 +366,11 @@ elif [[ "$MODE" == "install" ]]; then
     ensure_pinned_checkout
   fi
   install_plan
+  merge_settings
   echo
   echo "==> next steps"
-  echo "    1. Merge hooks + env blocks from claude/settings.template.json into"
-  echo "       your ~/.claude/settings.json (do NOT overwrite — merge)."
+  echo "    1. Merged hook entries from claude/settings.template.json into your"
+  echo "       ~/.claude/settings.json automatically; review env blocks manually."
   echo "    2. Read claude/rules/*.md and edit to match your philosophy."
   echo "    3. Open Claude Code in a git repo under ~/GitHub/ to trigger bootstrap."
   [[ "$DEV_MODE" == true ]] || echo "    NOTE: harness/hook edits go live after they reach main + './INSTALL.sh --update'."
