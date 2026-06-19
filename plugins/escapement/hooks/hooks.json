@@ -25,6 +25,26 @@
       {
         "hooks": [
           {
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/beads_worktree_guard.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/discovery-close-gate.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/discovery-gate.py\"",
             "timeout": 10,
             "type": "command"

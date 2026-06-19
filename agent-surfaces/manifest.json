@@ -157,8 +157,19 @@
       "source": "claude/hooks/beads_worktree_guard.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/beads_worktree_guard.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_beads_worktree_guard.py::test_codex_worktree_add_denied_inside_beads_project",
+            "claude/hooks/tests/test_codex_beads_worktree_guard.py::test_codex_worktree_add_allowed_outside_beads_project"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -278,8 +289,19 @@
       "source": "claude/hooks/discovery-close-gate.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/discovery-close-gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_discovery_close_gate.py::test_codex_close_asks_when_design_has_proof_of_delivery",
+            "claude/hooks/tests/test_codex_discovery_close_gate.py::test_codex_close_allowed_when_design_is_clean"
+          ]
         },
         "claude": {
           "status": "ready",
