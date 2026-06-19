@@ -6,45 +6,31 @@ For any task beyond a single quick action, dispatch agents. This includes resear
 
 A single file read, one search, or a small edit is fine inline. Everything else should go to agents.
 
-## Always Use TeamCreate + Named Agents
+## Always Use Named Agents
 
-Agent teams require THREE things. Missing any one means agents CANNOT talk to each other:
+Every dispatched agent MUST have a `name`. This is the only requirement for coordination.
+The session has a single implicit team — all named agents are automatically on it and can
+address each other via `SendMessage({to: name})`.
 
-1. **`TeamCreate`** — creates the team infrastructure (call ONCE per task)
-2. **`name`** on each Agent — makes agent addressable by name
-3. **`team_name`** on each Agent — puts agent ON the team
-
-Without all three, agents are isolated subprocesses that cannot coordinate.
+(`TeamCreate` and `team_name` are deprecated and ignored by the current Claude Code runtime.)
 
 ### Concrete Example — This Is What Every Dispatch Must Look Like
 
 ```
-# Step 1: Create the team FIRST
-TeamCreate(team_name="research")
-
-# Step 2: Dispatch agents ON the team
+# Dispatch named agents — they are automatically on the implicit team
 Agent(
   name="researcher-1",
-  team_name="research",
   description="Research auth patterns",
   prompt="Investigate OAuth patterns in the codebase.
-    You are on team 'research' with researcher-2.
-    Use SendMessage to share findings and argue."
+    Use SendMessage to share findings with researcher-2."
 )
 Agent(
   name="researcher-2",
-  team_name="research",
   description="Research session handling",
   prompt="Investigate session management patterns.
-    You are on team 'research' with researcher-1.
-    Use SendMessage to share findings and argue."
+    Use SendMessage to share findings with researcher-1."
 )
-# Now they show up as selectable teammates and can SendMessage to each other
-
-# ❌ WRONG — no TeamCreate, no team_name
-Agent(name="researcher-1", prompt="Investigate OAuth patterns...")
-Agent(name="researcher-2", prompt="Investigate session management...")
-# These look named but are ISOLATED — cannot communicate
+# Named agents can SendMessage to each other by name
 
 # ❌ WRONG — no name at all
 Agent(prompt="Investigate OAuth patterns...")
@@ -76,17 +62,17 @@ guidance, not a gate.
 
 | User says | What to do |
 |-----------|-----------|
-| "agent team" | TeamCreate + 2-5 named agents with `team_name` |
-| "roundtable" | TeamCreate + named agents with persona prompts that argue via SendMessage |
-| "panel of experts" | TeamCreate + named agents with different expertise, share findings via SendMessage |
-| "have them talk to each other" | Agents must use SendMessage — requires TeamCreate + team_name + name |
-| "use agents" | TeamCreate + named agents, not inline work |
+| "agent team" | 2-5 named agents |
+| "roundtable" | Named agents with persona prompts that argue via SendMessage |
+| "panel of experts" | Named agents with different expertise, share findings via SendMessage |
+| "have them talk to each other" | Named agents using SendMessage — just give each a `name` |
+| "use agents" | Named agents, not inline work |
 
 **"Roundtable" NEVER means writing simulated dialogue in your output.** It ALWAYS means dispatching real named agents on a team that independently analyze and communicate via SendMessage.
 
 ### Works With Beads
 
-Named agents and beads are complementary. Beads tracks *what* to do (`bd ready`, `bd close`), named agents handle *how* they coordinate while doing it. When dispatching agents for beads-tracked work, STILL use TeamCreate + team_name + name — beads adds tracking, not replaces naming.
+Named agents and beads are complementary. Beads tracks *what* to do (`bd ready`, `bd close`), named agents handle *how* they coordinate while doing it. When dispatching agents for beads-tracked work, give each agent a `name` — beads adds tracking, naming enables coordination.
 
 ## Agent Pairing for Quality
 
@@ -98,8 +84,8 @@ QA agents that work from the success criteria or spec — NOT from the code.
 For any non-trivial implementation task, dispatch alongside the implementer:
 
 ```
-Agent(name="implementer", team_name="feature-x", prompt="Implement the auth flow per spec...")
-Agent(name="qa-tester", team_name="feature-x", prompt="Write tests for the auth flow.
+Agent(name="implementer", prompt="Implement the auth flow per spec...")
+Agent(name="qa-tester", prompt="Write tests for the auth flow.
   Work from the SUCCESS CRITERIA and SPEC — do NOT read the implementation code.
   Your tests verify the OUTCOMES, not the implementation details.
   Share your test file via SendMessage when ready for the implementer to run.")
@@ -227,10 +213,8 @@ faster delivery = easier verification.
 - Doing all investigation yourself instead of dispatching a team
 - Using anonymous agents that can't talk to each other
 - **Writing simulated persona dialogue in your output instead of dispatching real agents**
-- **Dispatching agents without `team_name`** — they look named but are isolated
 - **Dispatching agents without `name`** — they are anonymous and unaddressable
-- **Skipping `TeamCreate`** — without it, `team_name` has no team to join
-- **Using `Agent(prompt="...")` without `name` and `team_name`** — this is ALWAYS wrong
+- **Using `Agent(prompt="...")` without `name`** — this is ALWAYS wrong
 - **Winding down prematurely** — summarizing remaining work instead of doing it
 - **Declaring "done" without verification** — reporting completion without running the actual test/command/workflow
 

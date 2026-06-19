@@ -249,10 +249,9 @@ it adversarially like any other. The critic does not get the last word; it
 Run the critic until a round surfaces nothing new (loop-until-dry), not once.
 
 ```
-# After the per-lens roundtable reports, on the SAME team:
+# After the per-lens roundtable reports:
 Agent(
   name="completeness-critic",
-  team_name="auth-review",
   description="Surface coverage gaps and severity under-calibration",
   prompt="You are the completeness critic for the review of <artifact>.
     The lenses that ran were: security, ux, performance. You are NOT given their

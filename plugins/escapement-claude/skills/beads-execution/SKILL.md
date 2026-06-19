@@ -205,13 +205,12 @@ After all agents in a wave complete and pass review:
 
 ### Team Coordination (for 2+ parallel agents)
 
-When dispatching multiple agents, set up team coordination:
+When dispatching multiple agents, give each a `name` — they are automatically on the
+implicit team and can coordinate via `SendMessage`:
 
-1. Use `TeamCreate` to create a team for this wave
-2. Spawn agents with `team_name` and `name` parameters
-3. Agents can use `SendMessage` for FYI coordination (not blocking questions)
-4. Monitor agent completion via idle notifications
-5. Shutdown the team after the wave completes
+1. Spawn agents with a `name` parameter
+2. Agents can use `SendMessage` for FYI coordination (not blocking questions)
+3. Monitor agent completion via idle notifications
 
 ## Step 2: Per-Task Execution
 

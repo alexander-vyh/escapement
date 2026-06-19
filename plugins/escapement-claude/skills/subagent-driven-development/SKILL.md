@@ -147,41 +147,39 @@ Match depth of work to task type. Do not converge on an answer before reaching t
 You: I'm using Subagent-Driven Development to execute this plan.
 
 [Read plan file, extract all tasks]
-[Create team]
-TeamCreate(team_name="feature-hooks")
 
 Task 1: Hook installation script
 
-Agent(name="impl-hooks", team_name="feature-hooks", prompt="[full task text]")
+Agent(name="impl-hooks", prompt="[full task text]")
 
 impl-hooks via SendMessage: "Should hooks install at user or system level?"
 You: SendMessage(to="impl-hooks", message="User level (~/.config/myapp/hooks/)")
 
 impl-hooks: DONE — implemented, 5/5 tests passing, committed
 
-Agent(name="spec-review-hooks", team_name="feature-hooks", prompt="Review against spec...")
+Agent(name="spec-review-hooks", prompt="Review against spec...")
 spec-review-hooks: ✅ Spec compliant
 
-Agent(name="quality-review-hooks", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
+Agent(name="quality-review-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
 quality-review-hooks: ✅ Approved
 
 [Mark Task 1 complete. If beads: bd close <task-id>]
 
 Task 2: Recovery modes
 
-Agent(name="impl-recovery", team_name="feature-hooks", prompt="[full task text]")
+Agent(name="impl-recovery", prompt="[full task text]")
 impl-recovery: DONE — 8/8 tests passing
 
-Agent(name="spec-review-recovery", team_name="feature-hooks", prompt="Review against spec...")
+Agent(name="spec-review-recovery", prompt="Review against spec...")
 spec-review-recovery: ❌ Missing progress reporting, extra --json flag
 
 SendMessage(to="impl-recovery", message="Fix: remove --json, add progress reporting")
 impl-recovery: Fixed, committed
 
-Agent(name="spec-review-recovery-2", team_name="feature-hooks", prompt="Re-review...")
+Agent(name="spec-review-recovery-2", prompt="Re-review...")
 spec-review-recovery-2: ✅ Spec compliant
 
-Agent(name="quality-review-recovery", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
+Agent(name="quality-review-recovery", subagent_type="adversarial-reviewer", prompt="Review quality...")
 quality-review-recovery: Issue: magic number (100)
 
 SendMessage(to="impl-recovery", message="Extract PROGRESS_INTERVAL constant")
@@ -190,10 +188,9 @@ impl-recovery: Done, committed
 [Mark Task 2 complete]
 
 [After all tasks]
-Agent(name="final-reviewer", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Final review...")
+Agent(name="final-reviewer", subagent_type="adversarial-reviewer", prompt="Final review...")
 final-reviewer: All requirements met, ready to merge
 
-[Shutdown team]
 Done!
 ```
 
@@ -226,9 +223,7 @@ confirms the outcome end-to-end. Anything short of that is not done.
 ## Red Flags
 
 **Never:**
-- Dispatch agents without `team_name` (they can't talk to each other)
-- Dispatch agents without `name` (they're anonymous)
-- Skip `TeamCreate` before dispatching with `team_name`
+- Dispatch agents without `name` (they're anonymous and unaddressable)
 - Start implementation on main/master without explicit user consent
 - Skip reviews (spec compliance OR code quality)
 - Proceed with unfixed issues
@@ -254,4 +249,4 @@ confirms the outcome end-to-end. Anything short of that is not done.
 - Merge when CI passes and review is clean.
 
 **With beads:**
-- Use `/beads-execution` which wraps this skill with `bd` status tracking. TeamCreate + named agents are still required.
+- Use `/beads-execution` which wraps this skill with `bd` status tracking. Named agents are still required.

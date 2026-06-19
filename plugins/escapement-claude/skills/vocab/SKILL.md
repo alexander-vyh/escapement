@@ -119,10 +119,9 @@ universal property of every Phase-2 agent.
 ## The method
 
 ### Phase 0 — team
-`TeamCreate` + named agents with `team_name` + `name`. Mechanics live in
-`agent-teams-default` and `dispatching-parallel-agents` — follow them, don't
-restate. This is the documented home for the one shape that skill *excludes*: a
-**sequential** dependency (Phase 2 consumes Phase 1).
+Named agents. Mechanics live in `agent-teams-default` and `dispatching-parallel-agents`
+— follow them, don't restate. This is the documented home for the one shape that skill
+*excludes*: a **sequential** dependency (Phase 2 consumes Phase 1).
 
 ### Phase 1 — a single LIVING vocab-scout
 One scout → **one authoritative glossary** (parallel scouts fragment the frame).
