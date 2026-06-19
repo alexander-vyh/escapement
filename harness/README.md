@@ -61,6 +61,52 @@ Thread directories are keyed by session id: `harness/threads/{CLAUDE_CODE_SESSIO
 
 `threads/current/` remains as the fallback bucket only; it is no longer the default for live Claude Code sessions.
 
+### Working-tree isolation — detect & steer (Move 3, bead e9v.4 — 2026-06-18)
+
+Thread *state* is per-session (above), but `verify` runs the contract command
+against the **shared working tree**. When two live sessions share one
+non-isolated checkout, session B's verify picks up session A's in-flight
+breakage — so B's red is actually A's. The 2026-06-17 root-cause (UDE-7 /
+BLOCK-5) concluded the fix is **isolation, not result-state gating**: a session's
+finishing boundary must reflect only its own work, and the repo already mandates
+`bd worktree create` (CLAUDE.md).
+
+`session_isolation.py` implements *detect → steer* (state-only, agent-asserts
+nothing):
+
+- Each session stamps `{thread_dir}/checkout.json` =
+  `{session_id, worktree_root, git_common_dir, is_linked_worktree, heartbeat}`.
+  Written at SessionStart (`session_watermark.py`) and refreshed each Stop
+  (`stop_hook.py`). Outside a git repo nothing is written (no checkout concept).
+- **Collision** = ≥2 *live* records (heartbeat within `LIVENESS_WINDOW_SECONDS`,
+  30 min) whose `worktree_root` is the same on-disk tree, distinct session ids.
+  It keys on `worktree_root`, NOT `git_common_dir` — two sessions in separate
+  linked worktrees of one repo share the common dir but are **isolated**, so they
+  do not collide (that is the success state the steer points toward).
+- On collision the harness surfaces the worktree escape path: proactively at
+  SessionStart, and appended to the `no_completion_or_resumption_proof` Stop
+  block (the BLOCK-5 red-boundary case). A solo session is never nagged.
+
+The steer is advisory — like the other Stop-block messages, the mechanical guard
+is the *detection* (unit-tested with positive/negative/staleness controls in
+`tests/test_session_isolation.py`); the de-collision itself happens when the
+agent runs `bd worktree create`. Ultimate proof is observational (does the
+cross-session red-boundary deadlock stop recurring), named not hidden.
+
+**Known limits (named, not hidden — tracked as follow-up beads):**
+
+- *Idle-peer staleness.* Heartbeats stamp only at SessionStart and each Stop, so
+  a peer parked idle >`LIVENESS_WINDOW_SECONDS` (30 min) ages out and stops being
+  detected. The *actively-editing* peer — the one whose WIP actually reddens the
+  tree — ends turns frequently and stays fresh; the gap is a long-idle peer.
+  Closing it fully needs a heartbeat refresh on tool-use (a frequently-firing
+  hook), deferred to bead `claude-workflow-setup-e9v.9`.
+- *Unresolved session id.* When `CLAUDE_CODE_SESSION_ID` is absent, two sessions
+  both fall back to `threads/current/` and `colliding_sessions` skips
+  falsy-id records — detection goes blind exactly when id resolution fails. This
+  is inherited `thread_dir_for_session` fragility; robustifying it is bead
+  `claude-workflow-setup-e9v.10`.
+
 ## Still v0.1+
 
 Full 57-stall regression test, launchd installation for `wakeup_waker.py`, bead-derived contracts, human-readable `(team_id, agent_name)` naming layered on top of session-id keying, and the supervisor daemon.

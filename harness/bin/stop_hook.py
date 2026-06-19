@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# file-complexity-waiver: 947 lines, pre-existing; split owned by bead e9v.7. This change only adds a one-line per-session isolation steer (e9v.4), not new bulk.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -39,6 +40,7 @@ from would_block_stop import (  # noqa: E402
     _load_json,
     _parse_iso,
 )
+import session_isolation  # noqa: E402  (per-session isolation steer, bead e9v.4)
 import datetime as _dt2
 
 # State root is the standard per-user location (env-overridable), NOT relative
@@ -803,6 +805,15 @@ def main() -> int:
     thread_dir = thread_dir_for_session(session_id, HARNESS_ROOT)
     thread_dir.mkdir(parents=True, exist_ok=True)
 
+    # bead e9v.4: stamp this session's checkout identity (worktree root + fresh
+    # heartbeat) so concurrent-session collision is detectable. Best-effort; a
+    # stamp failure must never affect the Stop decision.
+    _now_dt = _dt2.datetime.now(_dt2.timezone.utc)
+    try:
+        session_isolation.write_checkout(thread_dir, session_id, os.getcwd(), _now_dt)
+    except Exception:  # noqa: BLE001 — deliberate never-raise-into-the-Stop-hook boundary
+        pass
+
     # B1 fix: read last user message from transcript so _user_released() fires.
     recent_user_message = _read_last_user_message(transcript_path)
 
@@ -936,6 +947,19 @@ def main() -> int:
             display = _VERIFICATION_SUPPRESSED_DISPLAY
         else:
             display = RESUMPTION_PROMPT.format(reason=reason)
+        # bead e9v.4: if this red boundary is shared with a live concurrent session,
+        # append the worktree-isolation steer — one session's red must not dead-end
+        # another's finish. Scoped to the generic unverified-red block (the BLOCK-5
+        # case); other reasons carry their own targeted guidance.
+        if reason == "no_completion_or_resumption_proof":
+            try:
+                steer = session_isolation.isolation_steer_for_thread(
+                    HARNESS_ROOT, session_id, thread_dir, _now_dt
+                )
+            except Exception:  # noqa: BLE001 — never let the steer crash the Stop decision
+                steer = None
+            if steer:
+                display = display + steer
         out = {"decision": "block", "reason": display}
         print(json.dumps(out))
         return 0
