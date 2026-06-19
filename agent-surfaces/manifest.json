@@ -575,8 +575,19 @@
       "source": "claude/hooks/openspec_init_guard.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/openspec_init_guard.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_openspec_init_guard.py::test_codex_openspec_command_denied_when_not_initialized",
+            "claude/hooks/tests/test_codex_openspec_init_guard.py::test_codex_openspec_command_allowed_when_initialized"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -599,8 +610,19 @@
       "source": "claude/hooks/openspec_task_reconciliation_gate.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/openspec_task_reconciliation_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_openspec_task_reconciliation_gate.py::test_codex_close_denied_when_linked_tasks_incomplete",
+            "claude/hooks/tests/test_codex_openspec_task_reconciliation_gate.py::test_codex_close_allowed_when_linked_tasks_complete"
+          ]
         },
         "claude": {
           "status": "ready",
