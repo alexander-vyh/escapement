@@ -7,16 +7,16 @@ description: Use when executing implementation plans with independent tasks in t
 
 Execute a plan by dispatching fresh **named team** subagents per task, with two-stage review after each: spec compliance review first, then code quality review.
 
-**Why teams:** Named subagents on a team can receive follow-up instructions via `SendMessage` without losing their context. Isolated subagents are fire-and-forget — if the reviewer finds issues, you have to dispatch an entirely new agent. Team subagents allow iterative review loops with the same agent.
+**Why named agents:** Named subagents can receive follow-up instructions via `SendMessage` without losing their context. Anonymous subagents are fire-and-forget — if the reviewer finds issues, you have to dispatch an entirely new agent. Named agents allow iterative review loops with the same agent.
 
-**Core principle:** TeamCreate + fresh named subagent per task + two-stage review (spec then quality) = high quality, fast iteration
+**Core principle:** Fresh named subagent per task + two-stage review (spec then quality) = high quality, fast iteration
 
 ## Beads Integration
 
-Named agent teams and beads are complementary — beads tracks *what* to do, teams handle *how* they coordinate.
+Named agents and beads are complementary — beads tracks *what* to do, naming enables *how* they coordinate.
 
-- **Project has `.beads/`:** Use `/beads-execution` for the dispatch loop (`bd ready` → claim → dispatch → review → `bd close`). Agents dispatched by beads-execution MUST still use TeamCreate + team_name + name.
-- **No beads:** Use this skill directly. TeamCreate + named agents are the constant.
+- **Project has `.beads/`:** Use `/beads-execution` for the dispatch loop (`bd ready` → claim → dispatch → review → `bd close`). Agents dispatched by beads-execution MUST still have a `name`.
+- **No beads:** Use this skill directly. Named agents are the constant.
 
 ## When to Use
 
@@ -25,14 +25,6 @@ Named agent teams and beads are complementary — beads tracks *what* to do, tea
 - Tasks can be executed sequentially with fresh subagents
 
 ## The Process
-
-### Setup: Create a Team
-
-**ALWAYS start by creating a team.** This enables SendMessage for review loops.
-
-```
-TeamCreate(team_name="implementation")
-```
 
 ### Per-Task Loop
 
@@ -52,21 +44,18 @@ Dispatch named final-reviewer on the team for entire implementation.
 
 ## Dispatching Named Team Subagents
 
-**MANDATORY: Every subagent MUST have both `name` AND `team_name`.** The hook will block agents missing either.
+**MANDATORY: Every subagent MUST have a `name`.** The hook will block anonymous agents.
 
 ### Implementer dispatch:
 
 ```
-TeamCreate(team_name="impl-session")
-
 Agent(
   name="impl-task1",
-  team_name="impl-session",
   description="Implement hook installation script",
   prompt="[Full task text from plan]
     [Scene-setting context: where this fits in the overall plan]
     [Constraints, patterns to follow, files to touch]
-    You are on team 'impl-session'. Use SendMessage to ask questions.
+    Use SendMessage to ask questions.
     Before modifying or recommending any file path, verify it exists with Glob or Read. Never assume a path exists based on convention.
     Begin by making an explicit plan. List the steps you will take, then execute them one by one, checking off each step.
     Follow TDD: write tests first, then implement.
@@ -79,7 +68,6 @@ Agent(
 ```
 Agent(
   name="spec-reviewer-task1",
-  team_name="impl-session",
   description="Review spec compliance for task 1",
   prompt="Review the implementation by impl-task1 against this spec:
     [Full spec text]
@@ -99,7 +87,6 @@ Use the `adversarial-reviewer` agent type for quality review — it is hostile, 
 ```
 Agent(
   name="quality-reviewer-task1",
-  team_name="impl-session",
   subagent_type="adversarial-reviewer",
   description="Review code quality for task 1",
   prompt="Review code quality for the commits by impl-task1.
@@ -160,41 +147,39 @@ Match depth of work to task type. Do not converge on an answer before reaching t
 You: I'm using Subagent-Driven Development to execute this plan.
 
 [Read plan file, extract all tasks]
-[Create team]
-TeamCreate(team_name="feature-hooks")
 
 Task 1: Hook installation script
 
-Agent(name="impl-hooks", team_name="feature-hooks", prompt="[full task text]")
+Agent(name="impl-hooks", prompt="[full task text]")
 
 impl-hooks via SendMessage: "Should hooks install at user or system level?"
 You: SendMessage(to="impl-hooks", message="User level (~/.config/myapp/hooks/)")
 
 impl-hooks: DONE — implemented, 5/5 tests passing, committed
 
-Agent(name="spec-review-hooks", team_name="feature-hooks", prompt="Review against spec...")
+Agent(name="spec-review-hooks", prompt="Review against spec...")
 spec-review-hooks: ✅ Spec compliant
 
-Agent(name="quality-review-hooks", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
+Agent(name="quality-review-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
 quality-review-hooks: ✅ Approved
 
 [Mark Task 1 complete. If beads: bd close <task-id>]
 
 Task 2: Recovery modes
 
-Agent(name="impl-recovery", team_name="feature-hooks", prompt="[full task text]")
+Agent(name="impl-recovery", prompt="[full task text]")
 impl-recovery: DONE — 8/8 tests passing
 
-Agent(name="spec-review-recovery", team_name="feature-hooks", prompt="Review against spec...")
+Agent(name="spec-review-recovery", prompt="Review against spec...")
 spec-review-recovery: ❌ Missing progress reporting, extra --json flag
 
 SendMessage(to="impl-recovery", message="Fix: remove --json, add progress reporting")
 impl-recovery: Fixed, committed
 
-Agent(name="spec-review-recovery-2", team_name="feature-hooks", prompt="Re-review...")
+Agent(name="spec-review-recovery-2", prompt="Re-review...")
 spec-review-recovery-2: ✅ Spec compliant
 
-Agent(name="quality-review-recovery", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
+Agent(name="quality-review-recovery", subagent_type="adversarial-reviewer", prompt="Review quality...")
 quality-review-recovery: Issue: magic number (100)
 
 SendMessage(to="impl-recovery", message="Extract PROGRESS_INTERVAL constant")
@@ -203,10 +188,9 @@ impl-recovery: Done, committed
 [Mark Task 2 complete]
 
 [After all tasks]
-Agent(name="final-reviewer", team_name="feature-hooks", subagent_type="adversarial-reviewer", prompt="Final review...")
+Agent(name="final-reviewer", subagent_type="adversarial-reviewer", prompt="Final review...")
 final-reviewer: All requirements met, ready to merge
 
-[Shutdown team]
 Done!
 ```
 
@@ -239,9 +223,7 @@ confirms the outcome end-to-end. Anything short of that is not done.
 ## Red Flags
 
 **Never:**
-- Dispatch agents without `team_name` (they can't talk to each other)
-- Dispatch agents without `name` (they're anonymous)
-- Skip `TeamCreate` before dispatching with `team_name`
+- Dispatch agents without `name` (they're anonymous and unaddressable)
 - Start implementation on main/master without explicit user consent
 - Skip reviews (spec compliance OR code quality)
 - Proceed with unfixed issues
@@ -267,4 +249,4 @@ confirms the outcome end-to-end. Anything short of that is not done.
 - Merge when CI passes and review is clean.
 
 **With beads:**
-- Use `/beads-execution` which wraps this skill with `bd` status tracking. TeamCreate + named agents are still required.
+- Use `/beads-execution` which wraps this skill with `bd` status tracking. Named agents are still required.

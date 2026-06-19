@@ -5,7 +5,7 @@ description: Use when facing 2+ independent tasks that can be worked on without 
 
 # Dispatching Parallel Agents
 
-This skill provides mandatory TeamCreate + named-agent dispatch for parallel work. All agents MUST be on a team so they can communicate via SendMessage and show up as selectable teammates.
+This skill provides named-agent dispatch for parallel work. All agents MUST have a `name` so they can communicate via SendMessage.
 
 ---
 
@@ -13,14 +13,14 @@ This skill provides mandatory TeamCreate + named-agent dispatch for parallel wor
 
 You delegate tasks to specialized **named** agents on a **team**. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need.
 
-**Core principle:** Create a team, then dispatch one **named** agent per independent problem domain. They work concurrently and communicate via `SendMessage`.
+**Core principle:** Dispatch one **named** agent per independent problem domain. They work concurrently and communicate via `SendMessage`.
 
 ## Beads Integration
 
 Named agent teams and beads are complementary — beads tracks *what* to do, teams handle *how* agents coordinate while doing it.
 
-- **Project has `.beads/`:** Use `/beads-execution` for the dispatch loop (`bd ready` → claim → dispatch → review → `bd close`). Agents dispatched by beads-execution MUST still use TeamCreate + team_name + name.
-- **No beads:** Use this skill directly. TeamCreate + named agents are the constant regardless of whether beads is present.
+- **Project has `.beads/`:** Use `/beads-execution` for the dispatch loop (`bd ready` → claim → dispatch → review → `bd close`). Agents dispatched by beads-execution MUST still have a `name`.
+- **No beads:** Use this skill directly. Named agents are the constant regardless of whether beads is present.
 
 ## When to Use
 
@@ -37,59 +37,41 @@ Named agent teams and beads are complementary — beads tracks *what* to do, tea
 
 ## The Pattern
 
-### 1. Create a Team
-
-**ALWAYS start by creating a team.** Without this, agents cannot talk to each other.
-
-```
-TeamCreate(team_name="debug-session")
-```
-
-### 2. Identify Independent Domains
+### 1. Identify Independent Domains
 
 Group work by what's independent:
 - File A tests: Tool approval flow
 - File B tests: Batch completion behavior
 - File C tests: Abort functionality
 
-### 3. Dispatch Named Agents ON the Team
+### 2. Dispatch Named Agents
 
-**MANDATORY: Every agent MUST have both `name` AND `team_name`.** The hook will block agents missing either.
+**MANDATORY: Every agent MUST have a `name`.** The hook will block anonymous agents.
 
 ```
-# Step 1: Create the team
-TeamCreate(team_name="debug-session")
-
-# Step 2: Dispatch agents on the team
 Agent(
   name="abort-fixer",
-  team_name="debug-session",
   description="Fix abort test failures",
   prompt="Fix the 3 failing tests in agent-tool-abort.test.ts. [details...]
-    You are on team 'debug-session' with batch-fixer and race-fixer.
-    If your fix affects their domain, use SendMessage to notify them."
+    If your fix affects batch-fixer or race-fixer's domain, use SendMessage to notify them."
 )
 
 Agent(
   name="batch-fixer",
-  team_name="debug-session",
   description="Fix batch completion failures",
   prompt="Fix the 2 failing tests in batch-completion-behavior.test.ts. [details...]
-    You are on team 'debug-session' with abort-fixer and race-fixer.
-    If your fix affects their domain, use SendMessage to notify them."
+    If your fix affects abort-fixer or race-fixer's domain, use SendMessage to notify them."
 )
 
 Agent(
   name="race-fixer",
-  team_name="debug-session",
   description="Fix race condition failures",
   prompt="Fix the 1 failing test in tool-approval-race-conditions.test.ts. [details...]
-    You are on team 'debug-session' with abort-fixer and batch-fixer.
-    If your fix affects their domain, use SendMessage to notify them."
+    If your fix affects abort-fixer or batch-fixer's domain, use SendMessage to notify them."
 )
 ```
 
-All three show up as selectable teammates and can SendMessage to each other.
+All three can SendMessage to each other by name.
 
 ### 4. Review and Integrate
 
@@ -106,39 +88,29 @@ When agents return:
 A "roundtable" is a specific use of team agents where expert personas **argue and critique each other's positions** via SendMessage.
 
 ```
-# Create the team
-TeamCreate(team_name="auth-review")
-
-# Dispatch persona agents on the team
 Agent(
   name="security-reviewer",
-  team_name="auth-review",
   description="Security perspective review",
   prompt="Review the auth middleware changes from a security perspective.
-    You are on team 'auth-review' with ux-reviewer and perf-reviewer.
-    After your initial review, use SendMessage to share your findings.
+    After your initial review, use SendMessage to share your findings with ux-reviewer and perf-reviewer.
     Read and respond to the other reviewers' findings.
     Push back if you disagree — this is a debate, not a rubber stamp."
 )
 
 Agent(
   name="ux-reviewer",
-  team_name="auth-review",
   description="UX perspective review",
   prompt="Review the auth middleware changes from a UX perspective.
-    You are on team 'auth-review' with security-reviewer and perf-reviewer.
-    After your initial review, use SendMessage to share your findings.
+    After your initial review, use SendMessage to share your findings with security-reviewer and perf-reviewer.
     Read and respond to the other reviewers' findings.
     Push back if you disagree — this is a debate, not a rubber stamp."
 )
 
 Agent(
   name="perf-reviewer",
-  team_name="auth-review",
   description="Performance perspective review",
   prompt="Review the auth middleware changes from a performance perspective.
-    You are on team 'auth-review' with security-reviewer and ux-reviewer.
-    After your initial review, use SendMessage to share your findings.
+    After your initial review, use SendMessage to share your findings with security-reviewer and ux-reviewer.
     Read and respond to the other reviewers' findings.
     Push back if you disagree — this is a debate, not a rubber stamp."
 )
@@ -148,11 +120,10 @@ Agent(
 
 Good agent prompts are:
 1. **Named** — `name` parameter on every Agent call
-2. **On a team** — `team_name` matching the TeamCreate call
-3. **Focused** — One clear problem domain
-4. **Self-contained** — All context needed to understand the problem
-5. **Team-aware** — Lists other agents' names so they can coordinate via SendMessage
-6. **Specific about output** — What should the agent return?
+2. **Focused** — One clear problem domain
+3. **Self-contained** — All context needed to understand the problem
+4. **Peer-aware** — Lists other agents' names so they can coordinate via SendMessage
+5. **Specific about output** — What should the agent return?
 
 ### Effort Calibration
 
@@ -193,17 +164,11 @@ but that is a second line of defense. The first line is you.
 
 ## Common Mistakes
 
-**❌ No team:** `Agent(name="fixer", prompt="...")` — named but isolated, can't talk to others
-**✅ On a team:** `Agent(name="fixer", team_name="debug", prompt="...")` — can SendMessage
-
-**❌ No name:** `Agent(prompt="Fix tests")` — anonymous, unaddressable
-**✅ Named:** `Agent(name="test-fixer", team_name="debug", prompt="Fix tests")`
-
-**❌ No TeamCreate:** Dispatching with team_name but never called TeamCreate
-**✅ TeamCreate first:** `TeamCreate(team_name="debug")` then dispatch agents
+**❌ No name:** `Agent(prompt="Fix tests")` — anonymous, unaddressable via SendMessage
+**✅ Named:** `Agent(name="test-fixer", prompt="Fix tests")` — addressable, can coordinate
 
 **❌ Simulated roundtable:** Writing persona dialogue in your own output
-**✅ Real roundtable:** TeamCreate + named agents that argue via SendMessage
+**✅ Real roundtable:** Named agents that independently analyze and argue via SendMessage
 
 ## Vocabulary
 
@@ -212,12 +177,12 @@ but that is a second line of defense. The first line is you.
 
 | User says | Means |
 |-----------|-------|
-| "agent team" | TeamCreate + named agents on the team |
-| "roundtable" | TeamCreate + named agents arguing via SendMessage |
-| "panel of experts" | TeamCreate + named agents with different persona prompts |
-| "have them talk to each other" | Agents on a team using SendMessage |
+| "agent team" | 2+ named agents |
+| "roundtable" | Named agents arguing via SendMessage |
+| "panel of experts" | Named agents with different persona prompts |
+| "have them talk to each other" | Named agents using SendMessage |
 
-**"Roundtable" NEVER means writing simulated dialogue in your output.** It ALWAYS means TeamCreate + real named agents that independently analyze and communicate via SendMessage.
+**"Roundtable" NEVER means writing simulated dialogue in your output.** It ALWAYS means real named agents that independently analyze and communicate via SendMessage.
 
 ## Continuation Discipline for Dispatched Agents
 
@@ -284,10 +249,9 @@ it adversarially like any other. The critic does not get the last word; it
 Run the critic until a round surfaces nothing new (loop-until-dry), not once.
 
 ```
-# After the per-lens roundtable reports, on the SAME team:
+# After the per-lens roundtable reports:
 Agent(
   name="completeness-critic",
-  team_name="auth-review",
   description="Surface coverage gaps and severity under-calibration",
   prompt="You are the completeness critic for the review of <artifact>.
     The lenses that ran were: security, ux, performance. You are NOT given their

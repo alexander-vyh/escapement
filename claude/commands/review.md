@@ -12,13 +12,7 @@ Extract:
 - **Target**: file paths, PR number (e.g., `#123`), or branch name from the arguments
 - If no target is given, use `git diff --name-only HEAD~1` to find recently changed files
 
-## 2. Create the review team
-
-```
-TeamCreate(team_name="code-review")
-```
-
-## 3. Dispatch review agents in parallel
+## 2. Dispatch review agents in parallel
 
 Dispatch all agents simultaneously. Each agent gets the same target files/PR but reviews from a different angle.
 
@@ -27,7 +21,7 @@ Dispatch all agents simultaneously. Each agent gets the same target files/PR but
 ```
 Agent(
   name="adversarial-reviewer",
-  team_name="code-review",
+
   description="Hostile code review — find bugs, security issues, race conditions, edge cases",
   prompt="""You are an adversarial code reviewer. Your job is to BREAK this code.
 
@@ -58,7 +52,7 @@ CONTINUATION DISCIPLINE: Do not stop until you have reviewed every changed file.
 ```
 Agent(
   name="test-quality-reviewer",
-  team_name="code-review",
+
   description="Review test quality — assertions, coverage gaps, false confidence",
   prompt="""You are a test quality reviewer. Your job is to find gaps between what the tests claim to verify and what they actually verify.
 
@@ -90,7 +84,7 @@ CONTINUATION DISCIPLINE: Do not stop until you have reviewed every test file rel
 ```
 Agent(
   name="code-simplifier",
-  team_name="code-review",
+
   description="Check for unnecessary complexity, dead code, premature abstraction",
   prompt="""You are a code simplicity reviewer. Your job is to find unnecessary complexity in the changes.
 
