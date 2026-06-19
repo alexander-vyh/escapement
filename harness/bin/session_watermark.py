@@ -17,6 +17,7 @@ Rule 3) — never agent free-text.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import pathlib
@@ -25,6 +26,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from would_block_stop import thread_dir_for_session, harness_home  # noqa: E402
+import session_isolation  # noqa: E402  (per-session isolation steer, bead e9v.4)
 
 HARNESS_ROOT = harness_home()
 
@@ -56,6 +58,22 @@ def main() -> int:
     thread_dir = thread_dir_for_session(session_id, HARNESS_ROOT)
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     write_session_watermark(thread_dir, session_id, ts)
+
+    # bead e9v.4: stamp this session's checkout identity and, if a live concurrent
+    # session already shares this non-isolated checkout, surface the worktree steer
+    # PROACTIVELY at session start (before the work entangles). Best-effort: a
+    # failure here must never disrupt SessionStart.
+    try:
+        cwd = payload.get("cwd") or os.getcwd()
+        now = _dt.datetime.now(_dt.timezone.utc)
+        session_isolation.write_checkout(thread_dir, session_id, cwd, now)
+        steer = session_isolation.isolation_steer_for_thread(
+            HARNESS_ROOT, session_id, thread_dir, now
+        )
+        if steer:
+            print("continuation-harness [isolation]:" + steer)
+    except Exception:  # noqa: BLE001 — never let isolation bookkeeping disrupt SessionStart
+        pass
     return 0
 
 
