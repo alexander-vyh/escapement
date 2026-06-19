@@ -124,7 +124,13 @@ def main() -> int:
         return 0
 
     task_id = _extract_task_id(command)
-    parent_id = _lookup_parent_id(task_id) if task_id else None
+    # e9v.11 root cause: a claim with no parseable task id (e.g. `bd ready --claim`)
+    # cannot be scoped. Writing a scopeless task-mode record makes the Stop gate run
+    # `bd ready` unscoped = the whole-repo backlog, trapping a finished session. No
+    # scope -> do not enter task mode; the contract gate still covers the session.
+    if task_id is None:
+        return 0
+    parent_id = _lookup_parent_id(task_id)
 
     try:
         mode_file.write_text(json.dumps({

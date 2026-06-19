@@ -473,6 +473,22 @@ def _main_repo_has_beads(cwd: str) -> bool:
         return False
 
 
+def _task_mode_in_effect(session_mode) -> bool:
+    """Whether queue-drain (task-mode) gating applies to this session.
+
+    True only for a task-mode record that carries a real SCOPE — a claimed
+    task_id or its molecule parent_id. A scopeless record (both null, e.g. from a
+    `bd ready --claim` the entry hook couldn't parse) is NOT task-mode: gating it
+    would run `bd ready` unscoped = the whole-repo backlog, blocking a finished
+    session on work that belongs to a different session (bead e9v.11). Such a
+    session falls through to the normal contract gate, which still blocks a red
+    contract — teeth kept, false whole-repo block removed.
+    """
+    if not isinstance(session_mode, dict) or session_mode.get("mode") != "task":
+        return False
+    return bool(session_mode.get("parent_id") or session_mode.get("task_id"))
+
+
 def _check_task_mode_queue(session_mode: dict, run_bd=None) -> Tuple[str, str]:
     """Run bd ready / bd list in repo_cwd to determine if queue-drain allows stop.
 
@@ -821,7 +837,10 @@ def main() -> int:
     # User release and wakeup remain universal overrides (checked via would_block_stop
     # with contract=None, which short-circuits to the universal paths before contract check).
     session_mode = _load_json(thread_dir / "session_mode.json")
-    if isinstance(session_mode, dict) and session_mode.get("mode") == "task":
+    # e9v.11: only a SCOPED task-mode record gates here. A scopeless record
+    # (task_id and parent_id both null) is not really task mode — gating it would
+    # block on the whole-repo backlog — so it falls through to the contract gate.
+    if _task_mode_in_effect(session_mode):
         scheduled = _load_json(thread_dir / "scheduled.json")
         override_state = {
             "contract": None,
