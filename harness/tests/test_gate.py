@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# file-complexity-waiver: pre-existing aggregate harness gate test (>500 lines); splitting it is separate test-suite work. This change adds one e9v.11 scopeless-task-mode negative control.
 """
 Sanity tests for would_block_stop.
 
@@ -552,19 +553,38 @@ def run_task_mode() -> int:
 
         # --- Stop hook task mode queue-drain gate ---
 
-        # Task mode + ready items → block (tasks remain).
+        # Task mode (SCOPED) + ready items → block (tasks remain).
+        # e9v.11: mode_rec carries a parent_id so it is a real scoped task-mode
+        # session. A scopeless record (both ids null) is exercised separately below
+        # and must NOT block on the whole-repo backlog.
         td = tmp / "queue-has-items"
         td.mkdir(parents=True)
         fake_beads = td / ".beads"
         fake_beads.mkdir()
-        mode_rec = {"mode": "task", "repo_cwd": str(td), "parent_id": None,
+        mode_rec = {"mode": "task", "repo_cwd": str(td), "parent_id": "cake-epic",
                     "entered_at": _now_iso(), "session_id": "x"}
         (td / "session_mode.json").write_text(json.dumps(mode_rec))
         fakebin = make_fake_bd(tmp / "bin1", ready_items=1, list_items=1)
         out = call_hook({"session_id": "x", "transcript_path": ""},
                         td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
         _assert(out is not None and out.get("decision") == "block",
-                "task mode: bd ready non-empty → block (tasks remain)", results)
+                "task mode: scoped + bd ready non-empty → block (tasks remain)", results)
+
+        # e9v.11 NEGATIVE CONTROL: a SCOPELESS task-mode record (parent_id AND
+        # task_id both null) must NOT block on the whole-repo backlog — it falls
+        # through to the contract gate (no contract here → conversational allow).
+        # Without the fix this blocked a finished session on unrelated beads forever.
+        td_us = tmp / "queue-unscoped"
+        td_us.mkdir(parents=True)
+        (td_us / ".beads").mkdir()
+        (td_us / "session_mode.json").write_text(json.dumps(
+            {"mode": "task", "repo_cwd": str(td_us), "parent_id": None,
+             "entered_at": _now_iso(), "session_id": "x"}))
+        fakebin_us = make_fake_bd(tmp / "bin1u", ready_items=5, list_items=5)
+        out_us = call_hook({"session_id": "x", "transcript_path": ""},
+                           td_us, {"PATH": f"{fakebin_us}:{_os.environ.get('PATH', '')}"})
+        _assert(out_us is None,
+                "task mode: scopeless record + whole-repo ready → allow (e9v.11, not others' backlog)", results)
 
         # DEGRADED-PATH case (NOT the R2 invariant — see below). This `make_fake_bd`
         # implements only `ready` and `list`; the `blocked` subcommand falls through
@@ -654,18 +674,29 @@ def run_task_mode() -> int:
                 "task_id scoping: standalone task with no children → allow (leaf task closed)",
                 results)
 
-        # Without scoping (regression baseline): parent_id=null and task_id=null →
-        # bd ready (unscoped) returns unrelated items → gate blocks.
-        td = tmp / "taskid-scope-block"
+        # e9v.11: a fully scopeless record (task_id=null AND parent_id=null) is NOT
+        # task mode — it must NOT block on whole-repo backlog (the old "regression
+        # baseline" here asserted the opposite, which trapped finished sessions on
+        # other sessions' work). Teeth are kept by the CONTRACT gate, not by
+        # whole-repo blocking: this asserts the stronger invariant that a scopeless
+        # session with an UNVERIFIED contract still BLOCKS (no stop-with-work-undone
+        # hole), while the no-contract / whole-repo-ready case allows (above).
+        td = tmp / "taskid-scope-redcontract"
         td.mkdir(parents=True)
         (td / ".beads").mkdir()
         unscoped_mode = {"mode": "task", "repo_cwd": str(td), "task_id": None,
                          "parent_id": None, "entered_at": _now_iso(), "session_id": "x"}
         (td / "session_mode.json").write_text(json.dumps(unscoped_mode))
+        # Red contract: present but last_run failed -> contract gate must block.
+        (td / "contract.json").write_text(json.dumps({
+            "goal": "g", "verification_command": "pytest", "expected_exit": 0,
+            "source": "agent-declared", "thread_id": "x", "created_at": _now_iso(),
+            "last_run": {"exit_code": 1, "timestamp": _now_iso(), "output_excerpt": "FAIL"},
+        }))
         out = call_hook({"session_id": "x", "transcript_path": ""},
                         td, {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"})
         _assert(out is not None and out.get("decision") == "block",
-                "task_id scoping: no task_id and no parent_id (pre-fix regression case) → block",
+                "e9v.11: scopeless record + unverified contract → still block (teeth kept via contract gate)",
                 results)
 
     finally:
