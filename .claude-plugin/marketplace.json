@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "escapement",
+  "description": "Escapement: host-neutral agentic workflow layer (beads, OpenSpec, oracle-discipline gates, continuation harness).",
+  "owner": {
+    "name": "alexander-vyh"
+  },
+  "plugins": [
+    {
+      "name": "escapement",
+      "description": "Host-neutral agentic workflow layer with always-on rules injected via a SessionStart hook. Tracks main for continuous auto-update.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/alexander-vyh/escapement",
+        "path": "plugins/escapement-claude",
+        "ref": "main"
+      },
+      "category": "development",
+      "author": {
+        "name": "alexander-vyh"
+      },
+      "homepage": "https://github.com/alexander-vyh/escapement"
+    }
+  ]
+}

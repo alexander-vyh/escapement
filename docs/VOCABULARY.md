@@ -46,14 +46,13 @@ one in management — **division of labor** (Smith, Babbage) — combined with
 
 - **Named agent** — An agent dispatched with an explicit `name`, making it addressable.
   Only named agents can be sent messages or coordinate. Anonymous agents
-  (`Agent(prompt=...)` with no name) are fire-and-forget and cannot participate in a team.
-  *In repo:* `claude/hooks/enforce_named_agents.py` blocks teamless multi-agent dispatch.
+  (`Agent(prompt=...)` with no name) are fire-and-forget and cannot be addressed.
+  *In repo:* `claude/hooks/enforce_named_agents.py` blocks anonymous agent dispatch.
 
-- **Team / `TeamCreate`** — The shared infrastructure that lets named agents communicate.
-  A team requires three things together: `TeamCreate` (once), plus `name` and `team_name`
-  on every agent. Missing any one means the agents are isolated subprocesses that cannot
-  coordinate.
-  *In repo:* `claude/rules/agent-teams-default.md` (the canonical "three things" rule).
+- **Implicit Team** — The session has a single implicit team; all named agents are
+  automatically on it. `TeamCreate` and `team_name` are deprecated and ignored by the
+  current Claude Code runtime. `name` is the only parameter needed for coordination.
+  *In repo:* `claude/rules/agent-teams-default.md`.
   *Roots:* a team is a shared communication channel — a *blackboard* / shared workspace
   in classic AI architecture [analytical mapping].
 
