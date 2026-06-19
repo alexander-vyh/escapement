@@ -1,3 +1,4 @@
+import os
 import json
 import shutil
 import subprocess
@@ -360,6 +361,77 @@ def assert_minimum_verified_delivery_guidance(root):
         text = " ".join((root / rel_path).read_text().split())
         for fragment in MINIMUM_VERIFIED_DELIVERY_FRAGMENTS:
             assert fragment in text, f"{rel_path} missing minimum verified delivery fragment: {fragment}"
+
+
+CLAUDE_PLUGIN = ROOT / "plugins" / "escapement-claude"
+
+
+def test_claude_marketplace_tracks_main_for_autoupdate():
+    """The Claude marketplace points at this repo via git-subdir, ref main.
+
+    This is what makes the plugin auto-update: every push to main becomes the new
+    version. A regression to a pinned tag/sha here would silently freeze updates.
+    """
+    mkt = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
+    entry = next(p for p in mkt["plugins"] if p["name"] == "escapement")
+    src = entry["source"]
+    assert src["source"] == "git-subdir"
+    assert src["path"] == "plugins/escapement-claude"
+    assert src["ref"] == "main", "marketplace must track main for continuous auto-update"
+
+
+def test_claude_plugin_hooks_include_sessionstart_rules_injection():
+    """The plugin wires its always-on rules via a SessionStart inject hook.
+
+    Negative control: removing the SessionStart injection would drop escapement's
+    rules entirely on Codex-less hosts — this asserts it is present and points at
+    the bundled inject-rules.sh.
+    """
+    hooks = json.loads((CLAUDE_PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
+    session_start = hooks.get("SessionStart", [])
+    commands = [h["command"] for item in session_start for h in item["hooks"]]
+    assert any("inject-rules.sh" in c for c in commands), "SessionStart must inject the rules"
+
+
+def test_claude_plugin_bundles_all_rules():
+    """Every claude/rules/*.md is bundled into the plugin so injection is complete."""
+    source_rules = {p.name for p in (ROOT / "claude" / "rules").glob("*.md")}
+    bundled = {p.name for p in (CLAUDE_PLUGIN / "rules").glob("*.md")}
+    assert bundled == source_rules and source_rules, "all rules must be bundled, none dropped"
+
+
+def test_claude_plugin_injects_rules_with_imperative_framing(tmp_path):
+    """Behavioral: running inject-rules.sh emits SessionStart additionalContext
+    carrying the bundled rules AND imperative framing (so injected rules match
+    native CLAUDE.md authority). Positive control for the rules-delivery mechanism.
+    """
+    result = subprocess.run(
+        ["bash", str(CLAUDE_PLUGIN / "hooks" / "inject-rules.sh")],
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(CLAUDE_PLUGIN)},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "OVERRIDE default behavior" in ctx, "injected rules must carry imperative framing"
+    assert len(ctx) > 5000, "rules bundle should be substantial, not a stub"
+
+
+def test_claude_plugin_inject_rules_fails_loud_on_missing_bundle(tmp_path):
+    """Negative control: a missing rules bundle surfaces a WARNING, not a silent
+    drop — so a broken install is observable instead of a quiet rules regression.
+    """
+    result = subprocess.run(
+        ["bash", str(CLAUDE_PLUGIN / "hooks" / "inject-rules.sh")],
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(tmp_path / "empty")},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    ctx = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "WARNING" in ctx and "NOT injected" in ctx
 
 
 def copy_repo(tmp_path):
