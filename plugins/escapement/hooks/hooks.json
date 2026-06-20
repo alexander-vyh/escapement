@@ -132,6 +132,36 @@
           }
         ],
         "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/mol_status_check.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/session_cleanup.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/session_status.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
       }
     ]
   }

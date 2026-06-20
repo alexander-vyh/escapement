@@ -534,8 +534,19 @@
       "source": "claude/hooks/mol_status_check.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 claude/hooks/mol_status_check.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_mol_status_check.py::test_codex_mol_status_emits_systemmessage_in_beads_project",
+            "claude/hooks/tests/test_codex_mol_status_check.py::test_codex_mol_status_silent_when_not_beads_project"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -813,8 +824,18 @@
       "source": "claude/hooks/session_cleanup.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 claude/hooks/session_cleanup.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_session_cleanup.py::test_codex_session_cleanup_removes_stale_keeps_fresh"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -837,8 +858,19 @@
       "source": "claude/hooks/session_status.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 claude/hooks/session_status.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_session_status.py::test_codex_session_status_emits_queue_in_beads_project",
+            "claude/hooks/tests/test_codex_session_status.py::test_codex_session_status_silent_when_not_beads_project"
+          ]
         },
         "claude": {
           "status": "ready",
