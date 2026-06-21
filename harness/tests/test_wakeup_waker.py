@@ -199,6 +199,36 @@ def test_fire_preserves_due_entry_when_spawn_fails(tmp_path, monkeypatch):
     assert json.loads(schedule.read_text()) == [entry]
 
 
+def test_fire_skips_untrusted_schedule_and_does_not_execute_command(tmp_path, capsys):
+    # Security guard: a world-writable scheduled.json could have its `command`
+    # rewritten by another local user; the waker must NOT shell-execute it.
+    # Negative control for trusted_source — an existence-only check would fail this.
+    import os
+    if not hasattr(os, "geteuid"):
+        import pytest
+        pytest.skip("perms/ownership guard is POSIX-only")
+    root = tmp_path / "threads"
+    thread_dir = root / "thread-1"
+    thread_dir.mkdir(parents=True)
+    schedule = thread_dir / "scheduled.json"
+    sentinel = tmp_path / "untrusted-check-ran"
+    script = f"from pathlib import Path; Path({str(sentinel)!r}).write_text('ran')"
+    entry = _entry(
+        kind="check",
+        wake_at=CLI_PAST,
+        command=f"{sys.executable} -c {shlex.quote(script)}",
+        escalate_prompt="condition met",
+    )
+    schedule.write_text(json.dumps([entry]))
+    schedule.chmod(0o666)  # group + other writable -> untrusted
+
+    assert ww.main(["--threads-root", str(root), "--fire"]) == 0
+
+    assert not sentinel.exists()  # the command must NOT have run
+    assert json.loads(schedule.read_text()) == [entry]  # schedule left untouched
+    assert "untrusted" in capsys.readouterr().err.lower()
+
+
 def test_fire_skips_locked_schedule_to_avoid_duplicate_wakers(tmp_path, monkeypatch, capsys):
     root = tmp_path / "threads"
     thread_dir = root / "thread-1"
