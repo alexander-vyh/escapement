@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Per-repo git completion ceiling setup (escapement-8d2.5).
+#
+# Thin wrapper over the resolver module's CLI. Writes
+# <git_root>/.claude/repo-policy.json for the current repo.
+#
+#   set-repo-ceiling set <local|pr|merge>   # set this repo's ceiling
+#   set-repo-ceiling                        # show the resolved ceiling + usage
+#
+# Skipping setup leaves no file; the resolver then defaults to 'pr'.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+exec python3 "$here/../hooks/_repo_policy.py" "$@"
