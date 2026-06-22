@@ -10,7 +10,7 @@
 # Reusable + extensible: repos are discovered at runtime, so any NEW or EXISTING
 # repo that later gains a .beads dir is picked up automatically on the next run.
 #
-# Canonical copy in claude-workflow-setup/scripts/; symlinked into ~/.local/bin.
+# Canonical copy in escapement/scripts/; symlinked into ~/.local/bin.
 # Exit 0 on success (committed+pushed, or nothing changed); non-zero if the
 # clone/commit/push fails — a real, surfaced failure.
 set -uo pipefail   # deliberately NOT -e: one bad repo must not abort the sweep

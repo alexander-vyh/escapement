@@ -48,7 +48,7 @@ _BEAD_TITLE_PREFIX = "[gate-monitor]"
 # Repo where monitor-filed beads land. The monitor IS the workflow
 # tooling; concerning patterns surface in this repo's bd queue rather
 # than wherever the signal happened to be captured.
-_BEAD_TARGET_REPO = Path(os.path.expanduser("~/GitHub/claude-workflow-setup"))
+_BEAD_TARGET_REPO = Path(os.path.expanduser("~/GitHub/escapement"))
 
 
 _DEFAULT_KNOWN_GATES = [
@@ -417,7 +417,7 @@ def main() -> int:
         "--file-beads",
         action="store_true",
         help=(
-            "Open bd issues in claude-workflow-setup for concerning patterns "
+            "Open bd issues in escapement for concerning patterns "
             "(mock-bureaucracy risk, FP-heavy shirking categories). Deduped "
             "against existing open `[gate-monitor]`-tagged issues."
         ),

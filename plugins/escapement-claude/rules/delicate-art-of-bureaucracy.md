@@ -1,7 +1,7 @@
 # The Delicate Art of Bureaucracy — Global Rule
 
 This repo is a bureaucracy. The hooks, skills, gates, rules, and harnesses
-in `claude-workflow-setup/` are a structured set of routines that turn
+in `escapement/` are a structured set of routines that turn
 problem-solving successes into reusable practice. That is not pejorative —
 it is the operative frame.
 

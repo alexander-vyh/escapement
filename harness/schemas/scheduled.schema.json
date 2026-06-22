@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://claude-workflow-setup/harness/schemas/scheduled.schema.json",
+  "$id": "https://escapement/harness/schemas/scheduled.schema.json",
   "title": "ScheduledWakeups",
   "description": "Per-thread durable wakeup entries. Array; multiple wakeups may coexist for the same thread.",
   "type": "array",

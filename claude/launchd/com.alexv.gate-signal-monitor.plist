@@ -56,7 +56,7 @@
         <string>--since</string>
         <string>7d</string>
         <!--
-          --file-beads opens a bd issue in claude-workflow-setup for each
+          --file-beads opens a bd issue in escapement for each
           concerning pattern (mock-bureaucracy risk, FP-heavy shirking
           category). Deduped against existing open `[gate-monitor]`-tagged
           issues, so re-running the same week doesn't pile on duplicates.
