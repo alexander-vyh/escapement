@@ -273,3 +273,11 @@ The substance comes from elsewhere; this repo is the glue.
 - **Manager Tools, Radical Candor, Playing to Win, Lencioni, Grove, Brené Brown** — the rules' flavor on outcome ownership, feedback, and psychological safety.
 
 The glue — molecule formulas, skill overlays, hook enforcement, settings template — is my own iteration, not a product. Expect to modify before adopting.
+
+## License
+
+Escapement is licensed under the **GNU General Public License v3.0 or later**
+(`GPL-3.0-or-later`). See [`LICENSE`](LICENSE) for the full text. You may
+redistribute and/or modify it under the terms of the GPL as published by the
+Free Software Foundation, either version 3 of the License, or (at your option)
+any later version.
