@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Filesystem store at `~/GitHub/claude-workflow-setup/harness/threads/{team_id}/{agent_name}/scheduled.json` containing wakeup entries that survive session termination. In skeleton scope, the schema is defined and used by the verification gate; the live waker (the launchd-driven process that fires at `wake_at`) is DEFERRED until skeleton validation.
+Filesystem store at `~/GitHub/escapement/harness/threads/{team_id}/{agent_name}/scheduled.json` containing wakeup entries that survive session termination. In skeleton scope, the schema is defined and used by the verification gate; the live waker (the launchd-driven process that fires at `wake_at`) is DEFERRED until skeleton validation.
 
 ## Requirements
 

@@ -27,11 +27,11 @@ After this work, Claude Code agents that today stop one tool-call short of done,
 
 ### Modified Capabilities
 
-None. This is a greenfield addition under `claude-workflow-setup/harness/`. The existing regex Stop hook (`validate_no_shirking.py`) is unmodified; the new gate runs as a separate Stop-hook entry in `~/.claude/settings.json` alongside it.
+None. This is a greenfield addition under `escapement/harness/`. The existing regex Stop hook (`validate_no_shirking.py`) is unmodified; the new gate runs as a separate Stop-hook entry in `~/.claude/settings.json` alongside it.
 
 ## Impact
 
-- **New directory tree** under `~/GitHub/claude-workflow-setup/harness/` containing the supervisor, adapter, schemas, and per-thread storage.
+- **New directory tree** under `~/GitHub/escapement/harness/` containing the supervisor, adapter, schemas, and per-thread storage.
 - **New launchd entry** under `~/Library/LaunchAgents/` for the supervisor + scheduled-wakeup waker.
 - **Modified `~/.claude/settings.json`** — adds a Stop-hook entry pointing at the new gate. The existing `validate_no_shirking.py` entry is retained.
 - **No changes to `beads`** — the harness reads `bd` state but does not write to it. (Future increments may write blocker beads on documented failures.)

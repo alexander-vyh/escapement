@@ -11,7 +11,7 @@ Translation layer between Claude Code's session events and the canonical harness
 A Python script registered under the `Stop` matcher in `~/.claude/settings.json` MUST:
 
 1. Invoke `would_block_stop(thread_state)` on every Stop event
-2. Append a structured decision record to `~/GitHub/claude-workflow-setup/harness/shadow.jsonl`
+2. Append a structured decision record to `~/GitHub/escapement/harness/shadow.jsonl`
 3. Exit 0 unconditionally (skeleton scope — does not block)
 
 #### Scenario: Stop event triggers shadow logging

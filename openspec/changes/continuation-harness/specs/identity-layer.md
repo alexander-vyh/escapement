@@ -8,7 +8,7 @@ Naming convention `(team_id, agent_name)` for thread directories. Single-agent w
 
 ### Requirement: Thread directory naming
 
-Per-thread state MUST be stored at `~/GitHub/claude-workflow-setup/harness/threads/{team_id}/{agent_name}/` where:
+Per-thread state MUST be stored at `~/GitHub/escapement/harness/threads/{team_id}/{agent_name}/` where:
 
 - `team_id` is a kebab-case identifier (e.g., `harness-review`, `solo-2026-05-18-073142`)
 - `agent_name` is the named agent identifier from `TeamCreate` (e.g., `session-miner`), OR `"solo"` for single-agent sessions with no team context

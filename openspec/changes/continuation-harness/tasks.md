@@ -5,7 +5,7 @@ Walking skeleton only. Future-increment tasks are explicitly NOT included; they 
 ## 1. Baseline + schemas + storage
 
 - [x] 1.1 Capture baseline metrics from current transcripts — `harness/baseline-2026-05-18.json` contains 14-day baseline: 85 sessions, 20,440 user messages, 67 short-prod events (rate 0.33%), 69/80 sessions ended on plain text (86%), 155 `validate_no_shirking` block matches. Re-run via `python3 harness/bin/baseline.py` at 4-week mark for comparison.
-- [x] 1.2 Directory tree under `~/GitHub/claude-workflow-setup/harness/` with `bin/`, `schemas/`, `threads/current/`, `tests/`. Top-level `harness/README.md` documents layout.
+- [x] 1.2 Directory tree under `~/GitHub/escapement/harness/` with `bin/`, `schemas/`, `threads/current/`, `tests/`. Top-level `harness/README.md` documents layout.
 - [x] 1.3 `harness/schemas/contract.schema.json` written; covers all required fields (`goal`, `verification_command`, `expected_exit`, `source`, `thread_id`, `created_at`, optional `last_run`).
 - [x] 1.4 `harness/schemas/scheduled.schema.json` written; covers required fields (`wake_at`, `prompt`, `thread_id`, `created_by`, `crash_count`).
 
