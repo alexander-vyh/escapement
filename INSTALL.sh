@@ -65,7 +65,7 @@ run() {
   if [[ "$DRY_RUN" == true ]]; then
     echo "[dry-run] $*"
   else
-    eval "$*"
+    "$@"
   fi
 }
 
@@ -84,7 +84,7 @@ for tool in openspec bd direnv python3 jq git bash; do
   fi
 done
 
-run "mkdir -p '$CLAUDE_DIR'/{skills,rules,commands,hooks,harness,agents} '$CLAUDE_DIR'/harness/threads '$BEADS_DIR'/formulas"
+run mkdir -p "$CLAUDE_DIR"/{skills,rules,commands,hooks,harness,agents} "$CLAUDE_DIR"/harness/threads "$BEADS_DIR"/formulas
 
 # --- Symlink plan: (source_relative_to_repo, dest_absolute) ---
 # Preserves directory structure. For skill directories, symlink the whole dir.
@@ -170,11 +170,11 @@ backup_if_exists() {
   local dest="$1"
   if [[ -L "$dest" ]]; then
     # Already a symlink — remove it (no backup needed, nothing real there)
-    run "rm '$dest'"
+    run rm "$dest"
   elif [[ -e "$dest" ]]; then
     local backup="${dest}.backup-${TIMESTAMP}"
     echo "    backup: $dest -> $backup"
-    run "mv '$dest' '$backup'"
+    run mv "$dest" "$backup"
   fi
 }
 
@@ -194,7 +194,7 @@ install_plan() {
     fi
 
     backup_if_exists "$dest"
-    run "ln -s '$src_abs' '$dest'"
+    run ln -s "$src_abs" "$dest"
     installed=$((installed + 1))
     echo "    link:   $dest -> $src_rel"
   done
@@ -207,7 +207,7 @@ uninstall_plan() {
   for entry in "${PLAN[@]}"; do
     local dest="${entry#*|}"
     if [[ -L "$dest" ]]; then
-      run "rm '$dest'"
+      run rm "$dest"
       removed=$((removed + 1))
       echo "    unlink: $dest"
     fi
@@ -284,13 +284,13 @@ ensure_pinned_checkout() {
       echo "   --allow-pinned-drift set: proceeding." >&2
     fi
     echo "==> refreshing pinned checkout: $pin_dir -> $ESCAPEMENT_PIN_REF"
-    run "git -C '$pin_dir' fetch --quiet '$ESCAPEMENT_PIN_REMOTE' '$ESCAPEMENT_PIN_REF'"
-    run "git -C '$pin_dir' checkout --quiet '$ESCAPEMENT_PIN_REF'"
-    run "git -C '$pin_dir' merge --ff-only FETCH_HEAD"
+    run git -C "$pin_dir" fetch --quiet "$ESCAPEMENT_PIN_REMOTE" "$ESCAPEMENT_PIN_REF"
+    run git -C "$pin_dir" checkout --quiet "$ESCAPEMENT_PIN_REF"
+    run git -C "$pin_dir" merge --ff-only FETCH_HEAD
   else
     echo "==> creating pinned checkout: clone $ESCAPEMENT_PIN_REMOTE -> $pin_dir"
-    run "git clone --quiet '$ESCAPEMENT_PIN_REMOTE' '$pin_dir'"
-    run "git -C '$pin_dir' checkout --quiet '$ESCAPEMENT_PIN_REF'"
+    run git clone --quiet "$ESCAPEMENT_PIN_REMOTE" "$pin_dir"
+    run git -C "$pin_dir" checkout --quiet "$ESCAPEMENT_PIN_REF"
   fi
 }
 
