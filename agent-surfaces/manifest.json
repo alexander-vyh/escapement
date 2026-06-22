@@ -1100,6 +1100,31 @@
           ]
         }
       }
+    },
+    {
+      "id": "file_complexity_gate",
+      "description": "PreToolUse gate: block Write/Edit that would push a file past 500 lines (complexity signal), unless exempt or a substantive file-complexity-waiver is present.",
+      "source": "claude/hooks/file_complexity_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Not yet ported to Codex; Claude-only PreToolUse gate."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Write|Edit",
+              "command": "python3 ~/.claude/hooks/file_complexity_gate.py",
+              "timeout": 5000
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_file_complexity_gate.py"
+          ]
+        }
+      }
     }
   ],
   "distribution": {
