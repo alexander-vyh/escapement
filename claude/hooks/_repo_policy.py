@@ -97,3 +97,46 @@ def resolve_ceiling(cwd: str) -> str:
         return DEFAULT_CEILING
 
     return value
+
+
+def set_ceiling(cwd: str, tier: str) -> str:
+    """Write ``git_completion_ceiling=tier`` to ``<git_root>/.claude/repo-policy.json``
+    for the repo containing ``cwd``; return the file path.
+
+    The tier is validated BEFORE the filesystem is touched, so an invalid tier
+    writes nothing. Raises ValueError on an invalid tier, or when ``cwd`` is not
+    inside a git repository (the ceiling is repo-scoped, so a root is required).
+    Skipping setup entirely leaves no file — ``resolve_ceiling`` then defaults to
+    ``pr``.
+    """
+    if tier not in VALID_CEILINGS:
+        raise ValueError(f"invalid ceiling {tier!r}; expected one of {VALID_CEILINGS}")
+    root = _git_root(cwd)
+    if root is None:
+        raise ValueError(f"not inside a git repository: {cwd}")
+    policy_dir = Path(root) / ".claude"
+    policy_dir.mkdir(parents=True, exist_ok=True)
+    policy_path = policy_dir / "repo-policy.json"
+    policy_path.write_text(json.dumps({"git_completion_ceiling": tier}, indent=2) + "\n")
+    return str(policy_path)
+
+
+def _main(argv) -> int:
+    """CLI: ``set <local|pr|merge>`` writes the ceiling for the current repo;
+    no args prints the resolved ceiling + usage. Default (skip) → no file → pr."""
+    if len(argv) >= 2 and argv[0] == "set":
+        try:
+            path = set_ceiling(".", argv[1])
+        except ValueError as exc:
+            print(f"set-repo-ceiling: {exc}", file=sys.stderr)
+            return 2
+        print(f"git_completion_ceiling = {argv[1]}  ->  {path}")
+        return 0
+    print(f"git_completion_ceiling = {resolve_ceiling('.')} "
+          "(resolved; defaults to 'pr' when unset)")
+    print("usage: set-repo-ceiling set <local|pr|merge>")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main(sys.argv[1:]))
