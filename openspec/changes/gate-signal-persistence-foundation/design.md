@@ -13,7 +13,7 @@ rule has a half-life") is mechanically unenforceable today.
 
 This change ships the shared infrastructure. Both the
 `openspec-beads-staleness` change's learning loop AND the 9 other
-gate-audit revisions in epic `claude-workflow-setup-3ky` consume it.
+gate-audit revisions in epic `escapement-3ky` consume it.
 Without this foundation, each gate would invent its own signal sink.
 
 ## Riskiest Assumption
@@ -60,9 +60,9 @@ Three concrete tasks in one ~60-minute pass:
 `bd create` operation, `python3 claude/bin/gate_signal_query.py
 --since 1d` returns the corresponding entry with the gate name and
 decision visible, AND `_gate_signal.record()` has a documented API
-that future gate revisions (the 9 in epic claude-workflow-setup-3ky)
+that future gate revisions (the 9 in epic escapement-3ky)
 can adopt by one-line import.
 
-This change supersedes bead `claude-workflow-setup-3ky.2` as the
+This change supersedes bead `escapement-3ky.2` as the
 implementation surface. The bead will be closed pointing here when
 this change ships.

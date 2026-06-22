@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for workflow_status.py — bead claude-workflow-setup-etp.
+"""Tests for workflow_status.py — bead escapement-etp.
 
 Business invariant
 ------------------

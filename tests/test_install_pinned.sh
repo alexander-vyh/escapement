@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test: INSTALL.sh deploys ~/.claude symlinks from a PINNED checkout, not the live
-# working tree (bead claude-workflow-setup-ft1).
+# working tree (bead escapement-ft1).
 #
 # Business invariant: after `INSTALL.sh`, a deployed symlink (e.g. a hook) must
 # resolve into a pinned checkout that is INDEPENDENT of the dev working tree's
@@ -62,7 +62,7 @@ else
 fi
 
 # ===========================================================================
-# B — --update pin-dir drift (bead claude-workflow-setup-egk)
+# B — --update pin-dir drift (bead escapement-egk)
 #
 # A CWS-era machine has ~/.claude/* symlinks resolving into ~/.claude/.cws-pinned.
 # A bare `./INSTALL.sh --update` (no env override) currently refreshes

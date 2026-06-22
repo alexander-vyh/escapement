@@ -1,6 +1,6 @@
 """Watermark-scope the wakeup-blocker gate.
 
-Recovered from a pinned-deploy drift (bead claude-workflow-setup-d1e): a hand-edit
+Recovered from a pinned-deploy drift (bead escapement-d1e): a hand-edit
 in the deployed copy scoped `_check_wakeup_blockers` to session-fresh blocked beads,
 but it never reached main. Ported here with a test.
 

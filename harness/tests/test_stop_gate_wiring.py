@@ -3,7 +3,7 @@
 and the wired gate must actually BLOCK an unverified Stop.
 
 Source / oracle brief: docs/assessments/2026-05-28-critical-assessment.md (B1),
-bead claude-workflow-setup-fxh.1.
+bead escapement-fxh.1.
 
 Business invariant
 ------------------

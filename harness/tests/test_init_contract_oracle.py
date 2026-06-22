@@ -3,7 +3,7 @@
 write time.
 
 Source / oracle brief: docs/assessments/2026-05-28-critical-assessment.md (B3),
-bead claude-workflow-setup-fxh.3.
+bead escapement-fxh.3.
 
 Business invariant
 ------------------

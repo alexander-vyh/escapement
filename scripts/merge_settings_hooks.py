@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Additively merge the template's hooks block into the live settings.json.
 
-Part of the deploy-drift fix (claude-workflow-setup-e9v.8). INSTALL.sh previously
+Part of the deploy-drift fix (escapement-e9v.8). INSTALL.sh previously
 only WARNED that hooks needed manual merging, so newly-registered hooks (e.g.
 bypass_guard) never fired even after their files were symlinked. This makes the
 merge automatic and safe:

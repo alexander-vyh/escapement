@@ -73,7 +73,7 @@ Picking up unrelated backlog items is not a fourth path. If `bd ready` shows tas
 
 A background `Workflow` run is killed at the Claude Code host's task timeout (~13 min, observed 2026-05-29) with **no completion notification** — the parent is silently stranded mid-run. That timeout is a platform limit this repo cannot reconfigure; the mitigation is to make the death *observable* and *recoverable* instead of silent. When you launch a `Workflow` that may exceed ~13 min of wall-clock:
 
-1. **Register a fallback wakeup for it.** `ScheduleWakeup(delaySeconds=<~run estimate + buffer>, reason="watchdog: workflow <runId>", prompt="<resume/check prompt>")`. Since the ScheduleWakeup→Stop-gate bridge now works (bead `claude-workflow-setup-0wg`), this both releases the Stop gate while you wait and re-invokes you when the timer fires.
+1. **Register a fallback wakeup for it.** `ScheduleWakeup(delaySeconds=<~run estimate + buffer>, reason="watchdog: workflow <runId>", prompt="<resume/check prompt>")`. Since the ScheduleWakeup→Stop-gate bridge now works (bead `escapement-0wg`), this both releases the Stop gate while you wait and re-invokes you when the timer fires.
 2. **On re-invocation, classify the run mechanically — do NOT do manual `ps`/file-activity forensics:**
    ```bash
    python3 ~/.claude/harness/bin/workflow_status.py --run <runId>

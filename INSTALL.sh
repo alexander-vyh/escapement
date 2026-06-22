@@ -221,7 +221,7 @@ uninstall_plan() {
 # settings — not merely present on disk. The harness code is symlinked above, but
 # it does nothing unless ~/.claude/settings.json invokes stop_hook.py under Stop.
 # This catches the distribution-drift bug where a user symlinks the harness but
-# forgets to merge the Stop block (bead claude-workflow-setup-fxh.1).
+# forgets to merge the Stop block (bead escapement-fxh.1).
 verify_stop_gate_wired() {
   local settings="$CLAUDE_DIR/settings.json"
   if [[ ! -f "$settings" ]]; then

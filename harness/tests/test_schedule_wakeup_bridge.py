@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for schedule_wakeup_bridge.py — bead claude-workflow-setup-0wg.
+"""Tests for schedule_wakeup_bridge.py — bead escapement-0wg.
 
 Business invariant
 ------------------

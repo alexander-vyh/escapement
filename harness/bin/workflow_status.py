@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mechanical death-detection for background Workflow runs.
 
-Bead: claude-workflow-setup-etp.
+Bead: escapement-etp.
 
 The problem
 -----------
@@ -9,7 +9,7 @@ A background Workflow process is killed at the host's ~13-min task timeout with
 NO completion notification. The orchestrator only learned of the death via manual
 `ps` + file-activity inspection, then resumed via resumeFromRunId. This tool turns
 that manual forensics into one deterministic command, so a parent agent re-invoked
-by a ScheduleWakeup fallback (bead claude-workflow-setup-0wg) can decide — without
+by a ScheduleWakeup fallback (bead escapement-0wg) can decide — without
 guessing — whether to resume.
 
 What it reads (Claude Code on-disk artifacts, observed 2026-05-30)

@@ -6,7 +6,7 @@ disagree. This document is the **read-side source-of-truth map**: when you need 
 what the **reconciliation rule** is when two of them disagree.
 
 > This is the companion to the write-side work that collapsed triplicate *authoring*
-> (`claude-workflow-setup-fxh.10` — the bead declares its oracle once, and the harness
+> (`escapement-fxh.10` — the bead declares its oracle once, and the harness
 > contract is *derived* from it). That work reduced how often the trackers can drift.
 > This document covers the case that remains: reading a fact when drift has already
 > happened.
@@ -119,14 +119,14 @@ Two distinct failure modes, both real (see `outcome-ownership.md` § Child-Closu
 **Reconciliation:** before closing any parent, read the parent's *own* description and
 acceptance criterion, confirm every named seam maps to a closed child, and run the
 parent's own oracle. The `epic_coverage_gate.py` hook enforces the coverage half of
-this at `bd close <epic>` time (`claude-workflow-setup-g0u`).
+this at `bd close <epic>` time (`escapement-g0u`).
 
 ---
 
 ## Two known cross-tracker conflicts (read-side)
 
 These are not hypothetical — they are the specific seams this bead
-(`claude-workflow-setup-c3i`) was filed to document. Each is a place where one tracker
+(`escapement-c3i`) was filed to document. Each is a place where one tracker
 *structurally cannot see* a fact another tracker owns.
 
 ### Conflict 1 — the shirking gate vs. the harness's blocker-bead escape
@@ -157,7 +157,7 @@ captured to the signal log.
   **not** treat the gate's block as evidence the work is *not* blocked — beads owns that
   fact, not the gate.
 
-> **Write-side fix (delivered 2026-05-29, `claude-workflow-setup-c3i`):**
+> **Write-side fix (delivered 2026-05-29, `escapement-c3i`):**
 > `validate_no_shirking.py` now recognizes a freshly-filed blocker bead as a first-class
 > non-user escape. When a shirking phrase matches *and* the turn carries a **structural**
 > blocker-bead filing signal — a `bd create` invocation, a filing verb collocated with
@@ -169,7 +169,7 @@ captured to the signal log.
 
 ### Conflict 2 — gate-signal is a single point of failure in `.beads/`
 
-**The tension (resolved 2026-05-29, `claude-workflow-setup-c3i`).** Every signal-emitting
+**The tension (resolved 2026-05-29, `escapement-c3i`).** Every signal-emitting
 gate writes to `.beads/.gate-signal.jsonl` via `claude/hooks/_gate_signal.py`. Previously,
 when no `.beads/` directory was locatable (no `BEADS_DIR` env var and none found walking up
 from CWD), `record()` **silently no-opped** — returning without writing and without raising,
@@ -187,7 +187,7 @@ never raises and never blocks a gate decision.
   of gate firings** — the gates still fired and still blocked; they just left no record.
 - **Reconciliation:** never read an empty or missing `.gate-signal.jsonl` as "no gates
   fired here." Read it as "this context could not persist signal." A half-life review
-  (`claude/bin/gate_signal_analysis.py`, `claude-workflow-setup-cas`) run against a
+  (`claude/bin/gate_signal_analysis.py`, `escapement-cas`) run against a
   no-`.beads/` context will correctly print a zero-row notice and exit 0 — that zero is
   a *measurement gap*, not a measured zero.
 

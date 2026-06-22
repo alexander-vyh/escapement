@@ -1,4 +1,4 @@
-"""Behavioral tests for epic_coverage_gate.py (bead claude-workflow-setup-g0u).
+"""Behavioral tests for epic_coverage_gate.py (bead escapement-g0u).
 
 The gate fires as PreToolUse on `bd close <epic>` and blocks the close if the
 epic (a) carries no own acceptance oracle, or (b) names seams in its

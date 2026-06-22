@@ -3,7 +3,7 @@
 
 A contract's ``verification_command`` is the agent's to write, so an agent can
 reach exit 0 by GUTTING the check instead of fixing the work — the never-suppress
-violation relocated to the contract oracle (claude-workflow-setup-e9v.2). The
+violation relocated to the contract oracle (escapement-e9v.2). The
 harness Stop gate uses this to refuse to count a suppressed green as a real pass.
 
 Conservative by design: flag only UNAMBIGUOUS self-neutering —

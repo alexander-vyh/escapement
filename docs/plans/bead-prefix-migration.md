@@ -72,3 +72,41 @@ The migration is one git commit + a beads DB change. To roll back:
 
 - Historical git commit messages and PR titles keep the old `claude-workflow-setup-*`
   IDs. This is a historical record, not a live reference; accepted.
+
+## Post-execution notes (executed 2026-06-22)
+
+The prepared script (Step 1 per-issue `bd rename` + Step 2 file sweep) was
+**necessary but not sufficient** on bd 1.0.5. Step 3 (`bd config set issue-prefix`)
+is also **rejected by bd** (`issue_prefix cannot be set via 'bd config set'`). Four
+gaps surfaced during execution; all were resolved:
+
+1. **Registered prefix (critical).** `bd rename` changes issue IDs but NOT the
+   prefix new `bd create` uses — that lives in the Dolt `config` table
+   (`issue_prefix`), not `.beads/config.yaml` (which is `bd init`-only). After the
+   156 renames, a probe `bd create` still produced `claude-workflow-setup-*`. Fixed
+   with `dolt sql -q "UPDATE config SET value='escapement' WHERE \`key\`='issue_prefix'"`
+   (verified: new creates now get `escapement-*`). Note: `bd rename-prefix` cannot
+   set this — it validates a **max 8-char** prefix, and "escapement" is 10; the
+   per-issue path and the direct config write both bypass that validation, and bd
+   accepts the 10-char prefix fine at create time.
+2. **Hidden molecule-gate rows.** 6 `claude-workflow-setup-mol-*` gate issues were
+   excluded from `bd list --all` (bd's detector treats `*-mol` as a separate,
+   hidden prefix family), so the Step-1 loop (sourced from `bd list`) never renamed
+   them. They WERE renameable directly: `bd rename claude-workflow-setup-mol-<x>
+   escapement-mol-<x>` (bd-native, cascades FKs + recomputes content_hash). After
+   renaming, these 6 gates became consistently visible (count 156 → 162); none
+   pollute `bd ready`.
+3. **Dangling `child_counters`.** 14 dead counter rows referenced parents that
+   exist under no prefix (orphaned by past `bd delete`s). Deleted directly (leaf
+   table, no FK dependents).
+4. **Accepted historical residue (NOT rewritten).** The `events` audit table (250
+   rows), `close_reason` prose ("folded into …"), and one task title that literally
+   names the migration ("…claude-workflow-setup- -> escapement-") retain old-prefix
+   strings. These are historical/self-referential and content_hash-bearing —
+   rewriting them buys nothing and risks hash desync. Same principle as the accepted
+   git-history residue above.
+
+**Lesson for re-use:** a per-issue `bd rename` migration must also (a) UPDATE the
+Dolt `config.issue_prefix`, (b) rename hidden `*-mol` rows by querying the `issues`
+table directly (not `bd list`), and (c) sweep dangling `child_counters`. The
+`dependencies` table cascaded automatically via `bd rename`.

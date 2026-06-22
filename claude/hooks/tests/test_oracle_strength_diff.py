@@ -1,6 +1,6 @@
 """Behavioral corpus tests for claude/hooks/oracle_strength_diff.py (walking skeleton).
 
-Bead: claude-workflow-setup-esc (skeleton) under epic -gdf.
+Bead: escapement-esc (skeleton) under epic -gdf.
 Oracle brief: .research/flask4045-control-failure-20260619/09-test-oracle-brief.md
 
 Business invariant (revised 2026-06-20 — advisory-only, NO BLOCK tier)

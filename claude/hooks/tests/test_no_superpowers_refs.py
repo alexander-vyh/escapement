@@ -1,4 +1,4 @@
-"""Regression guard for the superpowers full-disconnect (epic claude-workflow-setup-e3o).
+"""Regression guard for the superpowers full-disconnect (epic escapement-e3o).
 
 After disconnect, production skill/hook source must contain ZERO references to
 `superpowers` — not just `superpowers:` dependency refs but ANY mention, since a

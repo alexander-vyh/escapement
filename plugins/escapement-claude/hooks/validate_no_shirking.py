@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: pre-existing 930-line gate; move-1 retires the verification-evidence machinery (~150 lines) but it stays >500 — full split tracked in claude-workflow-setup-e9v.7
+# file-complexity-waiver: pre-existing 930-line gate; move-1 retires the verification-evidence machinery (~150 lines) but it stays >500 — full split tracked in escapement-e9v.7
 """Claude Code hook: block outcome-shirking ("pre-existing failure" evasion).
 
 Fires as:
@@ -546,7 +546,7 @@ def find_shirking_match(text: str) -> tuple[str, str] | None:
 #   3. a filing verb + a concrete bead id with blocker framing nearby.
 # The bare word "blocker" alone never matches.
 
-# A concrete bead id: <project-slug>-<suffix>, e.g. claude-workflow-setup-z9q,
+# A concrete bead id: <project-slug>-<suffix>, e.g. escapement-z9q,
 # cake-ta5.7. Lowercase alnum/hyphen project, then "-", then an alnum/dot id.
 _BEAD_ID = r"[a-z0-9]+(?:-[a-z0-9]+)*-[a-z0-9]+(?:\.[a-z0-9]+)*"
 

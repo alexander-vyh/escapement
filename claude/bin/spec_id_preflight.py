@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Spec-id referential-integrity preflight.
 
-Bead: claude-workflow-setup-ao0.
+Bead: escapement-ao0.
 
 ## The gap this closes
 

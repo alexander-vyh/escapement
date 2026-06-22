@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: pre-existing 669-line file; this change only wires main() to the extracted oracle_reason_validation sibling module — full responsibility split tracked in claude-workflow-setup-55k
+# file-complexity-waiver: pre-existing 669-line file; this change only wires main() to the extracted oracle_reason_validation sibling module — full responsibility split tracked in escapement-55k
 """Hook gate for rejecting high-confidence implementation-echo tests.
 
 This is intentionally a landing-time scanner. It compares changed tests with
@@ -50,7 +50,7 @@ except ImportError:  # pragma: no cover
         # Fail-open: honor every non-empty override as before.
         return set(overrides), {}
 
-# Magic-number / business-constant echo detector (bead claude-workflow-setup-2o7).
+# Magic-number / business-constant echo detector (bead escapement-2o7).
 try:
     from magic_number_echo import find_magic_number_echoes
 except ImportError:  # pragma: no cover

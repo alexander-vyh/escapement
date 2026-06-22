@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Task-mode gate must not block on whole-repo backlog for an UNSCOPED session
-(bead claude-workflow-setup-e9v.11).
+(bead escapement-e9v.11).
 
 WHY THIS EXISTS
 ---------------
