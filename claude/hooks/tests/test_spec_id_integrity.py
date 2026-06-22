@@ -1,6 +1,6 @@
 """Behavioral tests for the spec-id referential-integrity preflight.
 
-Bead: claude-workflow-setup-ao0.
+Bead: escapement-ao0.
 
 Business invariant
 ------------------

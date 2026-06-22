@@ -45,7 +45,7 @@ def _extract_task_id(command: str) -> Optional[str]:
     if not m:
         return None
     task_id = m.group(1)
-    # Sanity check: beads IDs are alphanumeric + dash (e.g. cake-123, claude-workflow-setup-4ab)
+    # Sanity check: beads IDs are alphanumeric + dash (e.g. cake-123, escapement-4ab)
     if re.match(r'^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$', task_id) or re.match(r'^[A-Za-z0-9]$', task_id):
         return task_id
     return None

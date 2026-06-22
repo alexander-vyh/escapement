@@ -1,6 +1,6 @@
 # Gate Friction Analysis — Lean Pass (2026-05-29)
 
-Tracking bead: `claude-workflow-setup-fxh.12` (epic `fxh`: remediate the 2026-05-28
+Tracking bead: `escapement-fxh.12` (epic `fxh`: remediate the 2026-05-28
 critical assessment). This document is the lean-pass decision record for every
 **confirmed** gate-friction item surfaced by (a) the 2026-05-28 critical assessment
 (`docs/assessments/2026-05-28-critical-assessment.md` §§ 🟡 Bloat / Integration seams /

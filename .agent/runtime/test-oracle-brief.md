@@ -272,7 +272,7 @@ intended friction (a labeled signal), not a trap.
 
 ---
 
-# Test Oracle Brief — worktree-guard escape classes (bead claude-workflow-setup-q0f)
+# Test Oracle Brief — worktree-guard escape classes (bead escapement-q0f)
 
 Three behaviors (A1 detection-escapes, A2 foreign-worktree-operation guard, A3
 stop-gate worktree degradation). All three trace to one incident: a cake session
@@ -446,7 +446,7 @@ false-positive. Both are deliberately surfaced, not hidden.
 
 ---
 
-# Test Oracle Brief — INSTALL.sh --update pin-dir drift (bead claude-workflow-setup-egk)
+# Test Oracle Brief — INSTALL.sh --update pin-dir drift (bead escapement-egk)
 
 RAPID FORM (3-section). Low-blast-radius: one resolution step in `--update`. The
 fragile-implementation challenge (below) passes against the 3-section subset, so the
@@ -642,7 +642,7 @@ inconsistency. Not touched by this change; no tests added for it here.
 
 # Test Oracle Brief — final-review fix batch (B1 / C2 / N)
 
-Bead: claude-workflow-setup-v4u. Source of truth:
+Bead: escapement-v4u. Source of truth:
 `.research/stop-gate-hardening-2026-06-11/09-verify-sonnet-final.md`. Three findings
 from the final adversarial review, pinned tests-first (no production code). Rapid
 3-section form per finding — the fragile-implementation challenge passes against the

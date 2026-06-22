@@ -1,7 +1,7 @@
 # fxh.11 — Pipeline retro: the apparatus on real, non-meta work (cake-ta5)
 
 **Date:** 2026-05-29
-**Spike:** claude-workflow-setup-fxh.11 — "Prove the whole system end-to-end on one
+**Spike:** escapement-fxh.11 — "Prove the whole system end-to-end on one
 real, non-meta task." Closes the assessment's deepest finding: *100% of completed work
 is meta; the system has only ever built itself.*
 **Target (chosen by the user):** `cake-ta5` — Python God-module decomposition in the

@@ -86,7 +86,7 @@ No remaining con blocks the decision. The only live item is execution (#8): do i
 
 > **This supersedes the earlier draft recommendation ("keep-and-override + pin + detection-test").** That rested on the maintenance-analyst's "upstream churns weekly on the coupled files," which the verified per-file history **disproved** (the two would-be-kept skills are near-static; you already hold the latest). With no value in keeping the link, the keep-side cons (#5/#6/#7) collapse and full disconnect dominates. **No pin and no drift-detection-test** are needed — there is no link left to monitor; the one-time *completeness assertion* below replaces them.
 
-### Action set — filed as beads (epic `claude-workflow-setup-e3o`)
+### Action set — filed as beads (epic `escapement-e3o`)
 *All deletion + redirect to own skills; zero vendored copies. One owner for `brainstorming/SKILL.md` to avoid colliding with `a2n`/`ea3` (the triplicate-authoring lean violation flagged 2026-05-28).*
 
 - **`917` (P1, LIVE BUG):** de-number `brainstorming:41`/`:68` to semantic anchors + route `:230` → `Skill(skill="work-breakdown")`. The stale "skip 4-6" mis-instructs the agent *today* (skips propose-approaches; leaves the writing-plans transition at upstream step 9 unsuppressed). Fixes that, resolves the `:43`/`:230` contradiction, and severs the only live edge. **Sequence under one owner with `a2n`/`ea3`.**

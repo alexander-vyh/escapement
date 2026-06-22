@@ -133,7 +133,7 @@ def _verification_passed_this_turn(contract: Optional[dict]) -> bool:
         return False
     if is_suppressed_verification(contract.get("verification_command", "")):
         # A green reached by gutting the check (|| true, bare true, --no-verify,
-        # SKIP=, ...) is not a real pass (move 1b, claude-workflow-setup-e9v.2).
+        # SKIP=, ...) is not a real pass (move 1b, escapement-e9v.2).
         return False
     ts = _parse_iso(last.get("timestamp", ""))
     if ts is None:
@@ -206,7 +206,7 @@ def would_block_stop(thread_state: dict) -> Tuple[str, str]:
         # Fresh exit-0, but the verify command was gutted (|| true, bare true,
         # --no-verify, ...). Distinct reason so the block explains the COMMAND is
         # the problem — not a missing run — instead of looping the agent on a
-        # generic "unverified" message (move 1b, claude-workflow-setup-e9v.2).
+        # generic "unverified" message (move 1b, escapement-e9v.2).
         return ("block", "verification_suppressed")
     if contract is None:
         # No contract = no committed task in flight = conversational. Stopping is

@@ -72,7 +72,7 @@ cat "$TMP_OUT"
 
 if [[ $ACTUAL_EXIT -eq $EXPECTED_EXIT ]]; then
   # Tracked work completed: self-cancel this thread's ScheduleWakeup wakeups so a
-  # stale fallback can't replay a finished task list (bead claude-workflow-setup-0wg,
+  # stale fallback can't replay a finished task list (bead escapement-0wg,
   # part 2). Best-effort; never let pruning affect the verify result.
   _BRIDGE="$(cd "$(dirname "$0")" && pwd)/schedule_wakeup_bridge.py"
   [[ -f "$_BRIDGE" ]] && python3 "$_BRIDGE" --prune "$THREAD_DIR" >/dev/null 2>&1 || true

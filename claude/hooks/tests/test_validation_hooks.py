@@ -148,7 +148,7 @@ class TestSpecIdEnforcement:
     def test_invalid_spec_id_denies_and_does_not_crash_open(self):
         """A non-resolving --spec-id under mol-feature must DENY, not crash open.
 
-        Regression (claude-workflow-setup-fhl): the invalid-spec-id deny branch
+        Regression (escapement-fhl): the invalid-spec-id deny branch
         built its message as an f-string containing `{minlen}` *plus* a trailing
         `.format(minlen=_WAIVER_MIN_LEN)`. The f-string evaluated `{minlen}` at
         once -> NameError; main() exited non-zero (fail-open), so a wrong-path /
@@ -210,7 +210,7 @@ class TestSpecIdEnforcement:
     def test_is_mol_feature_parent_handles_bd_show_list_shape(self):
         """is_mol_feature_parent must unwrap the LIST shape `bd show --json` emits.
 
-        Regression (claude-workflow-setup-1l7): current `bd` returns a single-element
+        Regression (escapement-1l7): current `bd` returns a single-element
         JSON array `[{...}]` from `bd show <id> --json`, not a bare object. The
         detection passed that list straight to `_check_issue_for_mol_feature`, which
         called `.get()` on it -> AttributeError. The exception escaped
@@ -334,7 +334,7 @@ class TestSpecIdEnforcement:
 
 # ===========================================================================
 # Standard waiver convention: dedicated .gate-waivers.jsonl corpus
-# (claude-workflow-setup-8dm — gate-design.md "Standard waiver convention")
+# (escapement-8dm — gate-design.md "Standard waiver convention")
 # ===========================================================================
 
 class TestWaiverCorpus:

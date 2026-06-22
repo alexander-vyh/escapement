@@ -1,6 +1,6 @@
 # Gate Session-Scope Model
 
-**Bead:** `claude-workflow-setup-858`
+**Bead:** `escapement-858`
 **Status:** design (panel `scope-panel`: architect / adversary / bureaucracy / implementer)
 **Lands after:** PRs #12 (worktree false-allow), #13 (Stop messages drive continuation), #14 (validate_no_shirking ignores prose/docs edits).
 **Problem framing:** see `problem-framing.md` (confirmed by team-lead).

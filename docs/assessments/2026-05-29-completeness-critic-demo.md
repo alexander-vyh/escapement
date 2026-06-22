@@ -1,8 +1,8 @@
 # Completeness-Critic Stage — Demonstration (q90)
 
 **Date:** 2026-05-29
-**Bead:** `claude-workflow-setup-q90` — *Improve adversarial critique method: kill misstatements AND surface gaps/understatements*
-**Companion:** `claude-workflow-setup-fxh.10` (the finding this demo surfaces unprompted)
+**Bead:** `escapement-q90` — *Improve adversarial critique method: kill misstatements AND surface gaps/understatements*
+**Companion:** `escapement-fxh.10` (the finding this demo surfaces unprompted)
 
 ## What q90 fixed
 

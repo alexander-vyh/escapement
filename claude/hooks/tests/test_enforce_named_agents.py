@@ -284,7 +284,7 @@ class TestEscapePath:
 
 # ---------------------------------------------------------------------------
 # CI environment — missing-name block must still fire
-# (regression: claude-workflow-setup-3lq — CI env must not swallow the
+# (regression: escapement-3lq — CI env must not swallow the
 # anonymous-agent hard block)
 # ---------------------------------------------------------------------------
 

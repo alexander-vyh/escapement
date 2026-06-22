@@ -1,6 +1,6 @@
 # Problem Framing — Gate Session-Scope Model
 
-**Bead:** `claude-workflow-setup-858`. Confirmed inputs to discovery. Source: the
+**Bead:** `escapement-858`. Confirmed inputs to discovery. Source: the
 `scope-panel` charter from the team-lead this session, restating a live false-positive
 incident in the continuation-harness Stop gate. This framing restates the handed-down
 incident — it is not a fresh inference.

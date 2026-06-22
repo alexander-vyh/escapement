@@ -42,7 +42,7 @@ A one-word user out — "just answer" / "skip" — suppresses the Probe for that
 When you fire a Probe, append one record via `claude/hooks/_gate_signal.py`
 `record(...)`: gate `why-drilling`, decision `probe-fired` | `probe-empty` |
 `escape-used`, with the why excerpt. This is rule-based (not a hook), so it relies
-on compliance; the **observe phase** (`claude-workflow-setup-7ki`) tests whether the
+on compliance; the **observe phase** (`escapement-7ki`) tests whether the
 empty-fire rate stays low enough to keep the Probe on. If it fires emptily on plain
 lookups or the user disables it → Depth-1 does not ship.
 
@@ -56,7 +56,7 @@ lookups or the user disables it → Depth-1 does not ship.
 
 ## Status
 
-Depth-1 of the why-drilling engine (epic `claude-workflow-setup-a2n`). Depth-2
+Depth-1 of the why-drilling engine (epic `escapement-a2n`). Depth-2
 (Drill / root-cause) and Depth-3 (Grill / full interview) are follow-ups, gated
 behind real multi-agent dispatch. Engine extraction deferred until Depth-1 proves
 useful in the observe phase.

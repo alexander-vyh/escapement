@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PostToolUse:ScheduleWakeup bridge for the continuation-harness.
 
-Bead: claude-workflow-setup-0wg.
+Bead: escapement-0wg.
 
 The problem
 -----------

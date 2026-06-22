@@ -100,12 +100,12 @@ cross-session red-boundary deadlock stop recurring), named not hidden.
   detected. The *actively-editing* peer — the one whose WIP actually reddens the
   tree — ends turns frequently and stays fresh; the gap is a long-idle peer.
   Closing it fully needs a heartbeat refresh on tool-use (a frequently-firing
-  hook), deferred to bead `claude-workflow-setup-e9v.9`.
+  hook), deferred to bead `escapement-e9v.9`.
 - *Unresolved session id.* When `CLAUDE_CODE_SESSION_ID` is absent, two sessions
   both fall back to `threads/current/` and `colliding_sessions` skips
   falsy-id records — detection goes blind exactly when id resolution fails. This
   is inherited `thread_dir_for_session` fragility; robustifying it is bead
-  `claude-workflow-setup-e9v.10`.
+  `escapement-e9v.10`.
 
 ## Still v0.1+
 

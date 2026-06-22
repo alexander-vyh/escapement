@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """fxh.10 — derive a harness contract from a bead with ZERO additional hand-authoring.
 
-Source / oracle brief: bead claude-workflow-setup-fxh.10 (epic ...-fxh).
+Source / oracle brief: bead escapement-fxh.10 (epic ...-fxh).
 
 Business invariant
 ------------------
@@ -73,7 +73,7 @@ ORACLE_CMD = "python3 -m pytest harness/tests/test_contract_derivation.py -q"
 
 def _bead(acceptance: str, title: str = "Derive harness contract from a bead") -> dict:
     return {
-        "id": "claude-workflow-setup-fxh.10",
+        "id": "escapement-fxh.10",
         "title": title,
         "description": "Collapse triplicate authoring.",
         "acceptance_criteria": acceptance,

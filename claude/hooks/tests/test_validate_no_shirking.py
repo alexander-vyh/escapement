@@ -685,7 +685,7 @@ class TestNewShirkingPatterns:
 
 
 # NOTE: the transcript-based verification-evidence gate was RETIRED in move-1
-# (claude-workflow-setup-e9v.2). Its job — block a Stop when code changed but the
+# (escapement-e9v.2). Its job — block a Stop when code changed but the
 # outcome wasn't really verified — is now owned by the continuation-harness contract
 # gate, which reads the REAL exit code (harness/tests/test_gate.py: a contract with
 # exit_code=1 blocks the Stop). That is a stronger oracle than command-presence.
@@ -896,7 +896,7 @@ class TestBlockerBeadEscapeUnit:
     def test_concrete_bead_id_with_blocker_framing_detected(self):
         from validate_no_shirking import filed_blocker_bead
         assert filed_blocker_bead(
-            "Created claude-workflow-setup-z9q as a blocker documenting why this "
+            "Created escapement-z9q as a blocker documenting why this "
             "cannot be completed in this session."
         ) is True
 
@@ -964,7 +964,7 @@ class TestMainBlockerBeadEscape:
         """Escape applies on the PreToolUse (commit) path too."""
         transcript = _make_transcript(
             "The failure is unrelated to my changes and needs schema access I lack. "
-            "Filed blocker bead claude-workflow-setup-z9q documenting why."
+            "Filed blocker bead escapement-z9q documenting why."
         )
         try:
             denied = _run_main(

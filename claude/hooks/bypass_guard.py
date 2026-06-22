@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse gate: deny finishing commands that DISABLE verification hooks.
 
-Part of the outcome-shirking rework (bead claude-workflow-setup-e9v, move 2). The
+Part of the outcome-shirking rework (bead escapement-e9v, move 2). The
 hard outcome standard ("ship verified-working code or you failed") is hollow if an
 agent can silently switch the verification off. This guard closes that seam.
 
