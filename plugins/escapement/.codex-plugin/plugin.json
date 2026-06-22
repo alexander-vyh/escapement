@@ -8,7 +8,7 @@
   },
   "homepage": "https://github.com/alexander-vyh/escapement",
   "repository": "https://github.com/alexander-vyh/escapement",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "keywords": [
     "workflow",
     "oracle",

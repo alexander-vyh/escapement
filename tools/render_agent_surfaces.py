@@ -159,7 +159,7 @@ def _render_codex_plugin_manifest() -> str:
         },
         "homepage": "https://github.com/alexander-vyh/escapement",
         "repository": "https://github.com/alexander-vyh/escapement",
-        "license": "MIT",
+        "license": "GPL-3.0-or-later",
         "keywords": [
             "workflow",
             "oracle",
@@ -292,7 +292,7 @@ def _render_claude_plugin_manifest() -> str:
         "author": {"name": "alexander-vyh"},
         "repository": "https://github.com/alexander-vyh/escapement",
         "homepage": "https://github.com/alexander-vyh/escapement",
-        "license": "MIT",
+        "license": "GPL-3.0-or-later",
         "keywords": [
             "workflow",
             "beads",
