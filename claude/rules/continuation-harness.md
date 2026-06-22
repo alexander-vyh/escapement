@@ -87,6 +87,36 @@ The residual platform fix (the runtime emitting its own death signal / raising t
 
 If you are not done and not scheduled to return, you are not stopping. Action without outcomes (more tool calls, more subagent dispatches, more bead-claims) does not substitute for proof of completion or proof of resumption. See `feedback/outcome-bias-over-action-bias` memory for the underlying principle.
 
+## Git completion ceiling (per-repo)
+
+How far an agent may take work is a **per-repo** setting. A repo declares its ceiling
+in `.claude/repo-policy.json`:
+
+```json
+{"git_completion_ceiling": "local"}
+```
+
+The named tier is the **highest allowed action**; the cap blocks anything above it:
+
+| Ceiling | Agent may… | Blocked |
+|---------|------------|---------|
+| `local` | commit only | `git push` |
+| `pr` *(default when unset)* | commit, push, open a PR | merge |
+| `merge` | commit, push, merge | — |
+
+**The ceiling is both floor and cap** — it defines the per-repo completion target.
+escapement drives work *up to* the ceiling; `ceiling_push_cap.py` (PreToolUse) blocks
+anything *past* it. So in a `local` repo, **stopping after a commit is a complete
+outcome, not shirking** — which is why this lives in the continuation rule. An
+unconfigured repo defaults to `pr`; absence never blocks a push.
+
+- **Set it:** `set-repo-ceiling set <local|pr|merge>` (writes `repo-policy.json` at the
+  git root). Skip it → no file → `pr`.
+- **Override a block** (gate-design Rule 1): prefix the command with
+  `CEILING_WAIVER="<substantive reason>"` — recorded as a waiver signal.
+
+Design + specs: `openspec/changes/git-completion-ceiling/`.
+
 ## Status
 
 This rule is paired with the continuation-harness (May 2026). Code installs to `~/.claude/harness/bin/` (deployed by `INSTALL.sh` from the repo's `harness/` source); runtime state lives in `~/.claude/harness/` and is keyed per session (`threads/{session_id}/`) so concurrent agents never clobber each other. The full spec lives in the repo at `openspec/changes/continuation-harness/`. Still v0.1+: full 57-stall regression test, the launchd waker that actually fires scheduled wakeups, bead-derived contracts, and the supervisor daemon.
