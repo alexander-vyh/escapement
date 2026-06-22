@@ -362,6 +362,24 @@
           }
         ],
         "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/bypass_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ceiling_push_cap.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
       }
     ],
     "SessionStart": [
