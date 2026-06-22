@@ -308,7 +308,7 @@ def run_isolation() -> int:
 def run_portability() -> int:
     """Portability invariant: no harness script may hardcode the author's repo
     path. That hardcoding is exactly what made the harness non-installable —
-    it only worked at ~/GitHub/claude-workflow-setup. Static check over source.
+    it only worked at ~/GitHub/escapement. Static check over source.
     """
     results = []
     bindir = HARNESS_ROOT / "bin"
@@ -320,14 +320,14 @@ def run_portability() -> int:
             text = f.read_text()
         except (OSError, UnicodeDecodeError):
             continue
-        if "claude-workflow-setup/harness" in text or "GitHub/claude-workflow-setup" in text:
+        if "escapement/harness" in text or "GitHub/escapement" in text:
             offenders.append(f.name)
     _assert(not offenders, f"no harness script hardcodes the repo path (offenders: {offenders})", results)
 
     # Default state root resolves to the standard per-user location, not a repo.
     from would_block_stop import DEFAULT_HARNESS_ROOT  # noqa: E402
     s = str(DEFAULT_HARNESS_ROOT)
-    _assert("GitHub" not in s and "claude-workflow-setup" not in s,
+    _assert("GitHub" not in s and "escapement" not in s,
             "default state root is not inside the repo / GitHub tree", results)
 
     passed = sum(1 for ok, _ in results if ok)

@@ -17,7 +17,7 @@
 #       ~/.config/beads-backup/owned-remotes.txt   (e.g. your team's simplifi repos)
 #   - override per-invocation: `bd-init --mine`  or  `bd-init --theirs`
 #
-# Canonical copy in claude-workflow-setup/scripts/; symlinked to ~/.local/bin.
+# Canonical copy in escapement/scripts/; symlinked to ~/.local/bin.
 set -uo pipefail
 BD="${BD_BIN:-$(command -v bd || echo /opt/homebrew/bin/bd)}"
 OWNED_PATTERNS_FILE="${BEADS_OWNED_REMOTES:-$HOME/.config/beads-backup/owned-remotes.txt}"

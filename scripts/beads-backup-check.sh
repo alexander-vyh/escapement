@@ -9,7 +9,7 @@
 # This is an OUTCOME oracle, not an existence check: a touched-but-empty file from
 # a failed export is caught by (2), and a local-only commit is caught by (3).
 #
-# Canonical copy in claude-workflow-setup/scripts/; symlinked to ~/.local/bin.
+# Canonical copy in escapement/scripts/; symlinked to ~/.local/bin.
 set -uo pipefail
 
 BACKUP_CLONE="${BEADS_BACKUP_CLONE:-$HOME/.local/share/beads-backup}"

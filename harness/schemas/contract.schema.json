@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://claude-workflow-setup/harness/schemas/contract.schema.json",
+  "$id": "https://escapement/harness/schemas/contract.schema.json",
   "title": "Contract",
   "description": "Per-task outcome contract — the agent declares what 'done' means before its first implementation tool call. Gate enforces by running verification_command and comparing exit code to expected_exit.",
   "type": "object",

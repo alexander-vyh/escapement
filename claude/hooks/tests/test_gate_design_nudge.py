@@ -77,8 +77,8 @@ def _run(tool_name: str, file_path: str) -> tuple[int, dict, str]:
 # ---------------------------------------------------------------------------
 
 _GATE_PATHS = [
-    "/Users/x/GitHub/claude-workflow-setup/claude/hooks/foo_gate.py",
-    "/Users/x/GitHub/claude-workflow-setup/claude/hooks/some_guard.py",
+    "/Users/x/GitHub/escapement/claude/hooks/foo_gate.py",
+    "/Users/x/GitHub/escapement/claude/hooks/some_guard.py",
     "claude/hooks/discovery-gate.py",
     "/repo/claude/settings.template.json",
     "/repo/some/path/spec_id_enforcement_gate.py",
