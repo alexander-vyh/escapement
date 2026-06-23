@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# harness/bin/verify
+# Agent's verification affordance. Reads contract.json from the active thread,
+# runs verification_command, writes the result back as last_run, exits with
+# the same code as the verification command.
+#
+# v0.1: thread dir is keyed by CLAUDE_CODE_SESSION_ID so concurrent sessions /
+# named subagents working the same repo don't collide on a shared contract.
+# Resolution must match would_block_stop.thread_dir_for_session():
+#   1. HARNESS_THREAD_DIR override
+#   2. sanitized CLAUDE_CODE_SESSION_ID -> threads/{session_id}
+#   3. fallback                          -> threads/current
+
+set -u
+
+# Standard per-user state root (env-overridable); never a repo path.
+HARNESS_ROOT="${HARNESS_ROOT:-${CONTINUATION_HARNESS_HOME:-$HOME/.claude/harness}}"
+if [[ -n "${HARNESS_THREAD_DIR:-}" ]]; then
+  THREAD_DIR="$HARNESS_THREAD_DIR"
+elif [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+  SID="$(printf '%s' "$CLAUDE_CODE_SESSION_ID" | tr -cd 'A-Za-z0-9_-' | cut -c1-128)"
+  if [[ -n "$SID" ]]; then
+    THREAD_DIR="$HARNESS_ROOT/threads/$SID"
+  else
+    THREAD_DIR="$HARNESS_ROOT/threads/current"
+  fi
+else
+  THREAD_DIR="$HARNESS_ROOT/threads/current"
+fi
+CONTRACT="$THREAD_DIR/contract.json"
+
+if [[ ! -f "$CONTRACT" ]]; then
+  echo "verify: no contract.json at $CONTRACT" >&2
+  echo "verify: declare a contract first (e.g. via init_contract.py)" >&2
+  exit 2
+fi
+
+VERIFICATION_COMMAND="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("verification_command",""))' "$CONTRACT")"
+EXPECTED_EXIT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("expected_exit",0))' "$CONTRACT")"
+
+if [[ -z "$VERIFICATION_COMMAND" ]]; then
+  echo "verify: contract has no verification_command" >&2
+  exit 2
+fi
+
+TMP_OUT="$(mktemp)"
+trap 'rm -f "$TMP_OUT"' EXIT
+
+bash -c "$VERIFICATION_COMMAND" >"$TMP_OUT" 2>&1
+ACTUAL_EXIT=$?
+TIMESTAMP="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
+
+python3 - "$CONTRACT" "$ACTUAL_EXIT" "$TIMESTAMP" "$TMP_OUT" <<'PY'
+import json
+import sys
+
+path, exit_code, timestamp, out_path = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+with open(out_path) as f:
+    excerpt = f.read(4096)
+with open(path) as f:
+    c = json.load(f)
+c["last_run"] = {
+    "exit_code": exit_code,
+    "timestamp": timestamp,
+    "output_excerpt": excerpt,
+}
+with open(path, "w") as f:
+    json.dump(c, f, indent=2)
+PY
+
+cat "$TMP_OUT"
+
+if [[ $ACTUAL_EXIT -eq $EXPECTED_EXIT ]]; then
+  # Tracked work completed: self-cancel this thread's ScheduleWakeup wakeups so a
+  # stale fallback can't replay a finished task list (bead escapement-0wg,
+  # part 2). Best-effort; never let pruning affect the verify result.
+  _BRIDGE="$(cd "$(dirname "$0")" && pwd)/schedule_wakeup_bridge.py"
+  [[ -f "$_BRIDGE" ]] && python3 "$_BRIDGE" --prune "$THREAD_DIR" >/dev/null 2>&1 || true
+  echo "verify: PASS (exit $ACTUAL_EXIT)"
+  exit 0
+fi
+
+echo "verify: FAIL (exit $ACTUAL_EXIT, expected $EXPECTED_EXIT)"
+exit "$ACTUAL_EXIT"

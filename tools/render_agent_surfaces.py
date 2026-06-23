@@ -231,19 +231,27 @@ def _codex_ready_hook_sources(manifest: dict[str, Any]) -> set[str]:
     }
 
 
+# Deployed-path -> vendored-plugin-path rewrites. Order matters: the more
+# specific harness/bin prefix is checked before the generic hooks prefix.
+# Args after the script (e.g. `--quiet`) are preserved.
+_PLUGIN_PATH_REWRITES = (
+    ("~/.claude/harness/bin/", "${CLAUDE_PLUGIN_ROOT}/harness/bin/"),
+    ("~/.claude/hooks/", "${CLAUDE_PLUGIN_ROOT}/hooks/"),
+)
+
+
 def _claude_plugin_command(command: str) -> str:
-    # Rewrite a ~/.claude/hooks/<script> command to the vendored plugin path
-    # ${CLAUDE_PLUGIN_ROOT}/hooks/<script>. Non-hook commands (e.g. `bd prime`)
-    # pass through unchanged.
-    prefix = "~/.claude/hooks/"
-    if prefix not in command:
-        return command
-    head, tail = command.split(prefix, 1)
-    script, sep, rest = tail.partition(" ")
-    rebuilt = f'{head}"${{CLAUDE_PLUGIN_ROOT}}/hooks/{script}"'
-    if sep:
-        rebuilt += " " + rest
-    return rebuilt
+    # Rewrite a deployed ~/.claude/{hooks,harness/bin}/<script> command to its
+    # vendored plugin path. Non-hook commands (e.g. `bd prime`) pass through.
+    for prefix, repl in _PLUGIN_PATH_REWRITES:
+        if prefix in command:
+            head, tail = command.split(prefix, 1)
+            script, sep, rest = tail.partition(" ")
+            rebuilt = f'{head}"{repl}{script}"'
+            if sep:
+                rebuilt += " " + rest
+            return rebuilt
+    return command
 
 
 def _render_claude_plugin_hooks(manifest: dict[str, Any]) -> str:
@@ -393,9 +401,22 @@ def rendered_targets(root: Path, manifest: dict[str, Any]) -> dict[Path, str]:
     if claude_hook_sources:
         claude_hook_sources.add("claude/hooks/_gate_signal.py")
     for source in sorted(claude_hook_sources):
+        # harness/* sources are vendored wholesale into harness/ below, not flat into hooks/.
+        if source.startswith("harness/"):
+            continue
         source_path = root / source
         if source_path.exists():
             targets[root / CLAUDE_PLUGIN_ROOT / "hooks" / Path(source).name] = source_path.read_text(encoding="utf-8")
+
+    # Bundle the continuation-harness (bin + schemas) so its hooks run from the
+    # plugin via ${CLAUDE_PLUGIN_ROOT}/harness/bin. Runtime STATE still resolves to
+    # ~/.claude/harness (DEFAULT_HARNESS_ROOT), independent of this read-only code.
+    for sub in ("bin", "schemas"):
+        src_dir = root / "harness" / sub
+        for hpath in sorted(src_dir.glob("*")):
+            if hpath.is_file():
+                targets[root / CLAUDE_PLUGIN_ROOT / "harness" / sub / hpath.name] = \
+                    hpath.read_text(encoding="utf-8")
 
     return targets
 

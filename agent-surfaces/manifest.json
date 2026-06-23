@@ -1125,6 +1125,102 @@
           ]
         }
       }
+    },
+    {
+      "id": "schedule_wakeup_bridge",
+      "description": "PostToolUse: bridge a ScheduleWakeup tool call into a harness wakeup registration so the Stop gate honors it.",
+      "source": "harness/bin/schedule_wakeup_bridge.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Continuation-harness hook not yet validated for the Codex plugin surface."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "ScheduleWakeup",
+              "command": "python3 ~/.claude/harness/bin/schedule_wakeup_bridge.py"
+            }
+          ],
+          "fixtures": [
+            "harness/tests/test_schedule_wakeup_bridge.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "task_mode_entry",
+      "description": "PreToolUse: continuation-harness task-mode entry gate on Bash.",
+      "source": "harness/bin/task_mode_entry.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Continuation-harness hook not yet validated for the Codex plugin surface."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 ~/.claude/harness/bin/task_mode_entry.py"
+            }
+          ],
+          "fixtures": [
+            "harness/tests/test_task_mode_scope.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "session_watermark",
+      "description": "SessionStart: stamp the per-session continuation-harness watermark.",
+      "source": "harness/bin/session_watermark.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Continuation-harness hook not yet validated for the Codex plugin surface."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 ~/.claude/harness/bin/session_watermark.py"
+            }
+          ],
+          "fixtures": [
+            "harness/tests/test_session_watermark.py"
+          ]
+        }
+      }
+    },
+    {
+      "id": "reconcile_incidents",
+      "description": "SessionStart: reconcile harness incident log against current state.",
+      "source": "harness/bin/reconcile_incidents.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Continuation-harness hook not yet validated for the Codex plugin surface."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 ~/.claude/harness/bin/reconcile_incidents.py --quiet"
+            }
+          ],
+          "fixtures": [
+            "harness/tests/test_reconcile_incidents.py"
+          ]
+        }
+      }
     }
   ],
   "distribution": {

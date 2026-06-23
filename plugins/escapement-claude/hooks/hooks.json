@@ -36,6 +36,15 @@
           }
         ],
         "matcher": "Edit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/harness/bin/schedule_wakeup_bridge.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "ScheduleWakeup"
       }
     ],
     "PreToolUse": [
@@ -389,6 +398,15 @@
           }
         ],
         "matcher": "Write|Edit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/harness/bin/task_mode_entry.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
       }
     ],
     "SessionStart": [
@@ -440,6 +458,24 @@
       {
         "hooks": [
           {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/harness/bin/session_watermark.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/harness/bin/reconcile_incidents.py\" --quiet",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/inject-rules.sh\"",
             "type": "command"
           }
@@ -451,7 +487,7 @@
       {
         "hooks": [
           {
-            "command": "python3 ~/.claude/harness/bin/stop_hook.py",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/harness/bin/stop_hook.py\"",
             "type": "command"
           }
         ],
