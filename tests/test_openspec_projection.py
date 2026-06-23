@@ -247,3 +247,45 @@ def test_unresolved_placeholder_fails_closed():
     )
     with pytest.raises(ProjectionError):
         project_op(bad, "claude")
+
+
+# --- SC6 #orphan-governance: committed surfaces must be canon-governed -----------
+def _ungoverned_committed_surfaces():
+    """Committed .claude opsx/openspec surfaces not declared as a target by any
+    canon file in agent-surfaces/openspec/ -- i.e. ungoverned orphans the migration
+    could leave stale (loading live on Claude, divergent from canon)."""
+    governed = set()
+    for canon in sorted((ROOT / CANON_DIR).glob("*.md")):
+        for target in parse_canon(canon.read_text(encoding="utf-8")).get("targets", {}).values():
+            governed.add(target)
+    violations = []
+    for cmd in sorted((ROOT / ".claude" / "commands" / "opsx").glob("*.md")):
+        if cmd.relative_to(ROOT).as_posix() not in governed:
+            violations.append(cmd.relative_to(ROOT).as_posix())
+    for skill in sorted((ROOT / ".claude" / "skills").glob("openspec-*")):
+        rel = skill.relative_to(ROOT).as_posix()
+        skill_md = (skill / "SKILL.md").relative_to(ROOT).as_posix()
+        if rel not in governed and skill_md not in governed:
+            violations.append(rel)
+    return violations
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "RED-first governance oracle (spec escapement-mol-741.13 #orphan-governance). "
+        "At HEAD only archive's command is canon-governed; the other committed .claude "
+        "opsx/openspec surfaces are ungoverned orphans. Goes green when the "
+        "consolidate-openspec-surfaces migration adopts every op into "
+        "agent-surfaces/openspec/ canon (or git-rm's the orphan). strict=True flags the "
+        "xpass once that lands -- remove this marker then."
+    ),
+)
+def test_committed_opsx_surfaces_are_canon_governed():
+    violations = _ungoverned_committed_surfaces()
+    # Negative control: archive's command IS canon-governed today, so it must NOT appear.
+    assert ".claude/commands/opsx/archive.md" not in violations
+    assert not violations, (
+        "committed .claude opsx/openspec surfaces governed by no canon target: "
+        f"{violations}"
+    )
