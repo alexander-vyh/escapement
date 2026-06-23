@@ -463,17 +463,6 @@ def _claude_skill_status_violations():
     return unsupported_but_live, ready_but_unrendered
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RED-first oracle. The manifest marks the four openspec-* skills "
-        "claude=unsupported yet they load live under .claude/skills/ (the 'manifest "
-        "lie'). Fixed by the consolidate-openspec-surfaces change (bead "
-        "escapement-mol-741, spec escapement-mol-741.10 #manifest-bidirectional-fidelity). "
-        "strict=True means this becomes a FAILURE (xpass) once the consolidation lands -- "
-        "remove this marker then; the test is a permanent green guard thereafter."
-    ),
-)
 def test_manifest_claude_status_matches_filesystem():
     """Bidirectional manifest<->filesystem fidelity (spec escapement-mol-741.10,
     requirement #manifest-bidirectional-fidelity).

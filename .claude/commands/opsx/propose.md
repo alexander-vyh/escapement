@@ -1,7 +1,7 @@
 ---
 name: "OPSX: Propose"
-description: Propose a new change - create it and generate all artifacts in one step
-category: Workflow
+description: "Propose a new change - create it and generate all artifacts in one step"
+category: "Workflow"
 tags: [workflow, artifacts, experimental]
 ---
 
@@ -20,7 +20,7 @@ When ready to implement, run /opsx:apply
 
 **Steps**
 
-1. **If no input provided, ask what they want to build**
+1. **If no clear input provided, ask what they want to build**
 
    Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
    > "What change do you want to work on? Describe what you want to build or fix."
@@ -86,7 +86,7 @@ After completing all artifacts, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
-- Prompt: "Run `/opsx:apply` to start implementing."
+- Prompt: "Run `/opsx:apply` or ask me to implement to start working on the tasks."
 
 **Artifact Creation Guidelines**
 

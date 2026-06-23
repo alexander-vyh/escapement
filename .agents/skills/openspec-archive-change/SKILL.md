@@ -1,12 +1,8 @@
 ---
-name: openspec-archive-change
-description: Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete.
-license: MIT
-compatibility: Requires openspec CLI.
-metadata:
-  author: openspec
-  version: "1.0"
-  generatedBy: "1.2.0"
+name: "openspec-archive-change"
+description: "Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete."
+license: "MIT"
+compatibility: "Requires openspec CLI."
 ---
 
 Archive a completed change in the experimental workflow.
@@ -50,7 +46,14 @@ Archive a completed change in the experimental workflow.
 
    **If no tasks file exists:** Proceed without task-related warning.
 
-4. **Assess delta spec sync state**
+4. **Track the archive in beads**
+
+   Ensure the project work being archived has a bead. Create a bead if none exists,
+   update the relevant bead's status, and close the bead for the completed work as
+   part of finalizing the archive. Treat `tasks.md` as artifact-state only — bead
+   state is the authority for project tracking.
+
+5. **Assess delta spec sync state**
 
    Check for delta specs at `openspec/changes/<name>/specs/`. If none exist, proceed without sync prompt.
 
@@ -63,11 +66,9 @@ Archive a completed change in the experimental workflow.
    - If changes needed: "Sync now (recommended)", "Archive without syncing"
    - If already synced: "Archive now", "Sync anyway", "Cancel"
 
-   If user chooses sync, perform the sync directly in this session or create a
-   bead for the sync work before archiving. Proceed to archive only after the
-   sync decision is resolved.
+   If user chooses sync, perform the sync directly in this session or create a bead for the sync work before archiving. Proceed to archive only after the sync decision is resolved.
 
-5. **Perform the archive**
+6. **Perform the archive**
 
    Create the archive directory if it doesn't exist:
    ```bash
@@ -84,13 +85,14 @@ Archive a completed change in the experimental workflow.
    mv openspec/changes/<name> openspec/changes/archive/YYYY-MM-DD-<name>
    ```
 
-6. **Display summary**
+7. **Display summary**
 
    Show archive completion summary including:
    - Change name
    - Schema that was used
    - Archive location
    - Whether specs were synced (if applicable)
+   - Bead IDs updated or closed for the archived work
    - Note about any warnings (incomplete artifacts/tasks)
 
 **Output On Success**

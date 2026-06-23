@@ -270,17 +270,6 @@ def _ungoverned_committed_surfaces():
     return violations
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RED-first governance oracle (spec escapement-mol-741.13 #orphan-governance). "
-        "At HEAD only archive's command is canon-governed; the other committed .claude "
-        "opsx/openspec surfaces are ungoverned orphans. Goes green when the "
-        "consolidate-openspec-surfaces migration adopts every op into "
-        "agent-surfaces/openspec/ canon (or git-rm's the orphan). strict=True flags the "
-        "xpass once that lands -- remove this marker then."
-    ),
-)
 def test_committed_opsx_surfaces_are_canon_governed():
     violations = _ungoverned_committed_surfaces()
     # Negative control: archive's command IS canon-governed today, so it must NOT appear.
@@ -289,3 +278,36 @@ def test_committed_opsx_surfaces_are_canon_governed():
         "committed .claude opsx/openspec surfaces governed by no canon target: "
         f"{violations}"
     )
+
+
+# --- canon is writer-of-record: live surfaces == projection -------------------
+def _canon_ops():
+    return sorted(p.stem for p in (ROOT / CANON_DIR).glob("*.md"))
+
+
+def test_live_surfaces_match_canon_projection():
+    """Writer-of-record: every live host surface is byte-identical to project_op(canon,
+    host). Catches any hand-edit drift after the consolidation -- canon is authoritative."""
+    mismatches = []
+    for op in _canon_ops():
+        canon = (ROOT / CANON_DIR / f"{op}.md").read_text(encoding="utf-8")
+        for host, target in parse_canon(canon).get("targets", {}).items():
+            live = (ROOT / target).read_text(encoding="utf-8")
+            if live != project_op(canon, host):
+                mismatches.append(f"{op}:{host} ({target})")
+    assert not mismatches, f"live surfaces drifted from canon projection: {mismatches}"
+
+
+def test_every_op_has_per_host_invocation_path():
+    """SC4: every op retains a host-appropriate invocation path on each supported host
+    (a Claude command target AND a Codex skill target), both existing on disk.
+    Negative control of 'amputate a host' -- a union-over-hosts check would miss it."""
+    missing = []
+    for op in _canon_ops():
+        canon = (ROOT / CANON_DIR / f"{op}.md").read_text(encoding="utf-8")
+        targets = parse_canon(canon).get("targets", {})
+        for host in ("claude", "codex"):
+            target = targets.get(host)
+            if not target or not (ROOT / target).exists():
+                missing.append(f"{op}:{host}")
+    assert not missing, f"ops missing a host invocation path: {missing}"
