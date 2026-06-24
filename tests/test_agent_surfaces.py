@@ -442,3 +442,47 @@ def copy_repo(tmp_path):
         ignore=shutil.ignore_patterns(".git", ".worktrees", "__pycache__", ".pytest_cache"),
     )
     return temp_root
+
+
+def _claude_skill_status_violations():
+    """Skills whose manifest claude.status disagrees with the filesystem.
+
+    Returns (unsupported_but_live, ready_but_unrendered).
+    """
+    manifest = json.loads(MANIFEST.read_text())
+    unsupported_but_live = []
+    ready_but_unrendered = []
+    for skill in manifest["skills"]:
+        sid = skill["id"]
+        status = skill.get("hosts", {}).get("claude", {}).get("status")
+        live = (ROOT / ".claude" / "skills" / sid).is_dir()
+        if status == "unsupported" and live:
+            unsupported_but_live.append(sid)
+        elif status == "ready" and not live:
+            ready_but_unrendered.append(sid)
+    return unsupported_but_live, ready_but_unrendered
+
+
+def test_manifest_claude_status_matches_filesystem():
+    """Bidirectional manifest<->filesystem fidelity (spec escapement-mol-741.10,
+    requirement #manifest-bidirectional-fidelity).
+
+    NEGATIVE direction: a skill marked claude=unsupported must NOT load live under
+    .claude/skills/ (else the manifest lies about what Claude actually loads).
+    POSITIVE direction: a skill marked claude=ready must trace to a live Claude surface.
+
+    Negative control: source-command-opsx-* are claude=unsupported AND absent from
+    .claude/skills/, so a correct oracle must NOT flag them -- proving it catches the
+    real lie (the openspec-* skills), not merely 'any unsupported skill'.
+    """
+    unsupported_but_live, ready_but_unrendered = _claude_skill_status_violations()
+    # Negative control: a correctly-modeled unsupported-and-absent skill is not flagged.
+    assert "source-command-opsx-apply" not in unsupported_but_live
+    assert not unsupported_but_live, (
+        "manifest marks these claude=unsupported but they load live under .claude/skills/: "
+        f"{unsupported_but_live}"
+    )
+    assert not ready_but_unrendered, (
+        "manifest marks these claude=ready but no live .claude/skills/ surface exists: "
+        f"{ready_but_unrendered}"
+    )

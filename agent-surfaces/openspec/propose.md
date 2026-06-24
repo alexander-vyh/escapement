@@ -1,14 +1,37 @@
 ---
-name: "source-command-opsx-propose"
-description: "Propose a new change - create it and generate all artifacts in one step"
+op: propose
+slots:
+  input_source:
+    claude: "The argument after `/opsx:propose` is the change name (kebab-case), OR a description of what the user wants to build."
+    codex: "The user's request should include a change name (kebab-case) OR a description of what they want to build."
+  no_input_prompt:
+    claude: "Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:"
+    codex: "Ask the user directly:"
+  progress_tracking:
+    claude: "Use the **TodoWrite tool** to track progress through the artifacts."
+    codex: "Track implementation/work state in `bd`."
+  clarify_prompt:
+    claude: "Use **AskUserQuestion tool** to clarify"
+    codex: "Ask the user directly to clarify"
+targets:
+  claude: .claude/commands/opsx/propose.md
+  codex: .agents/skills/openspec-propose/SKILL.md
+frontmatter:
+  claude:
+    name: "OPSX: Propose"
+    description: Propose a new change - create it and generate all artifacts in one step
+    category: Workflow
+    tags: "[workflow, artifacts, experimental]"
+  codex:
+    name: openspec-propose
+    description: Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation.
+    license: GPL-3.0-or-later
+    compatibility: Requires openspec CLI.
+    metadata:
+      author: openspec
+      version: "1.0"
+      generatedBy: "1.2.0"
 ---
-
-# source-command-opsx-propose
-
-Use this skill when the user asks to run the migrated source command `opsx-propose`.
-
-## Command Template
-
 Propose a new change - create the change and generate all artifacts in one step.
 
 I'll create a change with artifacts:
@@ -20,13 +43,13 @@ When ready to implement, run /opsx:apply
 
 ---
 
-**Input**: The argument after `/opsx:propose` is the change name (kebab-case), OR a description of what the user wants to build.
+**Input**: {{slot:input_source}}
 
 **Steps**
 
-1. **If no input provided, ask what they want to build**
+1. **If no clear input provided, ask what they want to build**
 
-   Ask the user directly:
+   {{slot:no_input_prompt}}
    > "What change do you want to work on? Describe what you want to build or fix."
 
    From their description, derive a kebab-case name (e.g., "add user authentication" → `add-user-auth`).
@@ -49,7 +72,7 @@ When ready to implement, run /opsx:apply
 
 4. **Create artifacts in sequence until apply-ready**
 
-   Track implementation/work state in `bd`.
+   {{slot:progress_tracking}}
 
    Loop through artifacts in dependency order (artifacts with no pending dependencies first):
 
@@ -76,7 +99,7 @@ When ready to implement, run /opsx:apply
       - Stop when all `applyRequires` artifacts are done
 
    c. **If an artifact requires user input** (unclear context):
-      - Ask the user directly to clarify
+      - {{slot:clarify_prompt}}
       - Then continue with creation
 
 5. **Show final status**
@@ -90,7 +113,7 @@ After completing all artifacts, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
-- Prompt: "Run `/opsx:apply` to start implementing."
+- Prompt: "Run `/opsx:apply` or ask me to implement to start working on the tasks."
 
 **Artifact Creation Guidelines**
 

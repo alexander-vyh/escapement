@@ -1293,58 +1293,6 @@
           "unsupported_reason": "Claude uses .claude/skills in this increment."
         }
       }
-    },
-    {
-      "id": "source-command-opsx-apply",
-      "target": ".agents/skills/source-command-opsx-apply/SKILL.md",
-      "hosts": {
-        "codex": {
-          "status": "ready"
-        },
-        "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses .claude/commands in this increment."
-        }
-      }
-    },
-    {
-      "id": "source-command-opsx-archive",
-      "target": ".agents/skills/source-command-opsx-archive/SKILL.md",
-      "hosts": {
-        "codex": {
-          "status": "ready"
-        },
-        "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses .claude/commands in this increment."
-        }
-      }
-    },
-    {
-      "id": "source-command-opsx-explore",
-      "target": ".agents/skills/source-command-opsx-explore/SKILL.md",
-      "hosts": {
-        "codex": {
-          "status": "ready"
-        },
-        "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses .claude/commands in this increment."
-        }
-      }
-    },
-    {
-      "id": "source-command-opsx-propose",
-      "target": ".agents/skills/source-command-opsx-propose/SKILL.md",
-      "hosts": {
-        "codex": {
-          "status": "ready"
-        },
-        "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses .claude/commands in this increment."
-        }
-      }
     }
   ]
 }

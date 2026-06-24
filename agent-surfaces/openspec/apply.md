@@ -1,17 +1,31 @@
 ---
-name: "source-command-opsx-apply"
-description: "Implement tasks from an OpenSpec change (Experimental)"
+op: apply
+slots:
+  selection_prompt:
+    claude: "If ambiguous, run `openspec list --json` to get available changes and use the **AskUserQuestion tool** to let the user select."
+    codex: "If ambiguous, run `openspec list --json` to get available changes and ask the user directly to select."
+targets:
+  claude: .claude/commands/opsx/apply.md
+  codex: .agents/skills/openspec-apply-change/SKILL.md
+frontmatter:
+  claude:
+    name: "OPSX: Apply"
+    description: Implement tasks from an OpenSpec change (Experimental)
+    category: Workflow
+    tags: "[workflow, artifacts, experimental]"
+  codex:
+    name: openspec-apply-change
+    description: Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks.
+    license: GPL-3.0-or-later
+    compatibility: Requires openspec CLI.
+    metadata:
+      author: openspec
+      version: "1.0"
+      generatedBy: "1.2.0"
 ---
-
-# source-command-opsx-apply
-
-Use this skill when the user asks to run the migrated source command `opsx-apply`.
-
-## Command Template
-
 Implement tasks from an OpenSpec change.
 
-**Input**: Optionally specify a change name (e.g., `/opsx:apply add-auth`). If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
+**Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
 
 **Steps**
 
@@ -20,9 +34,9 @@ Implement tasks from an OpenSpec change.
    If a name is provided, use it. Otherwise:
    - Infer from conversation context if the user mentioned a change
    - Auto-select if only one active change exists
-   - If ambiguous, run `openspec list --json` to get available changes and ask the user directly to select
+   - {{slot:selection_prompt}}
 
-   Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
+   Always announce: "Using change: <name>" and how to override.
 
 2. **Check status to understand the schema**
    ```bash
@@ -39,13 +53,13 @@ Implement tasks from an OpenSpec change.
    ```
 
    This returns:
-   - Context file paths (varies by schema)
+   - Context file paths (varies by schema - could be proposal/specs/design/tasks or spec/tests/implementation/docs)
    - Progress (total, complete, remaining)
    - Task list with status
    - Dynamic instruction based on current state
 
    **Handle states:**
-   - If `state: "blocked"` (missing artifacts): show message, suggest using `/opsx:continue`
+   - If `state: "blocked"` (missing artifacts): show which artifacts are missing and suggest creating them before applying
    - If `state: "all_done"`: congratulate, suggest archive
    - Otherwise: proceed to implementation
 
@@ -120,7 +134,7 @@ Working on task 4/7: <task description>
 - [x] Task 2
 ...
 
-All tasks complete! You can archive this change with `/opsx:archive`.
+All tasks complete! Ready to archive this change.
 ```
 
 **Output On Pause (Issue Encountered)**
@@ -150,6 +164,7 @@ What would you like to do?
 - If implementation reveals issues, pause and suggest artifact updates
 - Keep code changes minimal and scoped to each task
 - Update task checkbox immediately after completing each task
+- Treat `tasks.md` as artifact-state only — bead state is the authority for project tracking
 - Pause on errors, blockers, or unclear requirements - don't guess
 - Use contextFiles from CLI output, don't assume specific file names
 
