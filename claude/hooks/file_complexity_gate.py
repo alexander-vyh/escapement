@@ -1,32 +1,47 @@
 #!/usr/bin/env python3
-"""PreToolUse gate: block Write/Edit that would push a file past 500 lines.
+"""PreToolUse gate: two-tier file-length control (soft guidance + hard stop).
 
-500 lines is a complexity signal, not just a LOC count. A file at that length
-almost always holds more than one responsibility and becomes hard to navigate,
-review, and test atomically. LOC is the practical proxy; the real concern is
-coupling between concerns that are better separated into sibling modules.
+Line count is a weak, pragmatic proxy — not a defect/edit-reliability measurement.
+The research behind this gate (.research/file-complexity-gate-2026-06-23/) found no
+evidence for a defect-reducing file-LOC ceiling; the honest rationale is that >500
+lines *correlates* with two real concerns this repo cares about:
+  • Humans: the file likely holds more than one responsibility and gets hard to
+    review and navigate atomically.
+  • Agents: large files inflate the working set; LLM edit reliability degrades as the
+    edit target grows (line-number mis-targeting, weaker localization — see arXiv
+    2602.16069, 2506.13186). Successful agent edits keep the working set small.
+
+Two tiers:
+  SOFT_LIMIT (500)  — exceed → non-blocking `systemMessage` nudge (allowed). A poor
+                      proxy, but >500 LOC is where the concerns above start to bite.
+  HARD_LIMIT (1000) — exceed → deny (blocked), human-overridable by waiver.
 
 Exemptions (fail-open on detection failure):
   Path fragments: /vendor/, /node_modules/, /migrations/, /generated/,
                   /testdata/, /fixtures/, /.beads/, /dist/, /build/
-  File suffixes:  .pb.go, _pb2.py, .min.js, .min.css, .snap, .lock,
-                  -lock.json, .md, .txt, .rst
+  File suffixes:  generated code (.pb.go, _pb2.py, _pb2_grpc.py, .gen.go, .g.dart,
+                  .freezed.dart, .generated.ts/.js, .pb.cc, .pb.h, go.sum, .min.js,
+                  .min.css, .snap, .lock, -lock.json) and passive data/docs
+                  (.json, .yaml, .yml, .csv, .tsv, .svg, .ipynb, .geojson, .md,
+                  .txt, .rst) — "extract a sibling module" is meaningless for these.
   Waiver comment: one of the first 5 lines contains
-                  `# file-complexity-waiver: <reason>` (or //, --, /* variants)
+                  `# file-complexity-waiver: <reason>` (or //, --, /* variants).
+                  Suppresses BOTH tiers (an acknowledged file is not nagged).
   Env var:        FILE_COMPLEXITY_WAIVER=<reason>
 
 Escape path IN the denial (gate-design rule 1):
   Extract a cohesive responsibility into a sibling module, OR add a waiver.
 
 Signal (gate-design rule 2):
-  Emits to _gate_signal with gate_name='file-complexity'.
+  Emits to _gate_signal with gate_name='file-complexity', decision one of
+  soft-nudge | deny | waiver-accepted.
 
 Value-not-presence (gate-design rule 3):
   Waiver must be non-empty after the colon; bare marker is rejected.
 
 Exit codes:
-  0  — pass (under limit, exempt, or waiver present)
-  2  — deny (would exceed 500 lines)
+  0  — pass (under soft limit, exempt, waiver) or soft nudge (allowed, with message)
+  2  — deny (would exceed the hard limit)
 """
 
 from __future__ import annotations
@@ -35,7 +50,8 @@ import json
 import os
 import sys
 
-LIMIT = 500
+SOFT_LIMIT = 500
+HARD_LIMIT = 1000
 
 _EXEMPT_PATH_FRAGMENTS = (
     "/vendor/",
@@ -50,13 +66,32 @@ _EXEMPT_PATH_FRAGMENTS = (
 )
 
 _EXEMPT_SUFFIXES = (
+    # generated code
     ".pb.go",
+    ".pb.cc",
+    ".pb.h",
     "_pb2.py",
+    "_pb2_grpc.py",
+    ".gen.go",
+    ".g.dart",
+    ".freezed.dart",
+    ".generated.ts",
+    ".generated.js",
+    "go.sum",
     ".min.js",
     ".min.css",
     ".snap",
     ".lock",
     "-lock.json",
+    # passive data / docs (no logic to extract into a sibling module)
+    ".json",
+    ".yaml",
+    ".yml",
+    ".csv",
+    ".tsv",
+    ".svg",
+    ".ipynb",
+    ".geojson",
     ".md",
     ".txt",
     ".rst",
@@ -92,6 +127,24 @@ def _has_waiver(first_lines: list[str]) -> bool:
     return False
 
 
+def decide(projected: int, file_path: str, first_lines: list[str]) -> str:
+    """Pure decision core. Returns one of:
+    exempt | pass | waiver | soft | hard.
+
+    Ordering matters: exemption first, then the silent-pass band, then waiver
+    (which suppresses both the soft nudge and the hard block), then the tiers.
+    """
+    if _is_exempt(file_path):
+        return "exempt"
+    if projected <= SOFT_LIMIT:
+        return "pass"
+    if _has_waiver(first_lines):
+        return "waiver"
+    if projected <= HARD_LIMIT:
+        return "soft"
+    return "hard"
+
+
 def _emit_signal(decision: str, file_path: str, projected: int) -> None:
     try:
         hooks_dir = os.path.dirname(os.path.abspath(__file__))
@@ -101,7 +154,8 @@ def _emit_signal(decision: str, file_path: str, projected: int) -> None:
         record(
             gate_name="file-complexity",
             decision=decision,
-            reason=f"{file_path}: projected {projected} lines (limit {LIMIT})",
+            reason=f"{file_path}: projected {projected} lines "
+                   f"(soft {SOFT_LIMIT} / hard {HARD_LIMIT})",
             file=file_path,
             projected_lines=projected,
         )
@@ -109,17 +163,36 @@ def _emit_signal(decision: str, file_path: str, projected: int) -> None:
         pass  # signal capture must never block the gate
 
 
-def _deny_response(file_path: str, projected: int) -> dict:
+def build_soft_message(file_path: str, projected: int) -> str:
+    """Non-blocking guidance shown at the soft tier — framed for humans AND agents."""
+    name = os.path.basename(file_path)
+    return (
+        f"{name} is {projected} lines — past the {SOFT_LIMIT}-line guidance threshold "
+        f"(soft nudge, not a block; hard stop is {HARD_LIMIT}). Line count is a rough "
+        f"proxy for two real concerns:\n"
+        f"  • Humans: a file this long usually holds more than one responsibility and "
+        f"becomes hard to review and navigate.\n"
+        f"  • Agents: large files inflate the working set; LLM edit reliability falls as "
+        f"the edit target grows (more line-number mis-targeting, weaker localization).\n"
+        f"Consider extracting a cohesive responsibility into a sibling module."
+    )
+
+
+def deny_response(file_path: str, projected: int) -> dict:
+    """Blocking response at the hard tier — carries the human override path."""
     name = os.path.basename(file_path)
     return {
         "permissionDecision": "deny",
         "denyReason": (
-            f"{name} would be {projected} lines — a signal it holds too many responsibilities.\n"
-            f"Files over {LIMIT} lines become hard to navigate, review, and test atomically.\n\n"
+            f"{name} would be {projected} lines — past the {HARD_LIMIT}-line hard limit "
+            f"(guidance starts at {SOFT_LIMIT}).\n"
+            f"Files this large hurt both reviewers (multiple responsibilities, hard to "
+            f"review atomically) and agents (working set too large; edit-target ambiguity "
+            f"and line-number errors rise sharply).\n\n"
             f"Fix: extract a cohesive responsibility into a sibling module before writing here.\n"
             f"Exempt paths: vendor/, node_modules/, migrations/, generated/, fixtures/, dist/, build/\n"
-            f"Bypass: add `# file-complexity-waiver: <reason>` in the first 5 lines of the file,\n"
-            f"        or set FILE_COMPLEXITY_WAIVER=<reason> in the environment."
+            f"Human override: add `# file-complexity-waiver: <reason>` in the first 5 lines of "
+            f"the file, or set FILE_COMPLEXITY_WAIVER=<reason> in the environment."
         ),
     }
 
@@ -140,7 +213,7 @@ def main() -> int:
 
     file_path = tool_input.get("file_path", "")
     if not file_path or _is_exempt(file_path):
-        return 0
+        return 0  # exempt short-circuit: skip the file read entirely
 
     try:
         if tool_name == "Write":
@@ -163,15 +236,23 @@ def main() -> int:
     except Exception:
         return 0  # fail-open on any unexpected error
 
-    if projected <= LIMIT:
+    decision = decide(projected, file_path, first_lines)
+
+    if decision in ("exempt", "pass"):
         return 0
 
-    if _has_waiver(first_lines):
+    if decision == "waiver":
         _emit_signal("waiver-accepted", file_path, projected)
         return 0
 
+    if decision == "soft":
+        _emit_signal("soft-nudge", file_path, projected)
+        json.dump({"systemMessage": build_soft_message(file_path, projected)}, sys.stdout)
+        return 0
+
+    # decision == "hard"
     _emit_signal("deny", file_path, projected)
-    json.dump(_deny_response(file_path, projected), sys.stdout)
+    json.dump(deny_response(file_path, projected), sys.stdout)
     return 2
 
 
