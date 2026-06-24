@@ -198,21 +198,35 @@ def test_ordinary_source_over_hard_is_not_exempt():
 
 # --- Message framing: human AND agent goals at both tiers -----------------
 
-def test_soft_message_names_both_audiences():
+def test_soft_message_names_both_audiences_and_nonloc_complexity():
     _, decision = run_hook(_write_payload("/repo/src/big.py", 700))
     msg = decision["systemMessage"].lower()
+    # both audiences
     assert "human" in msg or "review" in msg
     assert "agent" in msg
-    assert "1000" in msg   # tells you where the hard stop is
+    # proxy framing + thresholds (the "why")
+    assert "proxy" in msg
+    assert "1000" in msg   # where the hard stop is
     assert "700" in msg    # the actual projected size
+    # non-LOC complexity signals the message must call out
+    assert "complexity" in msg
+    assert "function" in msg                 # function size / nesting
+    assert "duplicat" in msg                 # near-duplicate / edit-target ambiguity
+    assert "24" in msg and "100" in msg      # human vs agent function-length thresholds
 
 
-def test_hard_denial_names_both_audiences_and_override():
+def test_hard_denial_names_both_audiences_override_and_nonloc_complexity():
     _, decision = run_hook(_write_payload("/repo/src/big.py", 1300))
     reason = decision["denyReason"].lower()
     assert "agent" in reason and ("human" in reason or "review" in reason)
-    assert "1000" in reason   # the limit crossed
+    assert "1000" in reason    # the limit crossed
     assert "waiver" in reason  # the human override path
+    # proxy framing + non-LOC complexity signals
+    assert "proxy" in reason
+    assert "complexity" in reason
+    assert "function" in reason
+    assert "duplicat" in reason
+    assert "24" in reason and "100" in reason
 
 
 # --- Non-target tools and malformed input fail open -----------------------

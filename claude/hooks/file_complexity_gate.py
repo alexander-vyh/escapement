@@ -164,17 +164,30 @@ def _emit_signal(decision: str, file_path: str, projected: int) -> None:
 
 
 def build_soft_message(file_path: str, projected: int) -> str:
-    """Non-blocking guidance shown at the soft tier — framed for humans AND agents."""
+    """Non-blocking guidance shown at the soft tier — framed for humans AND agents.
+
+    Line count is only a proxy; the message names the real (non-LOC) complexity
+    signals it stands in for and why each matters, so the reader can judge whether
+    to split or waive rather than react to the number.
+    """
     name = os.path.basename(file_path)
     return (
         f"{name} is {projected} lines — past the {SOFT_LIMIT}-line guidance threshold "
-        f"(soft nudge, not a block; hard stop is {HARD_LIMIT}). Line count is a rough "
-        f"proxy for two real concerns:\n"
-        f"  • Humans: a file this long usually holds more than one responsibility and "
-        f"becomes hard to review and navigate.\n"
-        f"  • Agents: large files inflate the working set; LLM edit reliability falls as "
-        f"the edit target grows (more line-number mis-targeting, weaker localization).\n"
-        f"Consider extracting a cohesive responsibility into a sibling module."
+        f"(soft nudge, not a block; hard stop is {HARD_LIMIT}).\n"
+        f"Line count is only a PROXY — the real concern is complexity and coupling, not "
+        f"lines. The signals it stands in for:\n"
+        f"  • Responsibilities / coupling: length usually means several concerns have "
+        f"accreted. Split by concern, not by line count.\n"
+        f"  • Function size & nesting: humans lose the thread past ~24 lines per function, "
+        f"LLM edit reliability past ~100. A long or deeply-nested function matters more "
+        f"than total file length — this is where cyclomatic/cognitive complexity lives.\n"
+        f"  • Near-duplicate blocks: repeated similar spans make edits mis-target the "
+        f"wrong instance — the dominant agent edit-failure mode (no line count sees it).\n"
+        f"  • Working set: big files inflate the tokens an agent must hold; edit success "
+        f"correlates with keeping the edited surface small.\n"
+        f"Why a nudge, not a block: LOC is weak evidence — a long but flat, cohesive file "
+        f"can be fine (waiver it). If it is long because it does many things, extract a "
+        f"cohesive responsibility into a sibling module."
     )
 
 
@@ -186,13 +199,20 @@ def deny_response(file_path: str, projected: int) -> dict:
         "denyReason": (
             f"{name} would be {projected} lines — past the {HARD_LIMIT}-line hard limit "
             f"(guidance starts at {SOFT_LIMIT}).\n"
-            f"Files this large hurt both reviewers (multiple responsibilities, hard to "
-            f"review atomically) and agents (working set too large; edit-target ambiguity "
-            f"and line-number errors rise sharply).\n\n"
+            f"Line count is a proxy, but at this size the complexity signals it stands in "
+            f"for are almost certainly present:\n"
+            f"  • Multiple responsibilities / high coupling — hard for humans to review "
+            f"atomically.\n"
+            f"  • Long or deeply-nested functions (humans ~24 lines, agents ~100) and "
+            f"near-duplicate blocks that make edits mis-target the wrong instance — the "
+            f"dominant agent edit-failure mode, and where cyclomatic/cognitive complexity "
+            f"actually lives (no line count sees it).\n"
+            f"  • A working set too large for reliable agent edits (line-number errors rise).\n\n"
             f"Fix: extract a cohesive responsibility into a sibling module before writing here.\n"
             f"Exempt paths: vendor/, node_modules/, migrations/, generated/, fixtures/, dist/, build/\n"
-            f"Human override: add `# file-complexity-waiver: <reason>` in the first 5 lines of "
-            f"the file, or set FILE_COMPLEXITY_WAIVER=<reason> in the environment."
+            f"Human override (e.g. a long but flat, cohesive, or generated-like file): add "
+            f"`# file-complexity-waiver: <reason>` in the first 5 lines, or set "
+            f"FILE_COMPLEXITY_WAIVER=<reason> in the environment."
         ),
     }
 
