@@ -95,6 +95,7 @@ def parse_canon(text: str) -> dict:
     section: str | None = None  # "slots" | "targets" | "frontmatter"
     cur_slot: str | None = None  # within slots: the slot name (2-indent key)
     cur_host: str | None = None  # within frontmatter: the host (2-indent key)
+    cur_nested: list | None = None  # within frontmatter: an open nested map (e.g. metadata)
 
     for raw in fm_text.splitlines():
         if not raw.strip():
@@ -137,11 +138,24 @@ def parse_canon(text: str) -> dict:
         elif section == "frontmatter":
             if indent == 2:
                 cur_host = key
+                cur_nested = None
                 frontmatter[cur_host] = []
             elif indent == 4:
                 if cur_host is None:
                     raise ProjectionError("frontmatter key before any host")
-                frontmatter[cur_host].append((key, _strip_value(val)))
+                if val == "":
+                    # Opens a nested map (e.g. `metadata:`); 6-indent lines fill it.
+                    cur_nested = []
+                    frontmatter[cur_host].append((key, cur_nested))
+                else:
+                    cur_nested = None
+                    frontmatter[cur_host].append((key, _strip_value(val)))
+            elif indent == 6:
+                if cur_nested is None:
+                    raise ProjectionError(
+                        f"6-indent frontmatter line outside a nested map: {raw!r}"
+                    )
+                cur_nested.append((key, _strip_value(val)))
             else:
                 raise ProjectionError(f"unexpected indent in frontmatter: {raw!r}")
         else:
@@ -166,8 +180,13 @@ def _emit_frontmatter(pairs: list[tuple[str, str]]) -> str:
     """
     lines = ["---"]
     for key, value in pairs:
-        # tags is an inline list literal in the source surfaces; emit unquoted.
-        if value.startswith("[") and value.endswith("]"):
+        if isinstance(value, list):
+            # Nested map (e.g. metadata: author/version/generatedBy).
+            lines.append(f"{key}:")
+            for subkey, subval in value:
+                lines.append(f'  {subkey}: "{subval}"')
+        elif value.startswith("[") and value.endswith("]"):
+            # tags is an inline list literal in the source surfaces; emit unquoted.
             lines.append(f"{key}: {value}")
         else:
             lines.append(f'{key}: "{value}"')

@@ -311,3 +311,20 @@ def test_every_op_has_per_host_invocation_path():
             if not target or not (ROOT / target).exists():
                 missing.append(f"{op}:{host}")
     assert not missing, f"ops missing a host invocation path: {missing}"
+
+
+def test_codex_surfaces_preserve_upstream_vendor_anchor():
+    """Non-Goal 3 / SC8: each Codex skill must carry the upstream-vendor anchor
+    (metadata.generatedBy) so a future re-vendor from the openspec CLI can re-apply
+    escapement's overlay. Guards against silently re-dropping it. Claude commands do
+    NOT carry it (they are not the vendored skill surface) -- negative control."""
+    missing = []
+    leaked = []
+    for op in _canon_ops():
+        canon = (ROOT / CANON_DIR / f"{op}.md").read_text(encoding="utf-8")
+        if "generatedBy" not in project_op(canon, "codex"):
+            missing.append(op)
+        if "generatedBy" in project_op(canon, "claude"):
+            leaked.append(op)
+    assert not missing, f"Codex surfaces dropped the vendor anchor (generatedBy): {missing}"
+    assert not leaked, f"Claude commands wrongly carry the skill vendor anchor: {leaked}"
