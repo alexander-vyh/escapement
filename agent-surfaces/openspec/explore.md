@@ -16,7 +16,7 @@ frontmatter:
   codex:
     name: openspec-explore
     description: Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change.
-    license: MIT
+    license: GPL-3.0-or-later
     compatibility: Requires openspec CLI.
     metadata:
       author: openspec
