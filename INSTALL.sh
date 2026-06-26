@@ -372,7 +372,8 @@ elif [[ "$MODE" == "install" ]]; then
   echo "    1. Merged hook entries from claude/settings.template.json into your"
   echo "       ~/.claude/settings.json automatically; review env blocks manually."
   echo "    2. Read claude/rules/*.md and edit to match your philosophy."
-  echo "    3. Open Claude Code in a git repo under ~/GitHub/ to trigger bootstrap."
+  echo "    3. Open Claude Code in any git repo to trigger bootstrap."
+  echo "       Optional: set ESCAPEMENT_BOOTSTRAP_ROOTS=/path/a:/path/b to limit it."
   [[ "$DEV_MODE" == true ]] || echo "    NOTE: harness/hook edits go live after they reach main + './INSTALL.sh --update'."
   echo
   echo "==> verifying continuation-harness Stop gate wiring"

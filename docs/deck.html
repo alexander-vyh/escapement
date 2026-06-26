@@ -642,8 +642,8 @@ after execute-full     production code + passing tests
   </div>
 
   <div class="warn">
-    <strong>Path assumptions.</strong>
-    Bootstrap script is gated on <code>~/GitHub/*</code>. Some rules reference <code>~/GitHub/</code> paths. Edit if your repos live elsewhere.
+    <strong>Bootstrap scope.</strong>
+    Bootstrap runs in any git repo by default. Set <code>ESCAPEMENT_BOOTSTRAP_ROOTS=/path/a:/path/b</code> if you want to constrain machine-wide bootstrap to known roots.
   </div>
 
   <div class="warn">
@@ -656,12 +656,13 @@ after execute-full     production code + passing tests
 <section class="slide" id="s12">
   <div class="slide-number">12</div>
   <h2>Try it</h2>
-  <pre><code>git clone https://github.com/alexander-vyh/escapement ~/GitHub/escapement
-cd ~/GitHub/escapement
+  <pre><code>mkdir -p "$HOME/src"
+git clone https://github.com/alexander-vyh/escapement "$HOME/src/escapement"
+cd "$HOME/src/escapement"
 ./INSTALL.sh
 # then manually merge claude/settings.template.json into ~/.claude/settings.json</code></pre>
   <h3 style="margin-top:2rem;">Validation prompt for the first session</h3>
-  <p>Open Claude Code in a fresh git repo under <code>~/GitHub/</code> and say:</p>
+  <p>Open Claude Code in any fresh git repo and say:</p>
   <pre><code>let's build a small feature to validate the setup — add a /status slash command</code></pre>
   <p>Claude should pour <code>mol-feature</code> and walk you through brainstorm → discovery → review → breakdown → skeleton → build → retro. If that flow happens end-to-end, you're wired correctly.</p>
   <h3 style="margin-top:2rem;">Uninstall</h3>
