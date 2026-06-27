@@ -103,8 +103,9 @@ Claude Code or Codex must be installed and working. The `Install` steps below ar
 ## Install
 
 ```bash
-git clone https://github.com/alexander-vyh/escapement ~/GitHub/escapement
-cd ~/GitHub/escapement
+mkdir -p "$HOME/src"
+git clone https://github.com/alexander-vyh/escapement "$HOME/src/escapement"
+cd "$HOME/src/escapement"
 ./INSTALL.sh
 ```
 
@@ -129,7 +130,7 @@ cp claude/settings.template.json ~/.claude/settings.json
 
 After installing and merging settings:
 
-1. Open Claude Code in a fresh git repo under `~/GitHub/` (the bootstrap script is gated on that path — edit `scripts/project-bootstrap.sh:24-27` to widen).
+1. Open Claude Code in a fresh git repo anywhere on disk.
 2. On SessionStart, the bootstrap script runs (idempotent, fail-open):
    - `direnv allow` on any `.envrc`
    - `openspec init --tools claude` if `openspec/` is missing
@@ -237,11 +238,15 @@ Skills produce guidance. Hooks produce enforcement. If you install skills withou
 
 Install both, or neither.
 
-### Path assumptions
+### Bootstrap scope
 
-The bootstrap script (`scripts/project-bootstrap.sh:24-27`) is gated on `~/GitHub/*`. If your repos live elsewhere, edit that case statement or parameterize it.
+The bootstrap script runs in any git repo by default. To constrain machine-wide bootstrap to known roots, set `ESCAPEMENT_BOOTSTRAP_ROOTS` to a colon-separated allowlist, for example:
 
-Some rules reference `~/GitHub/` paths directly — `grep -r '~/GitHub' claude/rules/` before installing if you're particular about that.
+```bash
+ESCAPEMENT_BOOTSTRAP_ROOTS="$HOME/src:$HOME/work"
+```
+
+Some maintenance utilities still default to scanning `~/GitHub/` unless their own root variables are set, such as `BEADS_BACKUP_ROOTS` for beads backup discovery.
 
 ### Not shared
 

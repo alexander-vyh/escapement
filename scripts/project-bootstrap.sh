@@ -1,10 +1,10 @@
 #!/bin/bash
 # project-bootstrap.sh — SessionStart hook
-# Ensures every ~/GitHub/ project has the full tool stack initialized.
+# Ensures git projects have the full tool stack initialized.
 # Idempotent. Fail-open. Worktree-aware. Fast (< 2s warm).
 #
 # Phases:
-#   1. Environment gate (~/GitHub/ + git repo)
+#   1. Environment gate (optional root allowlist + git repo)
 #   2. Worktree detection
 #   3. Silent init (direnv, openspec)
 #   4. Announced init (beads, serena)
@@ -20,10 +20,40 @@ SESSION_CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 CWD="${SESSION_CWD:-$(pwd)}"
 
 # --- Phase 1: Environment gate ---
-case "$CWD" in
-  "$HOME/GitHub/"*) ;;
-  *) exit 0 ;;  # Not a managed project
-esac
+if [[ ! -d "$CWD" ]]; then
+  exit 0
+fi
+CWD=$(cd "$CWD" 2>/dev/null && pwd -P) || exit 0
+
+normalize_bootstrap_root() {
+  local root="$1"
+  case "$root" in
+    "~") root="$HOME" ;;
+    "~/"*) root="$HOME/${root#"~/"}" ;;
+  esac
+  [[ -d "$root" ]] || return 1
+  (cd "$root" 2>/dev/null && pwd -P)
+}
+
+within_bootstrap_roots() {
+  local roots="${ESCAPEMENT_BOOTSTRAP_ROOTS:-}"
+  [[ -n "$roots" ]] || return 0
+
+  local root normalized
+  IFS=':' read -r -a _bootstrap_roots <<< "$roots"
+  for root in "${_bootstrap_roots[@]}"; do
+    [[ -n "$root" ]] || continue
+    normalized=$(normalize_bootstrap_root "$root") || continue
+    if [[ "$CWD" == "$normalized" || "$CWD" == "$normalized"/* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! within_bootstrap_roots; then
+  exit 0
+fi
 
 if ! git -C "$CWD" rev-parse --git-dir >/dev/null 2>&1; then
   exit 0  # Not a git repo
