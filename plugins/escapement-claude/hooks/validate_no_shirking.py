@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: pre-existing 930-line gate; move-1 retires the verification-evidence machinery (~150 lines) but it stays >500 — full split tracked in escapement-e9v.7
+# file-complexity-waiver: pre-existing 930-line gate; move-1 retires the verification-evidence machinery (~150 lines) but it stays >500 — full split tracked in claude-workflow-setup-e9v.7
 """Claude Code hook: block outcome-shirking ("pre-existing failure" evasion).
 
 Fires as:
@@ -32,6 +32,11 @@ try:
 except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
+
+try:
+    import _local_judge_client as _lj
+except ImportError:  # pragma: no cover
+    _lj = None
 
 # ---------------------------------------------------------------------------
 # Shirking patterns — all case-insensitive
@@ -140,9 +145,37 @@ _CATEGORY_RATIONALE: dict[str, str] = {
     "scope-limitation": "'out of scope' is a real defense sometimes — but only if the genuinely-out-of-scope work was filed; otherwise it's deferral.",
     "acceptance-evasion": "explicitly choosing to live with failures is the most direct form of the anti-pattern.",
     "dismissal": "'flaky' or 'known issue' may be true, but the burden is on you to confirm — not assume.",
+    "stop-solicitation": "asking the user whether you should stop or continue is wind-down behavior; continue, verify completion, or name the concrete blocker.",
 }
 
 COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _PATTERNS]
+
+_STOP_SOLICITATION_SYSTEM = (
+    "You judge whether an AI coding agent's message is STOP-SOLICITATION: "
+    "asking the user whether the agent should stop, pause, wrap, hand work back, "
+    "or continue, instead of taking the next in-scope action, stating verified "
+    "completion, or naming a concrete blocker. Technical/product questions about "
+    "stopping conditions, worker shutdown, wrapping strings, or implementation "
+    "choices are NOT stop-solicitation. Answer with ONLY one token: "
+    "stop_solicitation | not_stop_solicitation | unclear"
+)
+_STOP_SOLICITATION_BACKSTOP_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bwant\s+me\s+to\b(?=[^?]{0,500}\bor\b)(?=[^?]{0,500}\b(?:wrap|stop|pause|keep\s+going|continue)\b)",
+        r"\bwant\s+any\s+of\s+those\b(?=[^?]{0,300}\bstopping\s+point\b)",
+        r"\bis\s+this\s+(?:a\s+)?(?:good|clean|natural|reasonable|honest)\s+stopping\s+point\b",
+        (
+            r"\bwant\s+me\s+to\b"
+            r"(?=[^?]{0,650}\bor\b)"
+            r"(?=[^?]{0,650}\b(?:open\s+(?:a\s+)?(?:draft\s+)?pr|draft\s+pr)\b)"
+            r"(?=[^?]{0,650}\bfinish\b)"
+            r"(?=[^?]{0,650}\bsave\s+(?:a\s+)?memory\b)"
+        ),
+        r"\bshould\s+I\s+(?:continue|keep\s+going)\b(?=[^?]{0,250}\bor\b)(?=[^?]{0,250}\b(?:stop|pause|wrap|leave|end|call\s+it)\b)",
+        r"\blet\s+me\s+know\s+if\s+you\s+want\s+me\s+to\s+(?:continue|keep\s+going|proceed)\b",
+    )
+]
 
 # Bash commands that represent "I'm done" — trigger the PreToolUse path
 FINISHING_COMMANDS = ["git commit", "gh pr create", "gh pr merge", "git push"]
@@ -522,6 +555,57 @@ def find_shirking_match(text: str) -> tuple[str, str] | None:
     return None
 
 
+def _stop_solicitation_model_verdict(text: str) -> bool | None:
+    """Return semantic stop-solicitation verdict from the local model.
+
+    True = stop-solicitation, False = not stop-solicitation, None = unavailable,
+    unclear, unparseable, missing dependency, or timeout. This hook must never
+    hang or crash on model trouble.
+    """
+    if _lj is None or not text or not isinstance(text, str):
+        return None
+    return _lj.boolean_verdict(
+        text,
+        system_prompt=_STOP_SOLICITATION_SYSTEM,
+        positive_labels=("stop_solicitation",),
+        negative_labels=("not_stop_solicitation",),
+    )
+
+
+def find_stop_solicitation_match(
+    text: str,
+    *,
+    judge=None,
+    on_unavailable=None,
+) -> tuple[str, str] | None:
+    """Semantic-first stop-solicitation classifier with deterministic outage backstop."""
+    stripped = _strip_code_spans(text)
+    if not stripped.strip():
+        return None
+
+    fn = judge or _stop_solicitation_model_verdict
+    try:
+        verdict = fn(stripped)
+    except Exception:
+        verdict = None
+
+    if verdict is True:
+        return stripped.strip(), "stop-solicitation"
+    if verdict is False:
+        return None
+    if on_unavailable is not None:
+        on_unavailable(stripped)
+
+    for pattern in _STOP_SOLICITATION_BACKSTOP_PATTERNS:
+        for m in pattern.finditer(stripped):
+            if _is_guarded(stripped, m.start()):
+                continue
+            start = max(0, m.start() - 40)
+            end = min(len(stripped), m.end() + 80)
+            return stripped[start:end].strip(), "stop-solicitation"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Blocker-bead escape — "documented failure is also an outcome"
 # ---------------------------------------------------------------------------
@@ -546,7 +630,7 @@ def find_shirking_match(text: str) -> tuple[str, str] | None:
 #   3. a filing verb + a concrete bead id with blocker framing nearby.
 # The bare word "blocker" alone never matches.
 
-# A concrete bead id: <project-slug>-<suffix>, e.g. escapement-z9q,
+# A concrete bead id: <project-slug>-<suffix>, e.g. claude-workflow-setup-z9q,
 # cake-ta5.7. Lowercase alnum/hyphen project, then "-", then an alnum/dot id.
 _BEAD_ID = r"[a-z0-9]+(?:-[a-z0-9]+)*-[a-z0-9]+(?:\.[a-z0-9]+)*"
 
@@ -633,10 +717,30 @@ if a particular category keeps producing false positives, the patterns
 for that category get pruned in the next half-life review.\
 """
 
+_STOP_SOLICITATION_BLOCK_BODY = """\
+🚨 STOP-SOLICITATION VIOLATION — you asked the user whether you should stop.
+
+You said something like:
+  «{phrase}»
+
+Why this counts as {category}: {rationale}
+
+Do NOT ask the user whether to stop, keep going, wrap, pause, or call this a
+stopping point. Continue with the next in-scope action. If the outcome is
+verified, state the verified result. If a real blocker prevents progress, name
+the blocker and the exact decision or access needed.
+
+See `claude/rules/outcome-ownership.md` for the full anti-pattern catalog.
+
+The escape: if you believe this match is a false positive, the user can release
+with "yes" / "proceed" / "lgtm" / "approved" / "go ahead".\
+"""
+
 
 def _deny_output(event_name: str, phrase: str, category: str = "uncategorized") -> dict:
     rationale = _CATEGORY_RATIONALE.get(category, "review `outcome-ownership.md` for the rationale.")
-    reason = _BLOCK_BODY.format(phrase=phrase, category=category, rationale=rationale)
+    template = _STOP_SOLICITATION_BLOCK_BODY if category == "stop-solicitation" else _BLOCK_BODY
+    reason = template.format(phrase=phrase, category=category, rationale=rationale)
     if event_name == "PreToolUse":
         return {
             "hookSpecificOutput": {
@@ -703,6 +807,11 @@ def main() -> int:
     messages = read_recent_messages(transcript_path)
 
     if messages:
+        last_assistant_idx = None
+        for i, (role, _text) in enumerate(messages):
+            if role == "assistant":
+                last_assistant_idx = i
+
         last_shirking_idx: int | None = None
         last_shirking_phrase: str | None = None
 
@@ -720,6 +829,26 @@ def main() -> int:
             # recent assistant turns — it releases the gate below.
             if filed_blocker_bead(text):
                 filed_blocker = True
+            if hook_event == "Stop" and i == last_assistant_idx:
+                def _record_stop_solicitation_judge_outage(stripped_text: str) -> None:
+                    _record_signal(
+                        gate_name="validate_no_shirking",
+                        decision="allow",
+                        reason="stop_solicitation_judge_unavailable",
+                        category="stop-solicitation",
+                        phrase=stripped_text[:200],
+                        hook_event=hook_event,
+                    )
+
+                stop_match = find_stop_solicitation_match(
+                    text,
+                    on_unavailable=_record_stop_solicitation_judge_outage,
+                )
+                if stop_match:
+                    phrase, category = stop_match
+                    last_shirking_idx = i
+                    last_shirking_phrase = phrase
+                    last_shirking_category = category
             match = find_shirking_match(text)
             if match:
                 phrase, category = match

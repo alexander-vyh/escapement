@@ -41,7 +41,8 @@ from would_block_stop import (  # noqa: E402
     _parse_iso,
 )
 import session_isolation  # noqa: E402  (per-session isolation steer, bead e9v.4)
-import datetime as _dt2
+import winddown_outage_sentinel as _wos  # noqa: E402
+import datetime as _dt2  # noqa: E402
 
 # State root is the standard per-user location (env-overridable), NOT relative
 # to where this code is installed — so dev-copy and installed-copy share state
@@ -225,7 +226,6 @@ except Exception:  # pragma: no cover - defensive
 _WINDDOWN_VERDICT_FRESH_SECONDS = 300
 # Bounded — this runs in the Stop critical path (not a daemon), so it must be snappy.
 # Fail-open on timeout means a slow/cold model yields None → allow (judge-only).
-_INLINE_JUDGE_TIMEOUT = 6
 
 
 def _text_sha(text: str) -> str:
@@ -283,7 +283,7 @@ def _compute_winddown_verdict_inline(text, thread_dir, *, judge=None, now=None) 
     slice where it runs the judge as the sole classifier. Returns the bool verdict or None on
     any error/unclear — a judge problem must NEVER block or crash the hook.
     """
-    fn = judge or (lambda t: _wj.model_verdict(t, timeout=_INLINE_JUDGE_TIMEOUT))
+    fn = judge or (lambda t: _wj.model_verdict(t))
     try:
         v = fn(text)
     except Exception:
@@ -397,9 +397,10 @@ def _winddown_override(
     remaining, return the recovery display to BLOCK with; else None.
 
     Reversible work = the bd session-scoped queue (work_check) OR git state (unpushed
-    commits / dirty tracked files). Classification is judge-only: when the cache is cold
-    the judge runs inline (bounded, fail-open). A None verdict means no classifier fired
-    → allow, with a gate signal emitted so the outage is observable (gate-design Rule 2).
+    commits / dirty tracked files). The semantic judge is the primary classifier: when
+    the cache is cold the judge runs inline (bounded, fail-open). A None verdict records
+    `winddown_judge_unavailable`; only then can the separate high-confidence outage
+    sentinel block the transcript-proven DWDEV-style shapes.
 
     Scoped DELIBERATELY to the `conversational` allow (would_block_stop.py:176-183) —
     the free-pass hole. Genuine terminals (verification_passed / user_released /
@@ -421,8 +422,8 @@ def _winddown_override(
         return None  # nothing reversible (bd or git) → legitimate stop; never nag, never judge
     model_offer = _read_cached_winddown_verdict(thread_dir, text=text)
     if model_offer is None:
-        # Cache cold — consult the judge inline. Judge is the sole classifier; there is
-        # no regex floor to fall back to (classification is "semantic or nothing").
+        # Cache cold — consult the judge inline. There is no general regex floor in the
+        # judge/rung path; only the narrow outage sentinel below can act after a None.
         model_offer = _compute_winddown_verdict_inline(text, thread_dir, judge=judge)
     if model_offer is None:
         # Judge unavailable after inline attempt. Fail open (gate-design Rule 2: emit
@@ -435,6 +436,8 @@ def _winddown_override(
             "was_correct": None,
             "notes": "winddown_rung",
         })
+        if _wos.high_confidence_outage_winddown(text):
+            return _wg.RECOVERY_PROMPT
         return None
     decision, _ = _wj.decide(text, work_remains, model_offer=model_offer)
     return _wg.RECOVERY_PROMPT if decision == "block" else None

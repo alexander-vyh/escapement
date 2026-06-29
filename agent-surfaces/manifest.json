@@ -255,6 +255,32 @@
       }
     },
     {
+      "id": "codex_final_response_gap",
+      "description": "Codex SessionStart advisory for the missing final-response Stop hook.",
+      "source": "claude/hooks/codex_final_response_gap.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 claude/hooks/codex_final_response_gap.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_final_response_gap.py::test_codex_session_start_names_final_response_gap",
+            "claude/hooks/tests/test_codex_final_response_gap.py::test_codex_gap_hook_silent_for_non_session_start"
+          ]
+        },
+        "claude": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-specific transparency hook for a lifecycle gap; Claude has native Stop hooks for this class."
+        }
+      }
+    },
+    {
       "id": "design_doc_location_guard",
       "description": "Warn when writing design docs directly to docs/plans/ instead of openspec/changes/.",
       "source": "claude/hooks/design_doc_location_guard.py",

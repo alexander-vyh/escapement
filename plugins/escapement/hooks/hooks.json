@@ -136,6 +136,16 @@
       {
         "hooks": [
           {
+            "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 \"${PLUGIN_ROOT}/claude/hooks/mol_status_check.py\"",
             "timeout": 10,
             "type": "command"

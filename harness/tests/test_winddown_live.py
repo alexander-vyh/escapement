@@ -1,22 +1,22 @@
-"""Tests for the LIVE wind-down rung: the inline-judge fallback and git-aware
+"""Tests for the LIVE wind-down rung: inline judge, outage sentinel, and git-aware
 work-remains. Companion to test_winddown_stop_integration.py (which covers the
 already-wired cached-verdict path).
 
 Two new behaviours, both load-bearing:
 
   1. INLINE JUDGE (lights up the local model live, no daemon). When there is NO
-     fresh cached verdict AND the regex floor MISSED the text AND reversible work
-     remains, the Stop hook runs the local-LLM judge inline (bounded timeout,
-     fail-open) and writes the verdict to winddown_verdict.json. This is exactly
-     the slice the cake veiled-stop exposed: regex missed it, no monitor existed.
+     fresh cached verdict AND reversible work remains, the Stop hook runs the
+     local-LLM judge inline (bounded timeout, fail-open) and writes the verdict to
+     winddown_verdict.json. This is exactly the slice the cake veiled-stop exposed:
+     no monitor existed, so no semantic verdict was available.
 
   2. GIT-AWARE WORK-REMAINS. "Reversible work remains" must include unpushed
      commits / dirty tracked files, not only beads. The cake stop claimed
      "nothing outstanding" with 4 unpushed commits and a drained bead queue.
 
-The oracle that keeps this honest: the judge must NOT run when the regex floor
-already caught the offer, nor when no work remains (bounds latency + prevents
-nagging a legitimate stop). A spy on the judge proves it.
+The oracle that keeps this honest: the judge must NOT run when no work remains
+(bounds latency + prevents nagging a legitimate stop), and a judge outage must be
+observable before the narrow deterministic outage sentinel can block known shapes.
 """
 import datetime as dt
 import json
@@ -27,7 +27,7 @@ import sys
 BIN = pathlib.Path(__file__).resolve().parent.parent / "bin"
 sys.path.insert(0, str(BIN))
 
-import stop_hook as sh
+import stop_hook as sh  # noqa: E402
 
 
 def _write_transcript(tmp_path, entries):
@@ -55,6 +55,24 @@ def _no_work(cwd, thread_dir=None):
 # is just a representative offer the injected judge classifies. (Kept the name for
 # diff continuity; it no longer implies a regex blind spot.)
 _REGEX_BLIND_OFFER = "Everything's in a good state and there's nothing pressing left to do here."
+
+_DWDEV_FINAL_WINDDOWN = (
+    "Branch state: DWDEV-11304-churn-dashboard-risk-logic on origin, 2 commits, "
+    "design complete. No PR yet.\n\n"
+    "Open follow-ups when you want them (none blocking):\n"
+    "1. Author the remaining OpenSpec artifacts -- specs/ capability deltas + "
+    "tasks.md + test-oracle-brief -- then it's ready for implementation.\n"
+    "2. The deferred archive of the old churn-dashboard-data-quality change.\n"
+    "3. Open a PR for DWDEV-11304 (draft, since implementation hasn't started).\n\n"
+    "Want any of those, or is this a good stopping point?"
+)
+
+_DWDEV_EARLY_WINDDOWN = (
+    "The worktree lives at .worktrees/churn-dashboard-risk-logic if you want to "
+    "keep drafting there. Want me to open a draft PR for DWDEV-11304, finish the "
+    "remaining design.md sections, or save a memory of the gone-dark finding + "
+    "this change so a future session picks up cleanly?"
+)
 
 
 def test_regex_floor_is_removed():
@@ -144,9 +162,9 @@ def test_inline_judge_NOT_called_when_no_work_remains(tmp_path):
 
 
 def test_inline_judge_fail_open_when_model_errors(tmp_path):
-    """Judge raises → ALLOW (no fabricated block). Under judge-only there is no regex
-    floor to defer to: 'semantic or nothing'. A judge problem must never block or
-    crash the hook — the offer is NOT fabricated into a block."""
+    """Judge raises → ALLOW for non-sentinel text. A judge problem must never block or
+    crash the hook unless the separate high-confidence outage sentinel recognizes a
+    transcript-proven shape."""
     def boom_judge(text):
         raise RuntimeError("model down")
 
@@ -194,6 +212,49 @@ def test_fail_open_emits_judge_unavailable_signal(tmp_path, monkeypatch):
         "the fail-open must be labeled `winddown_judge_unavailable` in the corpus so "
         f"judge outages are countable; incidents body was: {body!r}"
     )
+
+
+def test_judge_unavailable_blocks_high_confidence_dwdev_winddown(tmp_path):
+    """Regression for DWDEV-11304: Claude Stop hooks ran, the judge outage path
+    allowed, and the final assistant message asked whether to stop with concrete
+    follow-ups still reversible. The outage sentinel is intentionally scoped to
+    this high-confidence wind-down shape; it is not a replacement classifier."""
+    for text in (_DWDEV_FINAL_WINDDOWN, _DWDEV_EARLY_WINDDOWN):
+        tp = _write_transcript(tmp_path, [_asst(text)])
+        disp = sh._winddown_override(
+            "conversational", tp, str(tmp_path), tmp_path,
+            work_check=_work_remains, judge=lambda t: None,
+        )
+        assert disp is not None and "proceed" in disp.lower()
+
+
+def test_judge_unavailable_sentinel_ignores_non_winddown_stop_words(tmp_path):
+    """Negative controls for the tempting shortcut: work remains + judge None
+    must not block ordinary technical prose just because it contains stop-ish
+    words or a choice question."""
+    non_winddowns = [
+        "Should I use Postgres or SQLite for this service?",
+        "The loop's stopping condition should be None when the stream closes.",
+        "From this point I will continue with the PR checks and implementation.",
+    ]
+    for text in non_winddowns:
+        tp = _write_transcript(tmp_path, [_asst(text)])
+        disp = sh._winddown_override(
+            "conversational", tp, str(tmp_path), tmp_path,
+            work_check=_work_remains, judge=lambda t: None,
+        )
+        assert disp is None
+
+
+def test_judge_negative_verdict_overrides_high_confidence_sentinel(tmp_path):
+    """The deterministic sentinel is only for an unavailable judge. If the model
+    returns a real negative verdict, model ownership still allows."""
+    tp = _write_transcript(tmp_path, [_asst(_DWDEV_FINAL_WINDDOWN)])
+    disp = sh._winddown_override(
+        "conversational", tp, str(tmp_path), tmp_path,
+        work_check=_work_remains, judge=lambda t: False,
+    )
+    assert disp is None
 
 
 def test_cached_verdict_short_circuits_inline_judge(tmp_path):
