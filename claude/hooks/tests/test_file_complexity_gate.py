@@ -36,8 +36,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 TEST_DIR = Path(__file__).resolve().parent
 HOOK_PATH = TEST_DIR / "file_complexity_gate.py"
 if not HOOK_PATH.exists():
