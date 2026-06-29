@@ -17,15 +17,24 @@ separate-/same-clause "for today" boundary) are REMOVED, not weakened. Per never
 the replacement oracle is equal-or-stronger: the rung's block/allow decisions are pinned
 against an INJECTED verdict, and an architecture guard asserts the regex API is gone.
 """
+import importlib.util
 import pathlib
 import sys
 
-import pytest
-
 BIN = pathlib.Path(__file__).resolve().parent.parent / "bin"
-sys.path.insert(0, str(BIN))
 
-import winddown_gate as wg  # hard import: sibling module, not a deployed dep
+
+def _load_winddown_gate():
+    spec = importlib.util.spec_from_file_location("winddown_gate", BIN / "winddown_gate.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load harness/bin/winddown_gate.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+wg = _load_winddown_gate()
 
 
 # ---------------------------------------------------------------------------

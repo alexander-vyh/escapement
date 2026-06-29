@@ -5,6 +5,7 @@ daemon's cached verdict, and the surgical override of the `conversational` allow
 The bd work-check is injected so these never shell out.
 """
 import datetime as dt
+import importlib.util
 import json
 import pathlib
 import sys
@@ -12,7 +13,18 @@ import sys
 BIN = pathlib.Path(__file__).resolve().parent.parent / "bin"
 sys.path.insert(0, str(BIN))
 
-import stop_hook as sh
+
+def _load_stop_hook():
+    spec = importlib.util.spec_from_file_location("stop_hook", BIN / "stop_hook.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load harness/bin/stop_hook.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+sh = _load_stop_hook()
 
 
 def _write_transcript(tmp_path, entries):
