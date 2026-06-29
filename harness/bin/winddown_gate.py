@@ -10,6 +10,9 @@ DESIGN NOTES
   verdict via `is_offer`. When `is_offer` is None (judge unavailable), the rung
   fails open: no offer detected, allow. The outage is signalled at the hook layer
   (stop_hook._winddown_override) per gate-design Rule 2.
+- The Stop hook has a separate, narrow outage sentinel for transcript-proven
+  DWDEV-style wind-down shapes after that signal is recorded. That sentinel is not
+  part of this rung and does not reintroduce a general prose classifier here.
 - HONEST LIMITATION: the Stop hook fires AFTER the turn is rendered, so this rung forces
   *continuation*; it does NOT un-show the offer text. It converts "agent pauses and waits"
   into "agent offers but keeps going."

@@ -1,4 +1,5 @@
 import os
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -18,6 +19,8 @@ EXPECTED_CODEX_GATE = {
     "command": "python3 claude/hooks/test_oracle_brief_gate.py",
     "timeout": 5,
 }
+CODEX_FINAL_RESPONSE_GAP_COMMAND = "python3 claude/hooks/codex_final_response_gap.py"
+CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"
 MINIMUM_VERIFIED_DELIVERY_FRAGMENTS = (
     "Escapement optimizes for minimum verified delivery.",
     "YAGNI forbids speculative",
@@ -45,6 +48,13 @@ def test_generated_surfaces_are_current():
 
 def test_generated_docs_include_minimum_verified_delivery_guidance():
     assert_minimum_verified_delivery_guidance(ROOT)
+
+
+def test_generated_docs_ban_stop_solicitation():
+    for rel_path in ("AGENTS.md", "CLAUDE.md"):
+        text = " ".join((ROOT / rel_path).read_text().split())
+        assert "Do not ask whether to stop, keep going, wrap, pause" in text
+        assert "If there is a next in-scope action, take it." in text
 
 
 def test_minimum_verified_delivery_guidance_without_oracle_guardrail_fails(tmp_path):
@@ -161,6 +171,40 @@ def test_codex_hooks_include_prime_and_behavioral_gate():
     ]
     assert "bd prime" in commands
     assert "python3 claude/hooks/test_oracle_brief_gate.py" in commands
+
+
+def test_codex_hooks_include_final_response_gap_warning():
+    """Codex has no Stop/final-response hook; the gap must be explicit at startup."""
+    hooks = json.loads((ROOT / ".codex" / "hooks.json").read_text())["hooks"]
+
+    assert "Stop" not in hooks, "Codex must not pretend it has a Claude-style Stop event"
+    session_start_commands = [
+        hook["command"]
+        for item in hooks.get("SessionStart", [])
+        for hook in item.get("hooks", [])
+    ]
+    assert CODEX_FINAL_RESPONSE_GAP_COMMAND in session_start_commands
+
+
+def test_codex_plugin_hooks_include_final_response_gap_warning():
+    """The installable Codex wrapper must carry the same startup warning."""
+    hooks = json.loads((CODEX_WRAPPER / "hooks" / "hooks.json").read_text())["hooks"]
+
+    assert "Stop" not in hooks, "Codex plugin must not ship unsupported Stop hooks"
+    session_start_commands = [
+        hook["command"]
+        for item in hooks.get("SessionStart", [])
+        for hook in item.get("hooks", [])
+    ]
+    matches = [
+        command
+        for command in session_start_commands
+        if CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT in command
+    ]
+    assert matches, "Codex plugin SessionStart must warn about the final-response Stop gap"
+
+    rel = "claude/hooks/codex_final_response_gap.py"
+    assert (CODEX_WRAPPER / rel).is_file(), f"plugin command references missing file: {rel}"
 
 
 def test_codex_behavioral_gate_has_exact_event_shape():
@@ -391,6 +435,58 @@ def test_claude_plugin_hooks_include_sessionstart_rules_injection():
     session_start = hooks.get("SessionStart", [])
     commands = [h["command"] for item in session_start for h in item["hooks"]]
     assert any("inject-rules.sh" in c for c in commands), "SessionStart must inject the rules"
+
+
+def test_claude_plugin_hooks_do_not_depend_on_user_local_claude_paths():
+    """Plugin install must run bundled hooks, not stale ~/.claude copies."""
+    hooks = json.loads((CLAUDE_PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
+    commands = [
+        h["command"]
+        for event_items in hooks.values()
+        for item in event_items
+        for h in item["hooks"]
+    ]
+    assert all("~/.claude" not in command for command in commands)
+    assert 'python3 "${CLAUDE_PLUGIN_ROOT}/harness/bin/stop_hook.py"' in commands
+
+
+def test_claude_plugin_bundles_shared_judge_support():
+    """Claude plugin hook copies must include shared semantic-judge dependencies."""
+    for name in (
+        "_local_judge_client.py",
+        "local_judge_health.py",
+    ):
+        assert (CLAUDE_PLUGIN / "hooks" / name).is_file(), (
+            f"Claude plugin hook bundle missing semantic judge support file: {name}"
+        )
+    for name in (
+        "session_isolation.py",
+        "stop_hook.py",
+        "verify_integrity.py",
+        "winddown_judge.py",
+        "winddown_gate.py",
+        "winddown_outage_sentinel.py",
+        "would_block_stop.py",
+    ):
+        assert (CLAUDE_PLUGIN / "harness" / "bin" / name).is_file(), (
+            f"Claude plugin harness bundle missing semantic judge support file: {name}"
+        )
+
+
+def test_claude_plugin_stop_hook_imports_from_bundle(monkeypatch):
+    hooks_dir = CLAUDE_PLUGIN / "hooks"
+    harness_dir = CLAUDE_PLUGIN / "harness" / "bin"
+    monkeypatch.syspath_prepend(str(hooks_dir))
+    monkeypatch.syspath_prepend(str(harness_dir))
+    spec = importlib.util.spec_from_file_location(
+        "plugin_stop_hook_import_check",
+        harness_dir / "stop_hook.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module._wj is not None
+    assert module._wg is not None
 
 
 def test_claude_plugin_bundles_all_rules():

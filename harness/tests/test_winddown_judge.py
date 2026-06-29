@@ -1,13 +1,15 @@
 """Tests for winddown_judge.py — the local-LLM judge is the SOLE classifier.
 
 ARCHITECTURE CHANGE (user directive): the regex floor is KILLED. Wind-down
-classification is semantic — the judge's verdict is the only signal. There is no
-regex fallback to defer to. `decide(text, work, model_offer)` resolves the offer
-purely from `model_offer`:
+classification in the judge/rung path is semantic — the judge's verdict is the
+only signal there. There is no regex fallback inside `decide(...)`, which resolves
+the offer purely from `model_offer`:
   - model_offer True  → offer
   - model_offer False → not an offer
   - model_offer None  → judge unavailable/unclear → FAIL-OPEN to allow (semantic
-    or nothing), and the outage is SIGNALLED (gate-design Rule 2) at the hook layer.
+    and the outage is SIGNALLED (gate-design Rule 2) at the hook layer.
+The Stop hook has a separate high-confidence outage sentinel for known DWDEV-style
+wind-down shapes; these tests cover the judge/rung contract, not that sentinel.
 The HTTP call is injected (`post=`) so tests never depend on a running server.
 
 These tests pin two load-bearing behaviors the live run can't guarantee on every
@@ -22,7 +24,7 @@ import sys
 BIN = pathlib.Path(__file__).resolve().parent.parent / "bin"
 sys.path.insert(0, str(BIN))
 
-import winddown_judge as wj
+import winddown_judge as wj  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -30,23 +32,50 @@ import winddown_judge as wj
 # ---------------------------------------------------------------------------
 
 def test_verdict_winddown_true():
-    assert wj.model_verdict("x", post=lambda payload: "winddown") is True
+    assert wj.model_verdict("x", post=lambda url, payload, timeout: "winddown") is True
 
 
 def test_verdict_not_winddown_false():
-    assert wj.model_verdict("x", post=lambda payload: "not_winddown") is False
+    assert wj.model_verdict("x", post=lambda url, payload, timeout: "not_winddown") is False
 
 
 def test_verdict_unclear_or_garbage_is_none():
-    assert wj.model_verdict("x", post=lambda payload: "unclear") is None
-    assert wj.model_verdict("x", post=lambda payload: "banana") is None
+    assert wj.model_verdict("x", post=lambda url, payload, timeout: "unclear") is None
+    assert wj.model_verdict("x", post=lambda url, payload, timeout: "banana") is None
 
 
 def test_verdict_fails_open_on_exception():
-    def boom(payload):
+    def boom(url, payload, timeout):
         raise TimeoutError("server down")
     # FAIL-OPEN: a down/slow model must yield None (defer to floor), never raise.
     assert wj.model_verdict("x", post=boom) is None
+
+
+def test_model_verdict_uses_configured_local_judge_contract(monkeypatch):
+    monkeypatch.setenv("ESCAPEMENT_LOCAL_JUDGE_BASE_URL", "http://127.0.0.1:9555/v1/")
+    monkeypatch.setenv("ESCAPEMENT_LOCAL_JUDGE_MODEL", "rapid-mlx-loaded")
+    calls = []
+
+    def post(url, payload, timeout):
+        calls.append((url, payload, timeout))
+        return "winddown"
+
+    assert wj.model_verdict("wrap?", timeout=3, post=post) is True
+    assert calls == [
+        (
+            "http://127.0.0.1:9555/v1/chat/completions",
+            {
+                "model": "rapid-mlx-loaded",
+                "messages": [
+                    {"role": "system", "content": wj._SYSTEM},
+                    {"role": "user", "content": "wrap?"},
+                ],
+                "max_tokens": 32,
+                "enable_thinking": False,
+            },
+            3,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -55,9 +84,8 @@ def test_verdict_fails_open_on_exception():
 # REPLACES the old "union of regex floor + model verdict" suite (and its
 # PARAPHRASE_REGEX_MISSES floor-gap cases). Under judge-only there is no floor to
 # have a gap. Per never-suppress, the replacement oracle is equal-or-STRONGER: it
-# pins that the verdict ALONE decides, and the new fail-open semantics (judge None
-# → allow even for an obvious wrap offer) are asserted directly — that is the
-# deliberate consequence of "semantic or nothing".
+# pins that the verdict ALONE decides inside the judge/rung path, and the fail-open
+# semantics (judge None → allow even for an obvious wrap offer) are asserted directly.
 # ---------------------------------------------------------------------------
 
 # A phrase an old regex floor WOULD have caught. Under judge-only it must NOT be

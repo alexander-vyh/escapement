@@ -13,11 +13,14 @@ Two invariants, both TESTED:
     The outage is signalled at the hook layer (stop_hook._winddown_override) per
     gate-design Rule 2.
   - JUDGE OWNS RECALL: `decide` blocks only when the model flags an offer (gated by
-    reversible-work-remaining, which prevents nagging a legitimate stop). There is no
-    regex floor to fall back to — None verdict means no classifier fired → allow.
+    reversible-work-remaining, which prevents nagging a legitimate stop). The judge/rung
+    path has no regex floor — None verdict means no classifier fired → allow. The Stop
+    hook may still run its separate high-confidence outage sentinel after logging the
+    unavailable judge signal.
 
-The model call belongs in a BACKGROUND monitor (so its latency never blocks the user's
-turn); the Stop hook reads the cached verdict and calls `decide`.
+The Stop hook reads a fresh cached verdict when present, otherwise computes one
+inline with the shared bounded local-judge client. A future background monitor
+can still warm the same cache.
 """
 from __future__ import annotations
 
@@ -27,15 +30,23 @@ from typing import Callable, Optional, Tuple
 
 # Import the sibling winddown_gate regardless of caller cwd (mirrors stop_hook).
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+for _support_dir in (
+    pathlib.Path(__file__).resolve().parents[2] / "hooks",
+    pathlib.Path(__file__).resolve().parents[2] / "claude" / "hooks",
+    pathlib.Path.home() / ".claude" / "hooks",
+):
+    if str(_support_dir) not in sys.path:
+        sys.path.insert(0, str(_support_dir))
+import _local_judge_client as _lj  # noqa: E402
 import winddown_gate as wg  # noqa: E402
 
-DEFAULT_BASE_URL = "http://localhost:8000/v1"
+DEFAULT_BASE_URL = _lj.DEFAULT_BASE_URL
 # "default" targets whatever model Rapid-MLX currently has loaded (server.py uses the
 # same), so a model swap doesn't break the judge.
-DEFAULT_MODEL = "default"
-# Generous: the judge runs in a background monitor, not the turn's critical path, and a
-# cold model can take >5s (the 01:41 false-negative was a 5s ping against a loading model).
-DEFAULT_TIMEOUT = 60
+DEFAULT_MODEL = _lj.DEFAULT_MODEL
+# Bounded by default because the currently wired path runs inline during Stop.
+# Raise ESCAPEMENT_LOCAL_JUDGE_TIMEOUT deliberately if a machine's model needs longer.
+DEFAULT_TIMEOUT = _lj.DEFAULT_TIMEOUT
 
 # The exact system prompt validated live at 11/11.
 _SYSTEM = (
@@ -47,23 +58,13 @@ _SYSTEM = (
 )
 
 
-def _default_post(payload: dict, *, base_url: str, timeout: int) -> str:
-    """POST to the OpenAI-compatible endpoint; return the model's raw reply text."""
-    import httpx  # lazy: a missing httpx must not break import (fail-open philosophy)
-
-    with httpx.Client(timeout=timeout) as client:
-        resp = client.post(f"{base_url}/chat/completions", json=payload)
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
-
-
 def model_verdict(
     text: str,
     *,
-    base_url: str = DEFAULT_BASE_URL,
-    model: str = DEFAULT_MODEL,
-    timeout: int = DEFAULT_TIMEOUT,
-    post: Optional[Callable[[dict], str]] = None,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+    timeout: Optional[float] = None,
+    post: Optional[Callable[[str, dict, float], str]] = None,
 ) -> Optional[bool]:
     """Ask the local model: is `text` a wind-down offer?
 
@@ -71,30 +72,16 @@ def model_verdict(
     unparseable). FAIL-OPEN: never raises — a model problem yields None and the caller
     treats it as allow (no classifier fired, judge-only architecture).
 """
-    if not text or not isinstance(text, str):
-        return None
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": text},
-        ],
-        "max_tokens": 8,
-        "enable_thinking": False,
-    }
-    try:
-        if post is None:
-            content = _default_post(payload, base_url=base_url, timeout=timeout)
-        else:
-            content = post(payload)
-    except Exception:
-        return None  # fail-open: down / timeout / network / parse → allow (judge-only)
-    low = (content or "").strip().lower()
-    if "not_winddown" in low or "not winddown" in low:
-        return False
-    if "winddown" in low:
-        return True
-    return None
+    return _lj.boolean_verdict(
+        text,
+        system_prompt=_SYSTEM,
+        positive_labels=("winddown",),
+        negative_labels=("not_winddown",),
+        base_url=base_url,
+        model=model,
+        timeout=timeout,
+        post=post,
+    )
 
 
 def decide(
@@ -108,7 +95,7 @@ def decide(
     The judge is the sole classifier. `model_offer` is the verdict from `model_verdict`:
       - True  → offer detected → rung decides based on reversible_work_remains
       - False → not an offer → allow
-      - None  → model unavailable / unclear → fail open to allow ("semantic or nothing")
+      - None  → model unavailable / unclear → fail open in the judge/rung path
 
     The reversible-work gate in winddown_gate.winddown_decision prevents nagging a
     legitimate stop even when the model flags an offer.

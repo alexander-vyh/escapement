@@ -11,6 +11,7 @@ Run from anywhere with:
 """
 
 import io
+import importlib.util
 import json
 import sys
 import tempfile
@@ -19,18 +20,41 @@ from unittest.mock import patch
 
 import pytest
 
-_hooks_dir = Path.home() / ".claude" / "hooks"
+_hooks_dir = Path(__file__).resolve().parent.parent
 if not _hooks_dir.exists():
     pytest.skip("~/.claude/hooks/ not found", allow_module_level=True)
 
 if str(_hooks_dir) not in sys.path:
     sys.path.insert(0, str(_hooks_dir))
 
+_MODULE_PATH = _hooks_dir / "validate_no_shirking.py"
+_spec = importlib.util.spec_from_file_location("validate_no_shirking", _MODULE_PATH)
+assert _spec is not None and _spec.loader is not None
+shirking_gate = importlib.util.module_from_spec(_spec)
+sys.modules["validate_no_shirking"] = shirking_gate
+_spec.loader.exec_module(shirking_gate)
 from validate_no_shirking import (  # noqa: E402
     find_shirking_match,
     find_shirking_phrase,
+    find_stop_solicitation_match,
     read_recent_agent_text,
 )
+
+_ORIGINAL_STOP_SOLICITATION_MODEL_VERDICT = shirking_gate._stop_solicitation_model_verdict
+
+
+def test_stop_solicitation_uses_shared_local_judge_client_architecture() -> None:
+    source = (Path(__file__).resolve().parent.parent / "validate_no_shirking.py").read_text()
+    assert "_lj.boolean_verdict" in source
+    assert "localhost:8000" not in source
+    assert "chat/completions" not in source
+    assert "import httpx" not in source
+
+
+@pytest.fixture(autouse=True)
+def _disable_live_stop_solicitation_judge(monkeypatch):
+    """Tests inject semantic verdicts explicitly; never call the live local model."""
+    monkeypatch.setattr(shirking_gate, "_stop_solicitation_model_verdict", lambda text: None)
 
 
 # ---------------------------------------------------------------------------
@@ -490,6 +514,63 @@ class TestMainStop:
         finally:
             Path(transcript).unlink(missing_ok=True)
 
+    def test_stop_solicitation_blocks_stop(self) -> None:
+        transcript = _make_transcript("Should I continue, or stop here?")
+        try:
+            denied = _run_main("Stop", transcript_path=transcript)
+            assert denied is True
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+    def test_technical_stopping_condition_allows_stop(self) -> None:
+        transcript = _make_transcript(
+            "The loop's stopping condition should be None when the stream closes."
+        )
+        try:
+            denied = _run_main("Stop", transcript_path=transcript)
+            assert denied is False
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+    def test_semantic_stop_solicitation_blocks_stop_without_known_phrase(self) -> None:
+        transcript = _make_transcript(
+            "I can hand this back at the checkpoint; say the word and I'll proceed."
+        )
+        try:
+            with patch.object(shirking_gate, "_stop_solicitation_model_verdict", return_value=True):
+                denied = _run_main("Stop", transcript_path=transcript)
+            assert denied is True
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+    def test_semantic_negative_verdict_allows_even_backstop_phrase(self) -> None:
+        transcript = _make_transcript("Want me to wrap for the night, or keep going?")
+        try:
+            with patch.object(shirking_gate, "_stop_solicitation_model_verdict", return_value=False):
+                denied = _run_main("Stop", transcript_path=transcript)
+            assert denied is False
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+    def test_stop_solicitation_judge_outage_records_signal(self, monkeypatch) -> None:
+        records = []
+        monkeypatch.setattr(shirking_gate, "_record_signal", lambda **kwargs: records.append(kwargs))
+        transcript = _make_transcript(
+            "I can hand this back at the checkpoint; say the word and I'll proceed."
+        )
+        try:
+            denied = _run_main("Stop", transcript_path=transcript)
+            assert denied is False
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+        assert any(
+            record["reason"] == "stop_solicitation_judge_unavailable"
+            and record["category"] == "stop-solicitation"
+            and record["hook_event"] == "Stop"
+            for record in records
+        )
+
 
 # ---------------------------------------------------------------------------
 # Block message content
@@ -543,6 +624,17 @@ class TestBlockMessageContent:
             assert "FIX" in reason
             # Message should be directive — no "ask user to skip" option
             assert "ask to skip" not in reason.lower()
+        finally:
+            Path(transcript).unlink(missing_ok=True)
+
+    def test_stop_solicitation_message_does_not_say_fix_failures(self) -> None:
+        transcript = _make_transcript("Should I continue, or stop here?")
+        try:
+            output = _run_main_output("Stop", transcript_path=transcript)
+            reason = output["reason"]
+            assert "STOP-SOLICITATION VIOLATION" in reason
+            assert "FIX THE FAILURES NOW" not in reason
+            assert "Continue with the next in-scope action" in reason
         finally:
             Path(transcript).unlink(missing_ok=True)
 
@@ -658,6 +750,104 @@ class TestNewShirkingPatterns:
     def test_known_issue(self) -> None:
         assert find_shirking_phrase("This is a known issue") is not None
 
+    def test_stop_solicitation_model_uses_shared_local_judge_client(self, monkeypatch) -> None:
+        calls = []
+
+        def fake_boolean_verdict(text, **kwargs):
+            calls.append((text, kwargs))
+            return True
+
+        monkeypatch.setattr(
+            shirking_gate,
+            "_stop_solicitation_model_verdict",
+            _ORIGINAL_STOP_SOLICITATION_MODEL_VERDICT,
+        )
+        monkeypatch.setattr(shirking_gate._lj, "boolean_verdict", fake_boolean_verdict)
+
+        assert shirking_gate._stop_solicitation_model_verdict(
+            "I can hand this back here; say the word and I will proceed."
+        ) is True
+        assert calls == [
+            (
+                "I can hand this back here; say the word and I will proceed.",
+                {
+                    "system_prompt": shirking_gate._STOP_SOLICITATION_SYSTEM,
+                    "positive_labels": ("stop_solicitation",),
+                    "negative_labels": ("not_stop_solicitation",),
+                },
+            )
+        ]
+
+    def test_want_me_to_wrap_or_keep_going_is_stop_solicitation(self) -> None:
+        match = find_stop_solicitation_match(
+            "Want me to wrap for the night, or keep going?",
+            judge=lambda text: None,
+        )
+        assert match is not None
+        assert match[1] == "stop-solicitation"
+
+    def test_good_stopping_point_is_stop_solicitation(self) -> None:
+        match = find_stop_solicitation_match(
+            "Want any of those, or is this a good stopping point?",
+            judge=lambda text: None,
+        )
+        assert match is not None
+        assert match[1] == "stop-solicitation"
+
+    def test_optional_pr_finish_memory_choice_is_stop_solicitation(self) -> None:
+        match = find_stop_solicitation_match(
+            "Want me to open a draft PR, finish the remaining design.md sections, "
+            "or save a memory so a future session picks up cleanly?",
+            judge=lambda text: None,
+        )
+        assert match is not None
+        assert match[1] == "stop-solicitation"
+
+    def test_should_i_continue_or_stop_here_is_stop_solicitation(self) -> None:
+        match = find_stop_solicitation_match(
+            "Should I continue, or stop here?",
+            judge=lambda text: None,
+        )
+        assert match is not None
+        assert match[1] == "stop-solicitation"
+
+    def test_semantic_judge_blocks_paraphrase_without_known_phrase(self) -> None:
+        match = find_stop_solicitation_match(
+            "I can hand this back at the checkpoint; say the word and I'll proceed.",
+            judge=lambda text: True,
+        )
+        assert match is not None
+        assert match[1] == "stop-solicitation"
+
+    def test_semantic_negative_overrides_backstop_phrase(self) -> None:
+        assert find_stop_solicitation_match(
+            "Want me to wrap for the night, or keep going?",
+            judge=lambda text: False,
+        ) is None
+
+    def test_semantic_judge_unavailable_callback_runs_before_backstop(self) -> None:
+        unavailable = []
+        match = find_stop_solicitation_match(
+            "Should I continue, or stop here?",
+            judge=lambda text: None,
+            on_unavailable=lambda text: unavailable.append(text),
+        )
+        assert match is not None
+        assert match[1] == "stop-solicitation"
+        assert unavailable == ["Should I continue, or stop here?"]
+
+    def test_technical_stopping_condition_not_stop_solicitation(self) -> None:
+        assert find_stop_solicitation_match(
+            "The loop's stopping condition should be None when the stream closes.",
+            judge=lambda text: False,
+        ) is None
+
+    def test_product_question_about_stopping_worker_not_stop_solicitation(self) -> None:
+        assert find_stop_solicitation_match(
+            "Should the worker stop when the queue is empty or keep polling?",
+            judge=lambda text: False,
+        ) is None
+
     def test_known_bug(self) -> None:
         assert find_shirking_phrase("That's a known bug") is not None
 
@@ -685,7 +875,7 @@ class TestNewShirkingPatterns:
 
 
 # NOTE: the transcript-based verification-evidence gate was RETIRED in move-1
-# (escapement-e9v.2). Its job — block a Stop when code changed but the
+# (claude-workflow-setup-e9v.2). Its job — block a Stop when code changed but the
 # outcome wasn't really verified — is now owned by the continuation-harness contract
 # gate, which reads the REAL exit code (harness/tests/test_gate.py: a contract with
 # exit_code=1 blocks the Stop). That is a stronger oracle than command-presence.
@@ -841,7 +1031,7 @@ class TestNegationGuardMetaDescription:
 class TestHookSignatureExpansion:
     def test_outcome_ownership_rule_name_skipped(self):
         # If an assistant message contains the rule file name, it's self-referential
-        from validate_no_shirking import read_recent_messages, _HOOK_SIGNATURES
+        from validate_no_shirking import _HOOK_SIGNATURES
         assert "outcome-ownership.md" in _HOOK_SIGNATURES
         assert "validate_no_shirking" in _HOOK_SIGNATURES
 
@@ -896,7 +1086,7 @@ class TestBlockerBeadEscapeUnit:
     def test_concrete_bead_id_with_blocker_framing_detected(self):
         from validate_no_shirking import filed_blocker_bead
         assert filed_blocker_bead(
-            "Created escapement-z9q as a blocker documenting why this "
+            "Created claude-workflow-setup-z9q as a blocker documenting why this "
             "cannot be completed in this session."
         ) is True
 
@@ -964,7 +1154,7 @@ class TestMainBlockerBeadEscape:
         """Escape applies on the PreToolUse (commit) path too."""
         transcript = _make_transcript(
             "The failure is unrelated to my changes and needs schema access I lack. "
-            "Filed blocker bead escapement-z9q documenting why."
+            "Filed blocker bead claude-workflow-setup-z9q documenting why."
         )
         try:
             denied = _run_main(
