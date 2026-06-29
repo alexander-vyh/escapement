@@ -192,6 +192,94 @@
       }
     },
     {
+      "id": "root_checkout_guard",
+      "description": "Prevent accidental mutations in the primary checkout of a beads-managed repo.",
+      "source": "claude/hooks/root_checkout_guard.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 claude/hooks/root_checkout_guard.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Write",
+              "command": "python3 claude/hooks/root_checkout_guard.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Edit",
+              "command": "python3 claude/hooks/root_checkout_guard.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "NotebookEdit",
+              "command": "python3 claude/hooks/root_checkout_guard.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_root_checkout_guard.py::test_codex_root_checkout_guard_denies_primary_checkout_bash",
+            "claude/hooks/tests/test_root_checkout_guard.py::test_codex_root_checkout_guard_denies_primary_checkout_write"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Write",
+              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Edit",
+              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "NotebookEdit",
+              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "MultiEdit",
+              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__serena__replace_symbol_body",
+              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__serena__insert_after_symbol",
+              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp__serena__insert_before_symbol",
+              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_root_checkout_guard.py"
+          ]
+        }
+      }
+    },
+    {
       "id": "cache_write_guard",
       "description": "Redirect trivial operations out of a heavy (bloated-context) session.",
       "source": "claude/hooks/cache_write_guard.py",

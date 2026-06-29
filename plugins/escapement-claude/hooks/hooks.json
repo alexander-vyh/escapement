@@ -87,6 +87,78 @@
       {
         "hooks": [
           {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "NotebookEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "MultiEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__serena__replace_symbol_body"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__serena__insert_after_symbol"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__serena__insert_before_symbol"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/cache_write_guard.py\"",
             "type": "command"
           }

@@ -21,6 +21,7 @@ EXPECTED_CODEX_GATE = {
 }
 CODEX_FINAL_RESPONSE_GAP_COMMAND = "python3 claude/hooks/codex_final_response_gap.py"
 CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"
+ROOT_CHECKOUT_GUARD_COMMAND = "python3 claude/hooks/root_checkout_guard.py"
 MINIMUM_VERIFIED_DELIVERY_FRAGMENTS = (
     "Escapement optimizes for minimum verified delivery.",
     "YAGNI forbids speculative",
@@ -219,6 +220,43 @@ def test_codex_behavioral_gate_has_exact_event_shape():
         and hook.get("timeout") == EXPECTED_CODEX_GATE["timeout"]
     ]
     assert matches, "Codex Test Oracle Brief gate must be PreToolUse/Bash with timeout"
+
+
+def test_root_checkout_guard_is_manifested_and_rendered_for_claude_and_codex():
+    """Architecture check: the hook must be wired, not merely implemented."""
+    manifest = json.loads(MANIFEST.read_text())
+    entries = [hook for hook in manifest["hooks"] if hook["id"] == "root_checkout_guard"]
+    assert len(entries) == 1, "root_checkout_guard must have exactly one manifest entry"
+    entry = entries[0]
+    assert entry["source"] == "claude/hooks/root_checkout_guard.py"
+    assert entry["hosts"]["codex"]["status"] == "ready"
+    assert entry["hosts"]["claude"]["status"] == "ready"
+
+    codex_hooks = json.loads((ROOT / ".codex" / "hooks.json").read_text())["hooks"]
+    codex_matchers = {
+        item.get("matcher", "")
+        for item in codex_hooks.get("PreToolUse", [])
+        for hook in item.get("hooks", [])
+        if hook.get("command") == ROOT_CHECKOUT_GUARD_COMMAND
+    }
+    assert {"Bash", "Write", "Edit", "NotebookEdit"} <= codex_matchers
+
+    claude_settings = json.loads((ROOT / "claude" / "settings.template.json").read_text())
+    claude_matchers = {
+        item.get("matcher", "")
+        for item in claude_settings["hooks"]["PreToolUse"]
+        for hook in item.get("hooks", [])
+        if hook.get("command") == "python3 ~/.claude/hooks/root_checkout_guard.py"
+    }
+    assert {"Bash", "Write", "Edit", "NotebookEdit"} <= claude_matchers
+
+    plugin_hooks = json.loads((CODEX_WRAPPER / "hooks" / "hooks.json").read_text())["hooks"]
+    plugin_commands = [
+        hook["command"]
+        for item in plugin_hooks.get("PreToolUse", [])
+        for hook in item.get("hooks", [])
+    ]
+    assert any("root_checkout_guard.py" in command for command in plugin_commands)
 
 
 def test_codex_generated_surfaces_do_not_use_claude_user_paths():

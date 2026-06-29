@@ -47,6 +47,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+          },
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
           },
           {
@@ -184,6 +188,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
@@ -207,6 +216,11 @@
       {
         "matcher": "Edit",
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "timeout": 5000
+          },
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
@@ -234,6 +248,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
@@ -247,6 +266,11 @@
       {
         "matcher": "mcp__serena__replace_symbol_body",
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "timeout": 5000
+          },
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
@@ -264,6 +288,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
@@ -279,12 +308,27 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
             "timeout": 5000
           }
         ]
