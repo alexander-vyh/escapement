@@ -35,6 +35,46 @@
       {
         "hooks": [
           {
+            "command": "python3 claude/hooks/root_checkout_guard.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 claude/hooks/root_checkout_guard.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Write"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 claude/hooks/root_checkout_guard.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 claude/hooks/root_checkout_guard.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "NotebookEdit"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 claude/hooks/discovery-close-gate.py",
             "timeout": 10,
             "type": "command"
