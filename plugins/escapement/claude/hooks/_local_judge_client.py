@@ -16,7 +16,7 @@ from typing import Callable, Iterable
 
 DEFAULT_BASE_URL = "http://localhost:8000/v1"
 DEFAULT_MODEL = "default"
-DEFAULT_TIMEOUT = 6.0
+DEFAULT_TIMEOUT = 60.0
 
 BASE_URL_ENV = "ESCAPEMENT_LOCAL_JUDGE_BASE_URL"
 MODEL_ENV = "ESCAPEMENT_LOCAL_JUDGE_MODEL"
@@ -120,13 +120,14 @@ def health_check(
 ) -> dict:
     """Probe the configured judge endpoint without raising."""
     verdict = boolean_verdict(
-        "ping",
-        system_prompt="Answer with ONLY one token: ready | broken",
+        "ready",
+        system_prompt="Classify. Answer only ready or broken.",
         positive_labels=("ready",),
         negative_labels=("broken",),
         base_url=base_url,
         model=model,
         timeout=timeout,
+        max_tokens=8,
         post=post,
     )
     return {
