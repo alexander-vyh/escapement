@@ -45,7 +45,9 @@ Run from anywhere:
 from __future__ import annotations
 
 import io
+import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -53,10 +55,15 @@ from unittest.mock import patch
 import pytest
 
 _hooks_dir = Path(__file__).resolve().parent.parent
-if str(_hooks_dir) not in sys.path:
-    sys.path.insert(0, str(_hooks_dir))
 
-import beads_worktree_guard as hook  # noqa: E402
+_spec = importlib.util.spec_from_file_location(
+    "beads_worktree_guard",
+    _hooks_dir / "beads_worktree_guard.py",
+)
+assert _spec is not None and _spec.loader is not None
+hook = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = hook
+_spec.loader.exec_module(hook)
 
 
 _SETTINGS_TEMPLATE = (
@@ -106,6 +113,17 @@ def _run(command: str, cwd: Path) -> tuple[int, dict, str]:
 def _make_beads_project(tmp_path: Path) -> Path:
     (tmp_path / ".beads").mkdir()
     return tmp_path
+
+
+def _make_git_beads_project(tmp_path: Path) -> Path:
+    repo = _make_beads_project(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+    (repo / ".gitignore").write_text(".worktrees/\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=repo, check=True)
+    return repo
 
 
 # ---------------------------------------------------------------------------
@@ -566,3 +584,86 @@ def test_bd_created_worktree_operation_allowed(tmp_path):
     assert parsed == {}, (
         f"A2: a bd-created worktree (with redirect) must not be denied; got {raw!r}"
     )
+
+
+# ===========================================================================
+# B2 — `bd worktree create` target location guard.
+#
+# A bd-created worktree is beads-correct, but placing it inside the repo at a
+# visible path makes code indexers scan it as source. The guard must steer to an
+# ignored or outside-repo location without pretending one generated name is the
+# only valid answer.
+# ===========================================================================
+
+def test_repo_ignores_worktrees_directory():
+    root = Path(__file__).resolve().parents[3]
+    text = (root / ".gitignore").read_text(encoding="utf-8")
+    assert ".worktrees/" in text
+
+
+def test_bd_worktree_create_inside_visible_repo_path_denied_with_policy_message(tmp_path):
+    repo = _make_git_beads_project(tmp_path)
+
+    exit_code, parsed, raw = _run(
+        "bd worktree create reconcile-bookings-finance -b DWDEV-123",
+        repo,
+    )
+
+    assert exit_code == 0
+    out = parsed["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny", raw
+    reason = out["permissionDecisionReason"]
+    assert "not ignored by git" in reason
+    assert "For the same slug" in reason
+    assert "bd worktree create .worktrees/reconcile-bookings-finance -b DWDEV-123" in reason
+    assert "choosing another ignored or outside-repo path is also fine" in reason
+    assert "Use `bd worktree create .worktrees/reconcile-bookings-finance" not in reason
+
+
+def test_bd_worktree_create_under_ignored_worktrees_dir_allowed(tmp_path):
+    repo = _make_git_beads_project(tmp_path)
+
+    exit_code, parsed, raw = _run(
+        "bd worktree create .worktrees/reconcile-bookings-finance -b DWDEV-123",
+        repo,
+    )
+
+    assert exit_code == 0
+    assert parsed == {}, raw
+
+
+def test_bd_worktree_create_outside_repo_allowed(tmp_path):
+    repo = _make_git_beads_project(tmp_path)
+
+    exit_code, parsed, raw = _run(
+        "bd worktree create ../reconcile-bookings-finance -b DWDEV-123",
+        repo,
+    )
+
+    assert exit_code == 0
+    assert parsed == {}, raw
+
+
+def test_bd_worktree_location_placeholder_waiver_still_denies(tmp_path):
+    repo = _make_git_beads_project(tmp_path)
+
+    _, parsed, raw = _run(
+        "bd worktree create reconcile-bookings-finance -b DWDEV-123 "
+        "# beads-worktree-waiver: <reason>",
+        repo,
+    )
+
+    assert parsed.get("hookSpecificOutput", {}).get("permissionDecision") == "deny", raw
+
+
+def test_bd_worktree_location_substantive_waiver_allows(tmp_path):
+    repo = _make_git_beads_project(tmp_path)
+
+    exit_code, parsed, raw = _run(
+        "bd worktree create reconcile-bookings-finance -b DWDEV-123 "
+        "# beads-worktree-waiver: reproducing old bad layout for cleanup",
+        repo,
+    )
+
+    assert exit_code == 0
+    assert parsed == {}, raw

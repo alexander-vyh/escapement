@@ -19,6 +19,7 @@ CODEX_PLUGIN_ROOT = Path("plugins/escapement")
 CLAUDE_PLUGIN_ROOT = Path("plugins/escapement-claude")
 VALID_STATUSES = {"ready", "partial", "unsupported"}
 SHARED_HOOK_SUPPORT = {
+    "claude/hooks/beads_worktree_location_guard.py",
     "claude/hooks/_gate_signal.py",
     "claude/hooks/_local_judge_client.py",
 }
