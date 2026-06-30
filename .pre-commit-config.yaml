@@ -1,0 +1,11 @@
+# Pre-commit hooks for escapement.
+#
+# Install once with:  pre-commit install
+# The gitleaks hook is the secret-scanning control the workflow rules assume
+# exists (research-findings-persistence.md). It scans staged changes against
+# .gitleaks.toml before each commit, so a secret never reaches history.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

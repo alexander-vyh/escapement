@@ -32,6 +32,7 @@ from typing import Callable, List, Optional, Tuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import wakeup_dispatch as wd  # noqa: E402
+import trusted_source as ts  # noqa: E402
 
 HARNESS_ROOT = pathlib.Path(
     os.environ.get("CONTINUATION_HARNESS_HOME", pathlib.Path.home() / ".claude" / "harness")
@@ -140,6 +141,13 @@ def main(argv=None) -> int:
     total_spawns = []
     exit_code = 0
     for sched in root.glob("*/scheduled.json"):
+        # Trust boundary: a check entry's `command` is shell-executed by the
+        # launchd-detached waker. Refuse any schedule another local user could
+        # have rewritten (wrong owner, or group/world-writable file or dir).
+        if not ts.is_trusted_file(sched):
+            print(f"skipped untrusted schedule (unsafe ownership/permissions): {sched}",
+                  file=sys.stderr)
+            continue
         lock_file = None
         if args.fire:
             lock_file = _try_lock(sched)
