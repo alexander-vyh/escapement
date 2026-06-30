@@ -1,0 +1,22 @@
+# Gitleaks config for escapement.
+#
+# Closes the "cited in prose, absent in the repo" gap: research-findings-persistence.md
+# relies on a gitleaks pre-commit hook that did not exist. This config powers three
+# enforcement points — the pre-commit hook (.pre-commit-config.yaml), the CI gate
+# (.github/workflows/tests.yml), and the planted-secret oracle (tests/test_gitleaks_control.py).
+#
+# It extends the built-in ruleset rather than redefining it, so new upstream
+# detections arrive for free.
+
+title = "escapement gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Paths and patterns that legitimately contain secret-shaped fixtures"
+paths = [
+  # The control's own oracle assembles a fake AWS key at runtime; this guards
+  # against any future inline fixture in the test tripping the gate on itself.
+  '''tests/test_gitleaks_control\.py''',
+]
