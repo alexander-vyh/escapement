@@ -35,7 +35,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B claude/hooks/root_checkout_guard.py",
             "timeout": 10,
             "type": "command"
           }
@@ -45,7 +45,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B claude/hooks/root_checkout_guard.py",
             "timeout": 10,
             "type": "command"
           }
@@ -55,7 +55,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B claude/hooks/root_checkout_guard.py",
             "timeout": 10,
             "type": "command"
           }
@@ -65,7 +65,7 @@
       {
         "hooks": [
           {
-            "command": "python3 claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B claude/hooks/root_checkout_guard.py",
             "timeout": 10,
             "type": "command"
           }

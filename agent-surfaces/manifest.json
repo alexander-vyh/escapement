@@ -202,25 +202,25 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/root_checkout_guard.py",
+              "command": "python3 -B claude/hooks/root_checkout_guard.py",
               "timeout_seconds": 10
             },
             {
               "event": "PreToolUse",
               "matcher": "Write",
-              "command": "python3 claude/hooks/root_checkout_guard.py",
+              "command": "python3 -B claude/hooks/root_checkout_guard.py",
               "timeout_seconds": 10
             },
             {
               "event": "PreToolUse",
               "matcher": "Edit",
-              "command": "python3 claude/hooks/root_checkout_guard.py",
+              "command": "python3 -B claude/hooks/root_checkout_guard.py",
               "timeout_seconds": 10
             },
             {
               "event": "PreToolUse",
               "matcher": "NotebookEdit",
-              "command": "python3 claude/hooks/root_checkout_guard.py",
+              "command": "python3 -B claude/hooks/root_checkout_guard.py",
               "timeout_seconds": 10
             }
           ],
@@ -235,42 +235,42 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+              "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Write",
-              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+              "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Edit",
-              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+              "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "NotebookEdit",
-              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+              "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "MultiEdit",
-              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+              "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__serena__replace_symbol_body",
-              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+              "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__serena__insert_after_symbol",
-              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+              "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__serena__insert_before_symbol",
-              "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+              "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
             }
           ],
           "fixtures": [

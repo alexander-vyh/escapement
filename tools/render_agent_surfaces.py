@@ -123,6 +123,8 @@ def _render_codex_hooks(manifest: dict[str, Any]) -> str:
 
 
 def _codex_plugin_command(command: str) -> str:
+    if command.startswith("python3 -B claude/hooks/"):
+        return command.replace("python3 -B ", 'python3 -B "${PLUGIN_ROOT}/', 1) + '"'
     if command.startswith("python3 claude/hooks/"):
         return command.replace("python3 ", 'python3 "${PLUGIN_ROOT}/', 1) + '"'
     return command
