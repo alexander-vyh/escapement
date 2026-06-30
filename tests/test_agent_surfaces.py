@@ -16,11 +16,11 @@ CODEX_WRAPPER = ROOT / "plugins" / "escapement"
 EXPECTED_CODEX_GATE = {
     "event": "PreToolUse",
     "matcher": "Bash",
-    "command": "python3 claude/hooks/test_oracle_brief_gate.py",
+    "command": "python3 -B claude/hooks/test_oracle_brief_gate.py",
     "timeout": 5,
 }
-CODEX_FINAL_RESPONSE_GAP_COMMAND = "python3 claude/hooks/codex_final_response_gap.py"
-CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"
+CODEX_FINAL_RESPONSE_GAP_COMMAND = "python3 -B claude/hooks/codex_final_response_gap.py"
+CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = 'python3 -B "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"'
 ROOT_CHECKOUT_GUARD_COMMAND = "python3 -B claude/hooks/root_checkout_guard.py"
 CLAUDE_ROOT_CHECKOUT_GUARD_COMMAND = "python3 -B ~/.claude/hooks/root_checkout_guard.py"
 CODEX_PLUGIN_ROOT_CHECKOUT_GUARD_FRAGMENT = 'python3 -B "${PLUGIN_ROOT}/claude/hooks/root_checkout_guard.py"'
@@ -173,7 +173,66 @@ def test_codex_hooks_include_prime_and_behavioral_gate():
         for hook in item["hooks"]
     ]
     assert "bd prime" in commands
-    assert "python3 claude/hooks/test_oracle_brief_gate.py" in commands
+    assert EXPECTED_CODEX_GATE["command"] in commands
+
+
+def test_codex_repo_relative_python_hooks_disable_bytecode():
+    """Codex hooks run inside the repo; Python hooks must not leave __pycache__ residue."""
+    hooks = json.loads((ROOT / ".codex" / "hooks.json").read_text())["hooks"]
+    commands = [
+        hook["command"]
+        for event_items in hooks.values()
+        for item in event_items
+        for hook in item["hooks"]
+    ]
+
+    offenders = [command for command in commands if command.startswith("python3 claude/hooks/")]
+    assert offenders == []
+    assert any(command.startswith("python3 -B claude/hooks/") for command in commands)
+
+    plugin_hooks = json.loads((CODEX_WRAPPER / "hooks" / "hooks.json").read_text())["hooks"]
+    plugin_commands = [
+        hook["command"]
+        for event_items in plugin_hooks.values()
+        for item in event_items
+        for hook in item["hooks"]
+    ]
+    plugin_offenders = [
+        command
+        for command in plugin_commands
+        if command.startswith('python3 "${PLUGIN_ROOT}/claude/hooks/')
+    ]
+    assert plugin_offenders == []
+
+
+def test_claude_python_hooks_disable_bytecode():
+    """Claude templates and vendored plugin hooks should not write Python bytecode caches."""
+    settings = json.loads((ROOT / "claude" / "settings.template.json").read_text())
+    setting_commands = [
+        hook["command"]
+        for event_items in settings["hooks"].values()
+        for item in event_items
+        for hook in item.get("hooks", [])
+    ]
+    setting_offenders = [
+        command for command in setting_commands if command.startswith("python3 ~/.claude/")
+    ]
+    assert setting_offenders == []
+    assert any(command.startswith("python3 -B ~/.claude/") for command in setting_commands)
+
+    plugin_hooks = json.loads((ROOT / "plugins" / "escapement-claude" / "hooks" / "hooks.json").read_text())["hooks"]
+    plugin_commands = [
+        hook["command"]
+        for event_items in plugin_hooks.values()
+        for item in event_items
+        for hook in item["hooks"]
+    ]
+    plugin_offenders = [
+        command
+        for command in plugin_commands
+        if command.startswith('python3 "${CLAUDE_PLUGIN_ROOT}/')
+    ]
+    assert plugin_offenders == []
 
 
 def test_codex_hooks_include_final_response_gap_warning():
@@ -487,7 +546,7 @@ def test_claude_plugin_hooks_do_not_depend_on_user_local_claude_paths():
         for h in item["hooks"]
     ]
     assert all("~/.claude" not in command for command in commands)
-    assert 'python3 "${CLAUDE_PLUGIN_ROOT}/harness/bin/stop_hook.py"' in commands
+    assert 'python3 -B "${CLAUDE_PLUGIN_ROOT}/harness/bin/stop_hook.py"' in commands
 
 
 def test_claude_plugin_bundles_shared_judge_support():

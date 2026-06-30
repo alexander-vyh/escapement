@@ -77,7 +77,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/test_oracle_brief_gate.py",
+              "command": "python3 -B claude/hooks/test_oracle_brief_gate.py",
               "timeout_seconds": 5
             }
           ],
@@ -92,7 +92,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Write|Edit|NotebookEdit|mcp__serena__replace_symbol_body|mcp__serena__insert_after_symbol|mcp__serena__insert_before_symbol",
-              "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+              "command": "python3 -B ~/.claude/hooks/test_oracle_brief_gate.py",
               "timeout": 5000
             }
           ],
@@ -117,7 +117,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Agent|Bash(bd close:*)|Bash(bd update:*)",
-              "command": "python3 ~/.claude/hooks/review_gate.py"
+              "command": "python3 -B ~/.claude/hooks/review_gate.py"
             }
           ],
           "fixtures": [
@@ -141,7 +141,7 @@
             {
               "event": "Stop",
               "matcher": "",
-              "command": "python3 ~/.claude/harness/bin/stop_hook.py"
+              "command": "python3 -B ~/.claude/harness/bin/stop_hook.py"
             }
           ],
           "fixtures": [
@@ -162,7 +162,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/beads_worktree_guard.py",
+              "command": "python3 -B claude/hooks/beads_worktree_guard.py",
               "timeout_seconds": 10
             }
           ],
@@ -177,12 +177,12 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash(git worktree add:*)",
-              "command": "python3 ~/.claude/hooks/beads_worktree_guard.py"
+              "command": "python3 -B ~/.claude/hooks/beads_worktree_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Bash(git:*)",
-              "command": "python3 ~/.claude/hooks/beads_worktree_guard.py"
+              "command": "python3 -B ~/.claude/hooks/beads_worktree_guard.py"
             }
           ],
           "fixtures": [
@@ -294,7 +294,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/hooks/cache_write_guard.py"
+              "command": "python3 -B ~/.claude/hooks/cache_write_guard.py"
             }
           ],
           "fixtures": [
@@ -318,22 +318,22 @@
             {
               "event": "PreToolUse",
               "matcher": "Agent",
-              "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+              "command": "python3 -B ~/.claude/hooks/context_burn_detector.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Read",
-              "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+              "command": "python3 -B ~/.claude/hooks/context_burn_detector.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Grep",
-              "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+              "command": "python3 -B ~/.claude/hooks/context_burn_detector.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Glob",
-              "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+              "command": "python3 -B ~/.claude/hooks/context_burn_detector.py"
             }
           ],
           "fixtures": [
@@ -353,7 +353,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 claude/hooks/codex_final_response_gap.py",
+              "command": "python3 -B claude/hooks/codex_final_response_gap.py",
               "timeout_seconds": 5
             }
           ],
@@ -383,12 +383,12 @@
             {
               "event": "PostToolUse",
               "matcher": "Write",
-              "command": "python3 ~/.claude/hooks/design_doc_location_guard.py"
+              "command": "python3 -B ~/.claude/hooks/design_doc_location_guard.py"
             },
             {
               "event": "PostToolUse",
               "matcher": "Edit",
-              "command": "python3 ~/.claude/hooks/design_doc_location_guard.py"
+              "command": "python3 -B ~/.claude/hooks/design_doc_location_guard.py"
             }
           ],
           "fixtures": [
@@ -408,7 +408,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/discovery-close-gate.py",
+              "command": "python3 -B claude/hooks/discovery-close-gate.py",
               "timeout_seconds": 10
             }
           ],
@@ -423,7 +423,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash(bd close:*)",
-              "command": "python3 ~/.claude/hooks/discovery-close-gate.py"
+              "command": "python3 -B ~/.claude/hooks/discovery-close-gate.py"
             }
           ],
           "fixtures": [
@@ -443,7 +443,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/discovery-gate.py",
+              "command": "python3 -B claude/hooks/discovery-gate.py",
               "timeout_seconds": 10
             }
           ],
@@ -458,7 +458,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash(bd create:*)",
-              "command": "python3 ~/.claude/hooks/discovery-gate.py"
+              "command": "python3 -B ~/.claude/hooks/discovery-gate.py"
             }
           ],
           "fixtures": [
@@ -482,7 +482,7 @@
             {
               "event": "UserPromptSubmit",
               "matcher": "",
-              "command": "python3 ~/.claude/hooks/discovery-nudge.py"
+              "command": "python3 -B ~/.claude/hooks/discovery-nudge.py"
             }
           ],
           "fixtures": [
@@ -506,12 +506,12 @@
             {
               "event": "PreToolUse",
               "matcher": "Write",
-              "command": "python3 ~/.claude/hooks/discovery_input_gate.py"
+              "command": "python3 -B ~/.claude/hooks/discovery_input_gate.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Edit",
-              "command": "python3 ~/.claude/hooks/discovery_input_gate.py"
+              "command": "python3 -B ~/.claude/hooks/discovery_input_gate.py"
             }
           ],
           "fixtures": [
@@ -535,7 +535,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Agent",
-              "command": "python3 ~/.claude/hooks/enforce_named_agents.py"
+              "command": "python3 -B ~/.claude/hooks/enforce_named_agents.py"
             }
           ],
           "fixtures": [
@@ -555,7 +555,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/epic_coverage_gate.py",
+              "command": "python3 -B claude/hooks/epic_coverage_gate.py",
               "timeout_seconds": 10
             }
           ],
@@ -570,7 +570,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash(bd close:*)",
-              "command": "python3 ~/.claude/hooks/epic_coverage_gate.py"
+              "command": "python3 -B ~/.claude/hooks/epic_coverage_gate.py"
             }
           ],
           "fixtures": [
@@ -594,12 +594,12 @@
             {
               "event": "PreToolUse",
               "matcher": "Write",
-              "command": "python3 ~/.claude/hooks/gate_design_nudge.py"
+              "command": "python3 -B ~/.claude/hooks/gate_design_nudge.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Edit",
-              "command": "python3 ~/.claude/hooks/gate_design_nudge.py"
+              "command": "python3 -B ~/.claude/hooks/gate_design_nudge.py"
             }
           ],
           "fixtures": [
@@ -619,7 +619,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/implementation_echo_test_gate.py",
+              "command": "python3 -B claude/hooks/implementation_echo_test_gate.py",
               "timeout_seconds": 10
             }
           ],
@@ -633,7 +633,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/hooks/implementation_echo_test_gate.py"
+              "command": "python3 -B ~/.claude/hooks/implementation_echo_test_gate.py"
             }
           ],
           "fixtures": [
@@ -653,7 +653,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 claude/hooks/mol_status_check.py",
+              "command": "python3 -B claude/hooks/mol_status_check.py",
               "timeout_seconds": 10
             }
           ],
@@ -668,7 +668,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 ~/.claude/hooks/mol_status_check.py"
+              "command": "python3 -B ~/.claude/hooks/mol_status_check.py"
             }
           ],
           "fixtures": [
@@ -692,22 +692,22 @@
             {
               "event": "PreToolUse",
               "matcher": "mcp__plugin_slack_slack__slack_send_message",
-              "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+              "command": "python3 -B ~/.claude/hooks/no_direct_send_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__plugin_slack_slack__slack_schedule_message",
-              "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+              "command": "python3 -B ~/.claude/hooks/no_direct_send_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__claude_ai_Slack__slack_send_message",
-              "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+              "command": "python3 -B ~/.claude/hooks/no_direct_send_guard.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__claude_ai_Slack__slack_schedule_message",
-              "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+              "command": "python3 -B ~/.claude/hooks/no_direct_send_guard.py"
             }
           ],
           "fixtures": [
@@ -727,7 +727,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/openspec_init_guard.py",
+              "command": "python3 -B claude/hooks/openspec_init_guard.py",
               "timeout_seconds": 10
             }
           ],
@@ -742,7 +742,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash(openspec:*)",
-              "command": "python3 ~/.claude/hooks/openspec_init_guard.py"
+              "command": "python3 -B ~/.claude/hooks/openspec_init_guard.py"
             }
           ],
           "fixtures": [
@@ -762,7 +762,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/openspec_task_reconciliation_gate.py",
+              "command": "python3 -B claude/hooks/openspec_task_reconciliation_gate.py",
               "timeout_seconds": 10
             }
           ],
@@ -777,7 +777,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash(bd close:*)",
-              "command": "python3 ~/.claude/hooks/openspec_task_reconciliation_gate.py"
+              "command": "python3 -B ~/.claude/hooks/openspec_task_reconciliation_gate.py"
             }
           ],
           "fixtures": [
@@ -797,7 +797,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/oracle_downgrade_warning_gate.py",
+              "command": "python3 -B claude/hooks/oracle_downgrade_warning_gate.py",
               "timeout_seconds": 10
             }
           ],
@@ -811,7 +811,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/hooks/oracle_downgrade_warning_gate.py"
+              "command": "python3 -B ~/.claude/hooks/oracle_downgrade_warning_gate.py"
             }
           ],
           "fixtures": [
@@ -831,7 +831,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/outcome_assertion_gate.py",
+              "command": "python3 -B claude/hooks/outcome_assertion_gate.py",
               "timeout_seconds": 10
             }
           ],
@@ -846,7 +846,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash(gh pr create:*)",
-              "command": "python3 ~/.claude/hooks/outcome_assertion_gate.py"
+              "command": "python3 -B ~/.claude/hooks/outcome_assertion_gate.py"
             }
           ],
           "fixtures": [
@@ -870,7 +870,7 @@
             {
               "event": "UserPromptSubmit",
               "matcher": "",
-              "command": "python3 ~/.claude/hooks/review_nudge.py"
+              "command": "python3 -B ~/.claude/hooks/review_nudge.py"
             }
           ],
           "fixtures": [
@@ -894,12 +894,12 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
+              "command": "python3 -B ~/.claude/hooks/serena_preference_gate.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Read",
-              "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
+              "command": "python3 -B ~/.claude/hooks/serena_preference_gate.py"
             }
           ],
           "fixtures": [
@@ -923,7 +923,7 @@
             {
               "event": "UserPromptSubmit",
               "matcher": "",
-              "command": "python3 ~/.claude/hooks/serena_preference_injection.py"
+              "command": "python3 -B ~/.claude/hooks/serena_preference_injection.py"
             }
           ],
           "fixtures": [
@@ -943,7 +943,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 claude/hooks/session_cleanup.py",
+              "command": "python3 -B claude/hooks/session_cleanup.py",
               "timeout_seconds": 10
             }
           ],
@@ -957,7 +957,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 ~/.claude/hooks/session_cleanup.py"
+              "command": "python3 -B ~/.claude/hooks/session_cleanup.py"
             }
           ],
           "fixtures": [
@@ -977,7 +977,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 claude/hooks/session_status.py",
+              "command": "python3 -B claude/hooks/session_status.py",
               "timeout_seconds": 10
             }
           ],
@@ -992,7 +992,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 ~/.claude/hooks/session_status.py"
+              "command": "python3 -B ~/.claude/hooks/session_status.py"
             }
           ],
           "fixtures": [
@@ -1012,7 +1012,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 claude/hooks/spec_id_enforcement.py",
+              "command": "python3 -B claude/hooks/spec_id_enforcement.py",
               "timeout_seconds": 10
             }
           ],
@@ -1027,7 +1027,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash(bd create:*)",
-              "command": "python3 ~/.claude/hooks/spec_id_enforcement.py"
+              "command": "python3 -B ~/.claude/hooks/spec_id_enforcement.py"
             }
           ],
           "fixtures": [
@@ -1051,32 +1051,32 @@
             {
               "event": "PreToolUse",
               "matcher": "Write",
-              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+              "command": "python3 -B ~/.claude/hooks/tdd-gate.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "Edit",
-              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+              "command": "python3 -B ~/.claude/hooks/tdd-gate.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "NotebookEdit",
-              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+              "command": "python3 -B ~/.claude/hooks/tdd-gate.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__serena__replace_symbol_body",
-              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+              "command": "python3 -B ~/.claude/hooks/tdd-gate.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__serena__insert_after_symbol",
-              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+              "command": "python3 -B ~/.claude/hooks/tdd-gate.py"
             },
             {
               "event": "PreToolUse",
               "matcher": "mcp__serena__insert_before_symbol",
-              "command": "python3 ~/.claude/hooks/tdd-gate.py"
+              "command": "python3 -B ~/.claude/hooks/tdd-gate.py"
             }
           ],
           "fixtures": [
@@ -1100,12 +1100,12 @@
             {
               "event": "PostToolUse",
               "matcher": "Write",
-              "command": "python3 ~/.claude/hooks/test_reminder.py"
+              "command": "python3 -B ~/.claude/hooks/test_reminder.py"
             },
             {
               "event": "PostToolUse",
               "matcher": "Edit",
-              "command": "python3 ~/.claude/hooks/test_reminder.py"
+              "command": "python3 -B ~/.claude/hooks/test_reminder.py"
             }
           ],
           "fixtures": [
@@ -1129,12 +1129,12 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+              "command": "python3 -B ~/.claude/hooks/validate_no_shirking.py"
             },
             {
               "event": "Stop",
               "matcher": "",
-              "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+              "command": "python3 -B ~/.claude/hooks/validate_no_shirking.py"
             }
           ],
           "fixtures": [
@@ -1182,7 +1182,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/hooks/bypass_guard.py"
+              "command": "python3 -B ~/.claude/hooks/bypass_guard.py"
             }
           ],
           "fixtures": [
@@ -1206,7 +1206,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/hooks/ceiling_push_cap.py"
+              "command": "python3 -B ~/.claude/hooks/ceiling_push_cap.py"
             }
           ],
           "fixtures": [
@@ -1230,7 +1230,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Write|Edit",
-              "command": "python3 ~/.claude/hooks/file_complexity_gate.py",
+              "command": "python3 -B ~/.claude/hooks/file_complexity_gate.py",
               "timeout": 5000
             }
           ],
@@ -1255,7 +1255,7 @@
             {
               "event": "PostToolUse",
               "matcher": "ScheduleWakeup",
-              "command": "python3 ~/.claude/harness/bin/schedule_wakeup_bridge.py"
+              "command": "python3 -B ~/.claude/harness/bin/schedule_wakeup_bridge.py"
             }
           ],
           "fixtures": [
@@ -1279,7 +1279,7 @@
             {
               "event": "PreToolUse",
               "matcher": "Bash",
-              "command": "python3 ~/.claude/harness/bin/task_mode_entry.py"
+              "command": "python3 -B ~/.claude/harness/bin/task_mode_entry.py"
             }
           ],
           "fixtures": [
@@ -1303,7 +1303,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 ~/.claude/harness/bin/session_watermark.py"
+              "command": "python3 -B ~/.claude/harness/bin/session_watermark.py"
             }
           ],
           "fixtures": [
@@ -1327,7 +1327,7 @@
             {
               "event": "SessionStart",
               "matcher": "",
-              "command": "python3 ~/.claude/harness/bin/reconcile_incidents.py --quiet"
+              "command": "python3 -B ~/.claude/harness/bin/reconcile_incidents.py --quiet"
             }
           ],
           "fixtures": [

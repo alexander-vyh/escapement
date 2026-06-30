@@ -11,16 +11,16 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/session_cleanup.py"
+            "command": "python3 -B ~/.claude/hooks/session_cleanup.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/session_status.py",
+            "command": "python3 -B ~/.claude/hooks/session_status.py",
             "timeout": 10000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/mol_status_check.py",
+            "command": "python3 -B ~/.claude/hooks/mol_status_check.py",
             "timeout": 10000
           },
           {
@@ -30,12 +30,12 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/harness/bin/session_watermark.py",
+            "command": "python3 -B ~/.claude/harness/bin/session_watermark.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/harness/bin/reconcile_incidents.py --quiet",
+            "command": "python3 -B ~/.claude/harness/bin/reconcile_incidents.py --quiet",
             "timeout": 10000
           }
         ]
@@ -51,33 +51,33 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+            "command": "python3 -B ~/.claude/hooks/validate_no_shirking.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/bypass_guard.py"
+            "command": "python3 -B ~/.claude/hooks/bypass_guard.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/ceiling_push_cap.py"
+            "command": "python3 -B ~/.claude/hooks/ceiling_push_cap.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/implementation_echo_test_gate.py",
+            "command": "python3 -B ~/.claude/hooks/implementation_echo_test_gate.py",
             "timeout": 10000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
+            "command": "python3 -B ~/.claude/hooks/serena_preference_gate.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/cache_write_guard.py",
+            "command": "python3 -B ~/.claude/hooks/cache_write_guard.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/harness/bin/task_mode_entry.py",
+            "command": "python3 -B ~/.claude/harness/bin/task_mode_entry.py",
             "timeout": 5000
           }
         ]
@@ -87,7 +87,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/outcome_assertion_gate.py"
+            "command": "python3 -B ~/.claude/hooks/outcome_assertion_gate.py"
           }
         ]
       },
@@ -96,7 +96,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/discovery-gate.py"
+            "command": "python3 -B ~/.claude/hooks/discovery-gate.py"
           }
         ]
       },
@@ -105,19 +105,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/openspec_task_reconciliation_gate.py"
+            "command": "python3 -B ~/.claude/hooks/openspec_task_reconciliation_gate.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/discovery-close-gate.py"
+            "command": "python3 -B ~/.claude/hooks/discovery-close-gate.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/review_gate.py"
+            "command": "python3 -B ~/.claude/hooks/review_gate.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/epic_coverage_gate.py"
+            "command": "python3 -B ~/.claude/hooks/epic_coverage_gate.py"
           }
         ]
       },
@@ -126,7 +126,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/review_gate.py"
+            "command": "python3 -B ~/.claude/hooks/review_gate.py"
           }
         ]
       },
@@ -135,7 +135,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/spec_id_enforcement.py"
+            "command": "python3 -B ~/.claude/hooks/spec_id_enforcement.py"
           }
         ]
       },
@@ -144,7 +144,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/openspec_init_guard.py"
+            "command": "python3 -B ~/.claude/hooks/openspec_init_guard.py"
           }
         ]
       },
@@ -153,7 +153,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/beads_worktree_guard.py"
+            "command": "python3 -B ~/.claude/hooks/beads_worktree_guard.py"
           }
         ]
       },
@@ -162,7 +162,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/beads_worktree_guard.py"
+            "command": "python3 -B ~/.claude/hooks/beads_worktree_guard.py"
           }
         ]
       },
@@ -171,15 +171,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/enforce_named_agents.py"
+            "command": "python3 -B ~/.claude/hooks/enforce_named_agents.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+            "command": "python3 -B ~/.claude/hooks/context_burn_detector.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/review_gate.py"
+            "command": "python3 -B ~/.claude/hooks/review_gate.py"
           }
         ]
       },
@@ -193,22 +193,22 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "command": "python3 -B ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "command": "python3 -B ~/.claude/hooks/tdd-gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/discovery_input_gate.py",
+            "command": "python3 -B ~/.claude/hooks/discovery_input_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/gate_design_nudge.py",
+            "command": "python3 -B ~/.claude/hooks/gate_design_nudge.py",
             "timeout": 5000
           }
         ]
@@ -223,22 +223,22 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "command": "python3 -B ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "command": "python3 -B ~/.claude/hooks/tdd-gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/discovery_input_gate.py",
+            "command": "python3 -B ~/.claude/hooks/discovery_input_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/gate_design_nudge.py",
+            "command": "python3 -B ~/.claude/hooks/gate_design_nudge.py",
             "timeout": 5000
           }
         ]
@@ -253,12 +253,12 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "command": "python3 -B ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "command": "python3 -B ~/.claude/hooks/tdd-gate.py",
             "timeout": 5000
           }
         ]
@@ -273,12 +273,12 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "command": "python3 -B ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "command": "python3 -B ~/.claude/hooks/tdd-gate.py",
             "timeout": 5000
           }
         ]
@@ -293,12 +293,12 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "command": "python3 -B ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "command": "python3 -B ~/.claude/hooks/tdd-gate.py",
             "timeout": 5000
           }
         ]
@@ -313,12 +313,12 @@
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/test_oracle_brief_gate.py",
+            "command": "python3 -B ~/.claude/hooks/test_oracle_brief_gate.py",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/tdd-gate.py",
+            "command": "python3 -B ~/.claude/hooks/tdd-gate.py",
             "timeout": 5000
           }
         ]
@@ -338,7 +338,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+            "command": "python3 -B ~/.claude/hooks/no_direct_send_guard.py"
           }
         ]
       },
@@ -347,7 +347,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+            "command": "python3 -B ~/.claude/hooks/no_direct_send_guard.py"
           }
         ]
       },
@@ -356,7 +356,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+            "command": "python3 -B ~/.claude/hooks/no_direct_send_guard.py"
           }
         ]
       },
@@ -365,7 +365,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/no_direct_send_guard.py"
+            "command": "python3 -B ~/.claude/hooks/no_direct_send_guard.py"
           }
         ]
       },
@@ -374,11 +374,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/serena_preference_gate.py"
+            "command": "python3 -B ~/.claude/hooks/serena_preference_gate.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+            "command": "python3 -B ~/.claude/hooks/context_burn_detector.py"
           }
         ]
       },
@@ -387,7 +387,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+            "command": "python3 -B ~/.claude/hooks/context_burn_detector.py"
           }
         ]
       },
@@ -396,7 +396,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/context_burn_detector.py"
+            "command": "python3 -B ~/.claude/hooks/context_burn_detector.py"
           }
         ]
       }
@@ -406,15 +406,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/discovery-nudge.py"
+            "command": "python3 -B ~/.claude/hooks/discovery-nudge.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/review_nudge.py"
+            "command": "python3 -B ~/.claude/hooks/review_nudge.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/serena_preference_injection.py"
+            "command": "python3 -B ~/.claude/hooks/serena_preference_injection.py"
           }
         ]
       }
@@ -425,11 +425,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/design_doc_location_guard.py"
+            "command": "python3 -B ~/.claude/hooks/design_doc_location_guard.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/test_reminder.py"
+            "command": "python3 -B ~/.claude/hooks/test_reminder.py"
           }
         ]
       },
@@ -438,11 +438,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/design_doc_location_guard.py"
+            "command": "python3 -B ~/.claude/hooks/design_doc_location_guard.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/test_reminder.py"
+            "command": "python3 -B ~/.claude/hooks/test_reminder.py"
           }
         ]
       },
@@ -451,7 +451,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/harness/bin/schedule_wakeup_bridge.py"
+            "command": "python3 -B ~/.claude/harness/bin/schedule_wakeup_bridge.py"
           }
         ]
       }
@@ -461,11 +461,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/validate_no_shirking.py"
+            "command": "python3 -B ~/.claude/hooks/validate_no_shirking.py"
           },
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/oracle_downgrade_stop.py"
+            "command": "python3 -B ~/.claude/hooks/oracle_downgrade_stop.py"
           }
         ]
       },
@@ -473,7 +473,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/harness/bin/stop_hook.py"
+            "command": "python3 -B ~/.claude/harness/bin/stop_hook.py"
           }
         ]
       }
