@@ -41,6 +41,8 @@ except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
 
+from beads_worktree_location_guard import evaluate_bd_worktree_location
+
 
 # B1 FIX: shlex tokenization replaces the substring regex detection for
 # `git worktree add`. The regex `\bgit\b[^\n|;&]*?\bworktree\s+add\b` matched
@@ -410,6 +412,10 @@ def main() -> int:
         )
         deny(command, cwd)
         return 0  # unreachable (deny exits)
+
+    # Location guard: a bd-created worktree is beads-correct, but still unsafe
+    # if it lives inside the repo at a path git/indexers will scan.
+    evaluate_bd_worktree_location(command, cwd, _record_signal)  # exits if denying
 
     # A2: state-changing git in a foreign beads worktree — deny and redirect.
     evaluate_worktree_operation(command, cwd)  # exits if denying

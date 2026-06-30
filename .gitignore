@@ -32,6 +32,9 @@ claude/hooks/state/
 # Serena MCP per-project navigation cache + memories (user/machine-local, created on onboarding)
 .serena/
 
+# Beads-linked worktrees live here so code indexers do not scan them as source.
+.worktrees/
+
 # Oracle-strength corpus fixtures: extracted from private session transcripts
 # (proprietary). Local-only; see bead yx3 / 09-test-oracle-brief.md.
 claude/hooks/tests/fixtures/oracle_strength/
