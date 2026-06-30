@@ -21,7 +21,9 @@ EXPECTED_CODEX_GATE = {
 }
 CODEX_FINAL_RESPONSE_GAP_COMMAND = "python3 claude/hooks/codex_final_response_gap.py"
 CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"
-ROOT_CHECKOUT_GUARD_COMMAND = "python3 claude/hooks/root_checkout_guard.py"
+ROOT_CHECKOUT_GUARD_COMMAND = "python3 -B claude/hooks/root_checkout_guard.py"
+CLAUDE_ROOT_CHECKOUT_GUARD_COMMAND = "python3 -B ~/.claude/hooks/root_checkout_guard.py"
+CODEX_PLUGIN_ROOT_CHECKOUT_GUARD_FRAGMENT = 'python3 -B "${PLUGIN_ROOT}/claude/hooks/root_checkout_guard.py"'
 MINIMUM_VERIFIED_DELIVERY_FRAGMENTS = (
     "Escapement optimizes for minimum verified delivery.",
     "YAGNI forbids speculative",
@@ -246,7 +248,7 @@ def test_root_checkout_guard_is_manifested_and_rendered_for_claude_and_codex():
         item.get("matcher", "")
         for item in claude_settings["hooks"]["PreToolUse"]
         for hook in item.get("hooks", [])
-        if hook.get("command") == "python3 ~/.claude/hooks/root_checkout_guard.py"
+        if hook.get("command") == CLAUDE_ROOT_CHECKOUT_GUARD_COMMAND
     }
     assert {"Bash", "Write", "Edit", "NotebookEdit"} <= claude_matchers
 
@@ -256,7 +258,7 @@ def test_root_checkout_guard_is_manifested_and_rendered_for_claude_and_codex():
         for item in plugin_hooks.get("PreToolUse", [])
         for hook in item.get("hooks", [])
     ]
-    assert any("root_checkout_guard.py" in command for command in plugin_commands)
+    assert CODEX_PLUGIN_ROOT_CHECKOUT_GUARD_FRAGMENT in plugin_commands
 
 
 def test_codex_generated_surfaces_do_not_use_claude_user_paths():

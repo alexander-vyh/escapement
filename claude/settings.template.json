@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/root_checkout_guard.py"
+            "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py"
           },
           {
             "type": "command",
@@ -188,7 +188,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py",
             "timeout": 5000
           },
           {
@@ -218,7 +218,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py",
             "timeout": 5000
           },
           {
@@ -248,7 +248,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py",
             "timeout": 5000
           },
           {
@@ -268,7 +268,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py",
             "timeout": 5000
           },
           {
@@ -288,7 +288,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py",
             "timeout": 5000
           },
           {
@@ -308,7 +308,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py",
             "timeout": 5000
           },
           {
@@ -328,7 +328,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/root_checkout_guard.py",
+            "command": "python3 -B ~/.claude/hooks/root_checkout_guard.py",
             "timeout": 5000
           }
         ]
