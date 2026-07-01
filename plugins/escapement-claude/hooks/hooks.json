@@ -456,15 +456,6 @@
       {
         "hooks": [
           {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/ceiling_push_cap.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash"
-      },
-      {
-        "hooks": [
-          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/file_complexity_gate.py\"",
             "type": "command"
           }

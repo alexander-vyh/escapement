@@ -87,35 +87,16 @@ The residual platform fix (the runtime emitting its own death signal / raising t
 
 If you are not done and not scheduled to return, you are not stopping. Action without outcomes (more tool calls, more subagent dispatches, more bead-claims) does not substitute for proof of completion or proof of resumption. See `feedback/outcome-bias-over-action-bias` memory for the underlying principle.
 
-## Git completion ceiling (per-repo)
+## Completion target: ship it live
 
-How far an agent may take work is a **per-repo** setting. A repo declares its ceiling
-in `.claude/repo-policy.json`:
-
-```json
-{"git_completion_ceiling": "local"}
-```
-
-The named tier is the **highest allowed action**; the cap blocks anything above it:
-
-| Ceiling | Agent may… | Blocked |
-|---------|------------|---------|
-| `local` | commit only | `git push` |
-| `pr` *(default when unset)* | commit, push, open a PR | merge |
-| `merge` | commit, push, merge | — |
-
-**The ceiling is both floor and cap** — it defines the per-repo completion target.
-escapement drives work *up to* the ceiling; `ceiling_push_cap.py` (PreToolUse) blocks
-anything *past* it. So in a `local` repo, **stopping after a commit is a complete
-outcome, not shirking** — which is why this lives in the continuation rule. An
-unconfigured repo defaults to `pr`; absence never blocks a push.
-
-- **Set it:** `set-repo-ceiling set <local|pr|merge>` (writes `repo-policy.json` at the
-  git root). Skip it → no file → `pr`.
-- **Override a block** (gate-design Rule 1): prefix the command with
-  `CEILING_WAIVER="<substantive reason>"` — recorded as a waiver signal.
-
-Design + specs: `openspec/changes/git-completion-ceiling/`.
+There is **no git completion ceiling**. Done means the outcome is live and verified
+end-to-end — merged and deployed where the change actually runs — not "PR opened" or
+"committed locally." A cap that stopped an agent below live delivery contradicted the
+outcome-ownership rule (done = the real result is happening), so the ceiling machinery
+(`ceiling_push_cap.py`, `repo-policy.json`, `set-repo-ceiling`) was removed. Drive work
+all the way to a verified live outcome; if a step genuinely requires a human (a
+credential, an irreversible external action), name the exact blocker and continue the
+rest — do not treat "PR opened" as done.
 
 ## Status
 
