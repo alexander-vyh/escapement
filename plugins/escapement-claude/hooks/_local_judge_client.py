@@ -90,6 +90,14 @@ def boolean_verdict(
         ],
         "max_tokens": max_tokens,
         "enable_thinking": False,
+        # Greedy decoding. These judges are label-only classifiers, not generators —
+        # sampling makes the SAME message flip verdict across calls, so a Stop gate
+        # built on them becomes a coin flip (observed: identical input → winddown one
+        # call, not_winddown the next). temperature 0 makes the classifier reproducible,
+        # which is a precondition for the gate being testable and for the user seeing
+        # consistent behavior. (The server may still carry mild non-determinism; the
+        # prompt is what carries correctness — this only removes the sampling noise.)
+        "temperature": 0,
     }
     call = post or _default_post
     try:

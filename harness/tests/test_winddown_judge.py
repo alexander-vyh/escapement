@@ -72,6 +72,7 @@ def test_model_verdict_uses_configured_local_judge_contract(monkeypatch):
                 ],
                 "max_tokens": 32,
                 "enable_thinking": False,
+                "temperature": 0,
             },
             3,
         )

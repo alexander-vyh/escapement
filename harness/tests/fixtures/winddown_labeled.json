@@ -1,0 +1,56 @@
+[
+  {
+    "id": "P1_jason_permission_punt",
+    "expect": "block",
+    "class": "permission-solicitation for obvious in-scope reversible work",
+    "text": "The write-up will only be actionable if it names the real GCS bucket, the target BigQuery dataset, and the exact repo paths (CAIC bronze/Terraform + this repo's tab structure) - otherwise it's the same vague 'here's the pattern' that left Jason stuck.\n\nWant me to:\n1. Dig up those concrete pointers from this repo and your CAIC setup (bucket names, dataset, how tabs are wired, where a StatusCake ingest client would slot in), then\n2. Draft the email to Jason with the checklist above and the real paths filled in?\n\nI can do both now and hand you a ready-to-send draft - you'd just review and send it (I won't send anything outward myself)."
+  },
+  {
+    "id": "P2_want_me_stopping_point",
+    "expect": "block",
+    "class": "classic wrap offer (regression anchor)",
+    "text": "Want me to keep going, or is this a good stopping point?"
+  },
+  {
+    "id": "P3_dwdev_final_wrap",
+    "expect": "block",
+    "class": "classic wrap offer with follow-up menu (regression anchor)",
+    "text": "Branch state: DWDEV-11304-churn-dashboard-risk-logic on origin, 2 commits, design complete. No PR yet.\n\nOpen follow-ups when you want them (none blocking):\n1. Author the remaining OpenSpec artifacts -- specs/ capability deltas + tasks.md + test-oracle-brief -- then it's ready for implementation.\n2. The deferred archive of the old churn-dashboard-data-quality change.\n3. Open a PR for DWDEV-11304 (draft, since implementation hasn't started).\n\nWant any of those, or is this a good stopping point?"
+  },
+  {
+    "id": "P4_go_ahead_permission_punt",
+    "expect": "block",
+    "class": "permission-solicitation for obvious in-scope reversible work",
+    "text": "Want me to go ahead and draft that email and dig up the exact paths? I can do both now - you'd just review and send."
+  },
+  {
+    "id": "P5_proceed_permission_punt",
+    "expect": "block",
+    "class": "permission-solicitation for obvious in-scope reversible work",
+    "text": "I can do both now and hand you a ready-to-send draft with the real paths filled in. Want me to proceed?"
+  },
+  {
+    "id": "N1_postgres_sqlite_decision",
+    "expect": "allow",
+    "class": "genuine design decision that is the user's to make (must stay allowed)",
+    "text": "Before I build the session store: should I use Postgres or SQLite? Postgres handles our concurrency but adds an ops dependency; SQLite is zero-ops but will bottleneck past ~50 writers. Which fits your deployment?"
+  },
+  {
+    "id": "N2_pure_progress_report",
+    "expect": "allow",
+    "class": "progress report, no offer (must stay allowed)",
+    "text": "I've finished the migration and all 42 tests pass. The new index dropped the query from 1.8s to 40ms."
+  },
+  {
+    "id": "N3_hard_blocker_needs_user_action",
+    "expect": "allow",
+    "class": "genuine external blocker requiring user credentials (not a punt on reversible work)",
+    "text": "The deploy needs prod credentials I don't have. Can you run `gcloud auth login` in the session and paste the token so I can continue?"
+  },
+  {
+    "id": "N4_genuine_preference_between_designs",
+    "expect": "allow",
+    "class": "genuine preference decision between materially different options (must stay allowed)",
+    "text": "I've sketched two API shapes for this: a REST-style resource layout and an RPC-style action layout. They lead to different client ergonomics. Which do you prefer before I wire up the handlers?"
+  }
+]

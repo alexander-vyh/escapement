@@ -48,13 +48,36 @@ DEFAULT_MODEL = _lj.DEFAULT_MODEL
 # Raise ESCAPEMENT_LOCAL_JUDGE_TIMEOUT deliberately if a machine's model needs longer.
 DEFAULT_TIMEOUT = _lj.DEFAULT_TIMEOUT
 
-# The exact system prompt validated live at 11/11.
+# The classifier definition. Two wind-down shapes, not one: the original WRAP/HANDOFF
+# offer AND the PERMISSION-PUNT (offering to do obvious in-scope reversible work and
+# asking permission instead of doing it). The permission-punt was the gap that let a
+# real "Want me to dig up X and draft Y? I can do both now — you'd just review" message
+# reach the user unblocked while the narrower wrap-only prompt classified it not_winddown.
+# The negative side is sharpened to protect GENUINE decisions (which of two materially
+# different options; irreversible/external actions) so widening recall does not start
+# nagging legitimate clarifying questions. Validated live against
+# harness/tests/fixtures/winddown_labeled.json (see test_winddown_prompt_accuracy.py).
 _SYSTEM = (
-    "You judge whether an AI coding agent's message is a WIND-DOWN / WRAP-UP / "
-    "decision-punt offer (offering to stop, wrap for the night, hand off, push-and-wrap, "
-    "or asking 'which way: continue or stop?') versus a SUBSTANTIVE work question (asking "
-    "which library/approach to use, or reporting progress). Answer with ONLY one word: "
-    "winddown | not_winddown | unclear"
+    "You classify an AI coding agent's turn-final message. Reply with ONLY one word: "
+    "winddown | not_winddown | unclear.\n\n"
+    "'winddown' = the agent is pausing when it should keep working. Two shapes:\n"
+    "  1. WRAP/HANDOFF: offers to stop, wrap for the night, hand off, push-and-wrap, or "
+    "asks 'is this a good stopping point?' / 'which way: continue or stop?'.\n"
+    "  2. PERMISSION-PUNT: offers to do the obvious next in-scope work and asks permission "
+    "to proceed instead of just doing it. Tells: 'Want me to ...?', 'Want me to go ahead "
+    "and ...?', 'I can do both now - want me to proceed?', 'you'd just review'. The work is "
+    "reversible (draft, search, edit, write-up) and the user has effectively already asked "
+    "for it, so the only honest answer is 'yes, just do it'.\n\n"
+    "'not_winddown' = a legitimate turn that should NOT be nagged:\n"
+    "  - reporting progress or results with no offer to stop;\n"
+    "  - a GENUINE decision needing the user's preference (two materially different options "
+    "with real trade-offs: which database, which architecture);\n"
+    "  - an irreversible or external action the agent must not take unilaterally (deploy to "
+    "prod, delete data, spend money, send an outward message) or that needs credentials/"
+    "access it lacks.\n\n"
+    "Decisive test: could the agent simply DO the next reversible step itself? If yes and it "
+    "is asking permission anyway -> winddown. If it genuinely needs the human to choose or "
+    "authorize -> not_winddown."
 )
 
 
