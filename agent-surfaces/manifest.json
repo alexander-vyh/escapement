@@ -1192,30 +1192,6 @@
       }
     },
     {
-      "id": "ceiling_push_cap",
-      "description": "PreToolUse gate: enforce a repo's git completion ceiling (local tier).",
-      "source": "claude/hooks/ceiling_push_cap.py",
-      "hosts": {
-        "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Not yet ported to Codex; Claude-only PreToolUse gate."
-        },
-        "claude": {
-          "status": "ready",
-          "events": [
-            {
-              "event": "PreToolUse",
-              "matcher": "Bash",
-              "command": "python3 -B ~/.claude/hooks/ceiling_push_cap.py"
-            }
-          ],
-          "fixtures": [
-            "claude/hooks/tests/test_ceiling_cap.py"
-          ]
-        }
-      }
-    },
-    {
       "id": "file_complexity_gate",
       "description": "PreToolUse gate: block Write/Edit that would push a file past 500 lines (complexity signal), unless exempt or a substantive file-complexity-waiver is present.",
       "source": "claude/hooks/file_complexity_gate.py",

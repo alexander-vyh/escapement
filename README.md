@@ -197,7 +197,6 @@ Grouped by what they protect:
 
 **Outcome verification + shirking**
 - `validate_no_shirking.py` — blocks "pre-existing failure" evasion at commit/PR/Stop
-- `ceiling_push_cap.py` — enforces a repo's git completion ceiling (`.claude/repo-policy.json`: `local`|`pr`|`merge`); blocks `git push` in a `local` repo (waiver: `CEILING_WAIVER=`). Set it with `set-repo-ceiling set <tier>`
 - `review_gate.py` — soft gate on `bd close` if no review agent was dispatched
 - `review_nudge.py` — UserPromptSubmit, nudges `/review` on review-intent prompts
 
