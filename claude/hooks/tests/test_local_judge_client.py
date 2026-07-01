@@ -65,6 +65,7 @@ def test_boolean_verdict_uses_configured_openai_compatible_contract(monkeypatch)
                 ],
                 "max_tokens": 32,
                 "enable_thinking": False,
+                "temperature": 0,
             },
             2.5,
         )
@@ -142,6 +143,7 @@ def test_default_post_parses_real_openai_compatible_http_response():
                 ],
                 "max_tokens": 32,
                 "enable_thinking": False,
+                "temperature": 0,
             },
         )
     ]
