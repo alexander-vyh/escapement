@@ -30,6 +30,12 @@
     "text": "I can do both now and hand you a ready-to-send draft with the real paths filled in. Want me to proceed?"
   },
   {
+    "id": "P6_ab_decision_with_wait_arm",
+    "expect": "block",
+    "class": "wrap dressed as an A/B decision - one arm is hold/wait-for-external-event (cake 845ae4ea live miss, 2026-07-01)",
+    "text": "The honest stopping point for building is here - phases 2-4 need phase 1 deployed and run before they can be built against real data. Want me to (a) write the phase-3 silver_jamf_computers.sql speculatively now (flagged, to be validated against the compacted schema post-deploy), or (b) hold item 1 at phase 1 until #1600 merges and the sync runs, and pick up 2-4 then?"
+  },
+  {
     "id": "N1_postgres_sqlite_decision",
     "expect": "allow",
     "class": "genuine design decision that is the user's to make (must stay allowed)",
@@ -52,5 +58,11 @@
     "expect": "allow",
     "class": "genuine preference decision between materially different options (must stay allowed)",
     "text": "I've sketched two API shapes for this: a REST-style resource layout and an RPC-style action layout. They lead to different client ergonomics. Which do you prefer before I wire up the handlers?"
+  },
+  {
+    "id": "N5_ab_decision_both_arms_forward",
+    "expect": "allow",
+    "class": "genuine (a)/(b) decision where BOTH arms are forward work (negative control against over-flagging the A/B shape)",
+    "text": "Two viable schemas for the bronze table: (a) one row per device per sync run, which keeps full history but grows ~50k rows/day, or (b) latest-state-only with an audit sidecar, which stays small but loses point-in-time queries. Both are quick to build - which matches how you'll query it?"
   }
 ]

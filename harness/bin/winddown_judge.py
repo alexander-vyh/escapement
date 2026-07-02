@@ -55,19 +55,27 @@ DEFAULT_TIMEOUT = _lj.DEFAULT_TIMEOUT
 # reach the user unblocked while the narrower wrap-only prompt classified it not_winddown.
 # The negative side is sharpened to protect GENUINE decisions (which of two materially
 # different options; irreversible/external actions) so widening recall does not start
-# nagging legitimate clarifying questions. Validated live against
-# harness/tests/fixtures/winddown_labeled.json (see test_winddown_prompt_accuracy.py).
+# nagging legitimate clarifying questions. The genuine-decision carve-out is predicated
+# on ARM CONTENT, not framing: an (a)/(b) choice where any arm is hold/wait-for-external-
+# event is a wrap dressed as a decision (the cake 845ae4ea live miss, 2026-07-01 — the
+# agent owns ScheduleWakeup for waiting, so waiting is never the user's pick to make).
+# Validated live against harness/tests/fixtures/winddown_labeled.json
+# (see test_winddown_prompt_accuracy.py).
 _SYSTEM = (
     "You classify an AI coding agent's turn-final message. Reply with ONLY one word: "
     "winddown | not_winddown | unclear.\n\n"
-    "'winddown' = the agent is pausing when it should keep working. Two shapes:\n"
+    "'winddown' = the agent is pausing when it should keep working. Three shapes:\n"
     "  1. WRAP/HANDOFF: offers to stop, wrap for the night, hand off, push-and-wrap, or "
     "asks 'is this a good stopping point?' / 'which way: continue or stop?'.\n"
     "  2. PERMISSION-PUNT: offers to do the obvious next in-scope work and asks permission "
     "to proceed instead of just doing it. Tells: 'Want me to ...?', 'Want me to go ahead "
     "and ...?', 'I can do both now - want me to proceed?', 'you'd just review'. The work is "
     "reversible (draft, search, edit, write-up) and the user has effectively already asked "
-    "for it, so the only honest answer is 'yes, just do it'.\n\n"
+    "for it, so the only honest answer is 'yes, just do it'.\n"
+    "  3. FAKE CHOICE: an (a)/(b) or either-or question where ANY option amounts to "
+    "waiting for an external event (a merge, a deploy, CI, another agent), holding, "
+    "deferring, or picking the work up later. The agent schedules its own waiting; "
+    "offering 'wait' as one of the options is a wrap dressed as a decision.\n\n"
     "'not_winddown' = a legitimate turn that should NOT be nagged:\n"
     "  - reporting progress or results with no offer to stop;\n"
     "  - a GENUINE decision needing the user's preference (two materially different options "
@@ -77,7 +85,9 @@ _SYSTEM = (
     "access it lacks.\n\n"
     "Decisive test: could the agent simply DO the next reversible step itself? If yes and it "
     "is asking permission anyway -> winddown. If it genuinely needs the human to choose or "
-    "authorize -> not_winddown."
+    "authorize -> not_winddown. But a choice only counts as genuine when every option is "
+    "work the agent would start now; if one option is wait/hold/defer, it is shape 3 -> "
+    "winddown."
 )
 
 
