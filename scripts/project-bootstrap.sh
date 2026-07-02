@@ -138,10 +138,14 @@ bootstrap_beads() {
     REPORT+=("NOTE: bd/dolt not reachable -- skipping beads init")
     return 0
   fi
-  if (cd "$CWD" && bd init --prefix "$REPO_NAME" --quiet >/dev/null 2>&1); then
-    ACTIONS+=("beads: initialized with prefix '$REPO_NAME'")
+  # --skip-hooks: never auto-install beads git hooks (post-checkout/post-merge/
+  # pre-commit/pre-push/prepare-commit-msg). The checkout/merge hooks re-import
+  # issues.jsonl and have silently reverted bd closes (jsonl-desync). There is no
+  # persistent bd config for this in 1.0.5 — the flag is the only lever.
+  if (cd "$CWD" && bd init --skip-hooks --prefix "$REPO_NAME" --quiet >/dev/null 2>&1); then
+    ACTIONS+=("beads: initialized with prefix '$REPO_NAME' (git hooks skipped)")
   else
-    REPORT+=("WARN: bd init failed -- run manually: bd init --prefix $REPO_NAME")
+    REPORT+=("WARN: bd init failed -- run manually: bd init --skip-hooks --prefix $REPO_NAME")
   fi
 }
 
@@ -178,7 +182,7 @@ repair_beads() {
   if [[ "$IS_WORKTREE" == "false" && -d "$CWD/.beads" ]]; then
     # Main repo with broken beads — try stop + reinit
     (cd "$CWD" && bd dolt stop 2>/dev/null)
-    if (cd "$CWD" && bd init --force --prefix "$REPO_NAME" >/dev/null 2>&1); then
+    if (cd "$CWD" && bd init --force --skip-hooks --prefix "$REPO_NAME" >/dev/null 2>&1); then
       # Try restoring backup if available
       if [[ -d "$CWD/.beads/backup" ]]; then
         (cd "$CWD" && bd backup restore >/dev/null 2>&1)
@@ -190,7 +194,7 @@ repair_beads() {
         return 0
       fi
     fi
-    REPORT+=("WARN: beads database broken and auto-repair failed — run: bd dolt stop && bd init --force --prefix $REPO_NAME")
+    REPORT+=("WARN: beads database broken and auto-repair failed — run: bd dolt stop && bd init --force --skip-hooks --prefix $REPO_NAME")
   fi
 }
 
