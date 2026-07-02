@@ -73,9 +73,17 @@ _PATTERNS: list[str] = [
     r"note\s+(?:this\s+|it\s+)?and\s+move\s+(?:on|past)",
     r"just\s+accept\s+the\s+(?:errors?|failures?|issues?)",
     r"accept\s+the\s+(?:errors?|failures?|issues?)\s+until",
-    # Infrastructure / CI blame — externalizing to other systems
-    r"CI\s+(?:infra(?:structure)?\s+)?(?:issue|problem|failure|error|bug)",
-    r"(?:infra(?:structure)?|pipeline|build\s+system|environment|deploy(?:ment)?|runner)\s+(?:issue|problem|failure|error|bug)",
+    # Infrastructure / CI blame — externalizing to other systems. Blame needs the
+    # DISMISSIVE COPULA FRAMING ("it's / looks like / probably an environment
+    # issue"), not the bare noun phrase: "fixed the deployment bug" is ownership,
+    # and the bare form looped the Stop gate on it (live FP 2026-07-01, cake xubhk).
+    r"(?:\bis|\bwas|it['’]?s|that['’]?s|this\s+is|seems?|appears?|looks?\s+like|"
+    r"must\s+be|probably|likely|just)\s+(?:to\s+be\s+)?(?:probably\s+|likely\s+|just\s+)?"
+    r"(?:an?\s+|the\s+|some\s+)?CI\s+(?:infra(?:structure)?\s+)?(?:issue|problem|failure|error|bug)",
+    r"(?:\bis|\bwas|it['’]?s|that['’]?s|this\s+is|seems?|appears?|looks?\s+like|"
+    r"must\s+be|probably|likely|just)\s+(?:to\s+be\s+)?(?:probably\s+|likely\s+|just\s+)?"
+    r"(?:an?\s+|the\s+|some\s+)?(?:infra(?:structure)?|pipeline|build\s+system|environment|"
+    r"deploy(?:ment)?|runner)\s+(?:issue|problem|failure|error|bug)",
     r"(?:the\s+)?(?:CI|pipeline|build|runner)\s+(?:is|seems?|appears?)\s+(?:broken|flaky|unstable|down)",
     # Deferral — punting to future work instead of fixing now
     r"(?:needs?|requires?)\s+(?:a\s+)?separate\s+(?:investigation|fix|ticket|PR|issue|effort|task|attention)",
@@ -445,7 +453,16 @@ _META_CUES = re.compile(
 _STRONG_META_CUES = re.compile(
     r"\b(?:shirk(?:ing)?|false[\s-]?positive|validate_no_shirking|the\s+hook|"
     r"this\s+(?:gate|check|hook)\s+(?:fire|match|flag|trigger|catch)\w*|"
-    r"keyword\s+match|meta[\s-]?discussion)\b",
+    r"keyword\s+match|meta[\s-]?discussion|"
+    # The gate's own category labels (hyphenated internal vocabulary — an agent
+    # actually shirking writes "it's a CI issue", never "infrastructure-blame").
+    # Plain-word labels (pre-existing, unrelated, deferral, dismissal) are NEVER
+    # cues — that would launder the real deflections they name (never-suppress).
+    r"infrastructure-blame|attribution-deflection|acceptance-evasion|"
+    r"scope-limitation|stop-solicitation|outcome\s+ownership\s+violation|"
+    # Detector verbs: classifying a phrase is gate-talk, not shirking.
+    r"flagg(?:ing|ed|s)?\s+(?:it|this|that)\s+as|was\s+flagged\s+as|"
+    r"re-?scan(?:ning|s|ned)?)\b",
     re.IGNORECASE,
 )
 
@@ -489,7 +506,7 @@ def _negation_guards(window: str) -> bool:
     return _CLAUSE_BREAK.search(tail) is None
 
 
-def _is_guarded(stripped: str, match_start: int) -> bool:
+def _is_guarded(stripped: str, match_start: int, match_end: int | None = None) -> bool:
     """True if the match at match_start is disavowed or described, not asserted.
 
     Two independent guards:
@@ -514,6 +531,15 @@ def _is_guarded(stripped: str, match_start: int) -> bool:
         strong = m
     if strong is not None and _META_SCOPE_BREAK.search(stripped[strong.end():match_start]) is None:
         return True
+    # Symmetric: a detector-naming cue AFTER the match, same sentence-clause, also
+    # guards ('that "deployment bug" phrase was flagged as infrastructure-blame' —
+    # the live 2026-07-01 loop put the cue after the quoted phrase). The scope-break
+    # rule is identical, so trailing gate-talk in a NEW sentence cannot launder an
+    # asserted shirk ("This is a pre-existing failure. The hook may flag this.").
+    if match_end is not None:
+        after = _STRONG_META_CUES.search(stripped[match_end:])
+        if after is not None and _META_SCOPE_BREAK.search(stripped[match_end:match_end + after.start()]) is None:
+            return True
     return False
 
 
@@ -547,7 +573,7 @@ def find_shirking_match(text: str) -> tuple[str, str] | None:
             # Skip matches that are disavowed ("I will NOT claim...") or
             # described ("scan for phrases like ..."); keep scanning in case a
             # later, un-guarded match of the same pattern is a real assertion.
-            if _is_guarded(stripped, m.start()):
+            if _is_guarded(stripped, m.start(), m.end()):
                 continue
             start = max(0, m.start() - 40)
             end = min(len(stripped), m.end() + 80)
@@ -598,7 +624,7 @@ def find_stop_solicitation_match(
 
     for pattern in _STOP_SOLICITATION_BACKSTOP_PATTERNS:
         for m in pattern.finditer(stripped):
-            if _is_guarded(stripped, m.start()):
+            if _is_guarded(stripped, m.start(), m.end()):
                 continue
             start = max(0, m.start() - 40)
             end = min(len(stripped), m.end() + 80)
