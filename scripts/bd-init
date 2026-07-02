@@ -55,7 +55,11 @@ is_owned() {
 
 if is_owned; then
   echo "bd-init: OWNED repo (${remote:-<none>}) → beads committable in-place"
-  "$BD" init "${args[@]}"
+  # --skip-hooks: never install beads git hooks. The post-checkout/post-merge
+  # hooks re-import issues.jsonl and have reverted bd closes; export.interval=0
+  # (set below) keeps issues.jsonl current without them. No persistent bd config
+  # exists for this in 1.0.5 — the flag is the only lever.
+  "$BD" init --skip-hooks "${args[@]}"
   excl=".git/info/exclude"
   if [ -f "$excl" ] && grep -q 'beads/issues.jsonl' "$excl"; then
     grep -v 'beads/issues\.jsonl' "$excl" > "$excl.tmp" && mv "$excl.tmp" "$excl"
@@ -65,7 +69,7 @@ if is_owned; then
   echo "bd-init: tip — 'git add .beads/issues.jsonl' rides with your normal pushes"
 else
   echo "bd-init: NON-OWNED / no-remote (${remote:-<none>}) → fork-excluded (stealth); data stays OUT of this repo"
-  "$BD" init --stealth "${args[@]}"
+  "$BD" init --stealth --skip-hooks "${args[@]}"
 fi
 
 # Eliminate the stale-JSONL revert race: with interval 0, every `bd close`/write
