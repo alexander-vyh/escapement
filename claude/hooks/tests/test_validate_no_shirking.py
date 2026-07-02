@@ -1209,3 +1209,86 @@ class TestMetaDiscussionGuard:
         assert find_shirking_match(
             "I discussed validate_no_shirking earlier. This OOM is unrelated to my change"
         ) is not None
+
+
+class TestInfrastructureBlamePrecision:
+    """Live FP 2026-07-01 (cake xubhk): the bare noun-phrase patterns for
+    infrastructure-blame ("deploy(ment)? bug", "CI issue", ...) matched OWNERSHIP
+    statements ("fixed the deployment bug") and meta-mentions, looping the Stop gate.
+    Blame requires the dismissive copula framing ("it's / looks like / probably an
+    environment issue"), not the mere noun phrase.
+    """
+
+    # --- precision: ownership / neutral mentions must NOT fire ---
+    def test_ownership_of_deployment_bug_allowed(self) -> None:
+        assert find_shirking_match(
+            "I fixed the deployment bug and redeployed; all checks are green."
+        ) is None
+
+    def test_live_cake_meta_message_allowed(self) -> None:
+        """The verbatim production FP: meta-discussion of the gate's own re-fire."""
+        assert find_shirking_match(
+            'it keeps re-scanning that earlier "deployment bug" phrase and flagging it'
+            " as infrastructure-blame. It's a genuine false positive"
+        ) is None
+
+    def test_owned_environment_issue_allowed(self) -> None:
+        assert find_shirking_match(
+            "The environment issue I introduced in the Dockerfile is fixed now."
+        ) is None
+
+    def test_debugging_ci_issue_allowed(self) -> None:
+        assert find_shirking_match(
+            "Root-caused and fixed the CI issue in our workflow config."
+        ) is None
+
+    # --- never-suppress: dismissive blame framing must STILL fire ---
+    def test_copula_environment_issue_still_fires(self) -> None:
+        assert find_shirking_match(
+            "The failure is an environment issue with the runner image."
+        ) is not None
+
+    def test_looks_like_ci_issue_still_fires(self) -> None:
+        assert find_shirking_match(
+            "Looks like a CI issue, the tests pass locally."
+        ) is not None
+
+    def test_probably_deployment_issue_still_fires(self) -> None:
+        assert find_shirking_match(
+            "That's probably a deployment issue on the platform side."
+        ) is not None
+
+    def test_pipeline_is_flaky_still_fires(self) -> None:
+        assert find_shirking_match(
+            "The pipeline is flaky today, my change is fine."
+        ) is not None
+
+
+class TestBidirectionalStrongCueGuard:
+    """858.5 follow-through: a detector-naming cue AFTER the match, in the SAME
+    sentence-clause, also guards — the live loop's meta-messages put the cue after
+    the quoted phrase. Sentence/clause breaks between match and cue still un-guard
+    (never-suppress: trailing gate-talk cannot launder an asserted shirk).
+    """
+
+    def test_cue_after_match_same_clause_guards(self) -> None:
+        assert find_shirking_match(
+            "the agent wrote \"it's probably an environment issue\" and the hook"
+            " flagged it as infrastructure-blame — a false positive"
+        ) is None
+
+    def test_category_label_after_match_guards(self) -> None:
+        assert find_shirking_match(
+            'that "unrelated to my change" phrase was flagged as attribution-deflection'
+        ) is None
+
+    def test_cue_in_next_sentence_does_not_guard(self) -> None:
+        """NC: shirk asserted, THEN gate-talk in a new sentence ⇒ still fires."""
+        assert find_shirking_match(
+            "This is a pre-existing failure. The hook may flag this as a false positive."
+        ) is not None
+
+    def test_cue_after_clause_break_does_not_guard(self) -> None:
+        assert find_shirking_match(
+            "All three jobs died OOM, unrelated to my fix; the hook will disagree"
+        ) is not None
