@@ -73,6 +73,18 @@ _TASK_MODE_DISPLAY: dict[str, str] = {
         "work is genuinely paused, call ScheduleWakeup so it resumes; (3) the user can "
         "release you by saying 'stop'."
     ),
+    "verification_passed_unmerged_automerge_pr": (
+        "continuation-harness: verification_passed_unmerged_automerge_pr. Your contract's "
+        "verify passed (green) and this repo's .escapement/repo.json declared "
+        "auto_merge_on_green with intended_outcome at merged-and-deployed — so you are "
+        "durably authorized to ship, and an open PR is not a finished session. Do NOT stop "
+        "at PR-opened and do NOT ask 'merge or review first?' — the repo already authorized "
+        "that outcome. Escape paths: (1) merge it and ship live — `gh pr merge <PR> --squash` "
+        "(find it with `gh pr list --head $(git branch --show-current) --state open`), then "
+        "stop; (2) if the merge genuinely requires a human you cannot be (a protected-branch "
+        "credential, an external approval), name that exact blocker and call ScheduleWakeup; "
+        "(3) the user can release you by saying 'stop'."
+    ),
     "tasks_remain_in_queue": (
         "continuation-harness [task-mode]: tasks_remain_in_queue. In-scope work is ready "
         "under this session's goal — keep working it. Do NOT stop to summarize or to ask the "
@@ -354,12 +366,80 @@ def _git_work_remains(cwd: str, run_git=None) -> bool:
     return False
 
 
+def _repo_authorizes_auto_merge(cwd: str) -> bool:
+    """True iff the repo at `cwd` declared auto-merge authorization in
+    .escapement/repo.json (intended_outcome >= merged AND auto_merge_on_green).
+    FAIL-OPEN to False (no reader / no declaration / any error) — never fabricates
+    authorization, mirroring the conservative default the reader itself uses."""
+    if not cwd:
+        return False
+    try:
+        import repo_outcome  # sibling in harness/bin
+    except ImportError:
+        return False
+    try:
+        return bool(repo_outcome.authorizes_auto_merge(repo_outcome.resolve(cwd)))
+    except Exception:
+        return False
+
+
+def _open_pr_for_current_branch(cwd: str, run=None) -> Optional[int]:
+    """PR number of an OPEN pull request whose head is the current branch, else None.
+    FAIL-OPEN to None (no gh / not a repo / no PR / any error) — never fabricates a PR."""
+    if not cwd:
+        return None
+    if run is None:
+        def run(args):
+            try:
+                r = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=10)
+                return r if r.returncode == 0 else None
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError, NotADirectoryError):
+                return None
+    br = run(["git", "branch", "--show-current"])
+    if br is None:
+        return None
+    branch = br.stdout.strip()
+    if not branch:
+        return None
+    out = run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number"])
+    if out is None:
+        return None
+    try:
+        data = json.loads(out.stdout or "[]")
+        if isinstance(data, list) and data:
+            return int(data[0].get("number"))
+    except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+        return None
+    return None
+
+
+def _unmerged_automerge_pr(cwd: str, *, authorize_check=None, pr_lookup=None) -> Optional[int]:
+    """PR number of an open PR the session must merge before stopping — i.e. the repo
+    AUTHORIZES auto-merge AND an open PR exists for the current branch. Else None.
+
+    Only meaningful on the verification_passed (green) path; the caller establishes green,
+    so this never force-merges a red PR (design anti-metric #1). Authorization is required
+    (design anti-metric #2 — never force a merge in a repo that did not grant it); a fragile
+    check keying only on PR presence is exactly what the authorize gate rejects.
+    FAIL-OPEN to None on every error path."""
+    if not cwd:
+        return None
+    if authorize_check is None:
+        authorize_check = _repo_authorizes_auto_merge
+    if not authorize_check(cwd):
+        return None
+    if pr_lookup is None:
+        pr_lookup = _open_pr_for_current_branch
+    return pr_lookup(cwd)
+
+
 def _verification_work_remains(
     cwd: str,
     thread_dir,
     *,
     bd_check=None,
     git_check=None,
+    automerge_check=None,
 ) -> Optional[Tuple[str, str]]:
     """After a `verification_passed` allow, decide whether open work still blocks.
 
@@ -376,11 +456,18 @@ def _verification_work_remains(
         bd_check = _check_bd_queue_implicit
     if git_check is None:
         git_check = _git_work_remains
+    if automerge_check is None:
+        automerge_check = _unmerged_automerge_pr
     bd_decision, bd_reason = bd_check(cwd or "", thread_dir=thread_dir)
     if bd_decision == "block":
         return (bd_decision, bd_reason)
     if cwd and git_check(cwd):
         return ("block", "verification_passed_git_work_remains")
+    # Deterministic auto-merge backstop: green + repo authorized auto-merge + open PR =>
+    # the session must ship it live, not stop at PR-opened. Enforced regardless of whether
+    # the agent read the per-repo-outcome rule. Reached only post-green (anti-metric #1).
+    if cwd and automerge_check(cwd) is not None:
+        return ("block", "verification_passed_unmerged_automerge_pr")
     return None
 
 

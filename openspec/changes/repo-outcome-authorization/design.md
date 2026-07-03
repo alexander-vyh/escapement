@@ -187,9 +187,13 @@ and the same agent still asks (or stops at PR) in an unconfigured repo.
 
 `[PLACEHOLDER]`
 
-- **Stop-gate enforcement.** Done when a session that tries to end with an open green
-  PR in an `auto_merge_on_green` repo is blocked by the harness — not when the rule
-  text merely says so.
+- **Stop-gate enforcement.** ✅ BUILT (deterministic backstop). `stop_hook.py`
+  `_unmerged_automerge_pr` + `_verification_work_remains` block a `verification_passed`
+  stop when the repo authorizes auto-merge and an open PR exists for the current branch
+  (reason `verification_passed_unmerged_automerge_pr`). Gated on green (only reached on
+  the verification-passed path, anti-metric #1) and on authorization (anti-metric #2).
+  This makes the feature enforced, not compliance-based — it fires regardless of whether
+  the agent read the rule.
 - **`confirm_class` carve-out.** Done when a change matching a declared danger class
   (e.g. `db-migration`) still draws one confirm under `auto_merge_on_green` — not when
   the field merely exists. Gated on the Open Question below.
