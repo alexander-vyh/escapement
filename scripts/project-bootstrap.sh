@@ -211,6 +211,22 @@ bootstrap_serena() {
   REPORT+=("ACTION: Run serena onboarding for this project (set languages, project name)")
 }
 
+bootstrap_outcome() {
+  # Per-project options manifest: elicit the repo's intended outcome + auto-merge
+  # authorization ON BY DEFAULT (repo-outcome-authorization). Skip in worktrees
+  # (.escapement/ lives at repo root) and once a declaration exists (any answer,
+  # including a conservative "keep asking me", silences this — it never nags twice).
+  if [[ "$IS_WORKTREE" == "true" ]]; then
+    return 0
+  fi
+  if [[ -f "$CWD/.escapement/repo.json" ]]; then
+    return 0  # Already declared
+  fi
+  # Interactive: Claude asks the user and writes .escapement/repo.json.
+  ACTIONS+=("outcome: no per-project outcome policy set")
+  REPORT+=("ACTION: Ask how far agents should drive in this repo (committed / pr-opened / merged / merged-and-deployed), whether to auto-merge on green, and whether any change class still needs a confirm — then write .escapement/repo.json. Declining writes a conservative default (pr-opened, no auto-merge) so this is asked only once. See continuation-harness.md § Per-repo outcome authorization.")
+}
+
 # --- Phase 5: Check and report ---
 
 check_claude_md() {
@@ -225,6 +241,7 @@ bootstrap_openspec
 bootstrap_beads
 repair_beads
 bootstrap_serena
+bootstrap_outcome
 check_claude_md
 
 # --- Phase 6: Agent team reminder (always emitted) ---
