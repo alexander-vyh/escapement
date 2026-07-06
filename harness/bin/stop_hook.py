@@ -471,6 +471,38 @@ def _verification_work_remains(
     return None
 
 
+def _wakeup_work_remains(
+    cwd: str,
+    thread_dir,
+    *,
+    bd_check=None,
+) -> Optional[Tuple[str, str]]:
+    """After a `wakeup_registered` allow, decide whether SESSION-FRESH work still blocks.
+
+    A registered wakeup pauses for an external event (CI, a merge, a scheduled run);
+    it does NOT discharge work the session itself created. Without this check the
+    wakeup allow returns from main() before `_verification_work_remains`
+    (verification_passed path) and `_winddown_override` (conversational path) run, so
+    a session can file a session-fresh bead, schedule a trivial deploy/CI-check wakeup,
+    and stop with that work abandoned (escapement-51w3; the cro-dashboard
+    grain-adaptation deferral).
+
+    Reuses the SAME watermark-scoped oracle the task-mode wakeup path already trusts
+    (`_check_bd_queue_implicit`): it blocks only on beads created_at >= the session
+    watermark, so unrelated prior-session backlog does NOT trap a completed session.
+    That scope is the whole point — an unscoped `bd ready` check would block every
+    session in any repo that has a backlog. Returns (decision, reason) to block, or
+    None to allow. Deterministic and fail-open (bd unavailable / no watermark ⇒ the
+    scoped check itself returns allow ⇒ None here).
+    """
+    if bd_check is None:
+        bd_check = _check_bd_queue_implicit
+    bd_decision, bd_reason = bd_check(cwd or "", thread_dir=thread_dir)
+    if bd_decision == "block":
+        return (bd_decision, bd_reason)
+    return None
+
+
 def _winddown_override(
     reason: str,
     transcript_path: str,
@@ -1018,6 +1050,23 @@ def main() -> int:
         except OSError:
             cwd = ""
         blocked = _verification_work_remains(cwd, thread_dir)
+        if blocked is not None:
+            decision, reason = blocked
+
+    # escapement-51w3: a `wakeup_registered` allow bypasses BOTH the
+    # verification_passed work-check above and the conversational wind-down rung
+    # below — so a session could file session-fresh work, schedule a trivial
+    # deploy/CI-check wakeup, and stop with that work abandoned (the cro-dashboard
+    # grain-adaptation deferral). Route the wakeup allow through the SAME
+    # watermark-scoped queue oracle the task-mode wakeup path already uses
+    # (_check_wakeup_blockers → _check_bd_queue_implicit scope). Session-fresh work
+    # blocks; unrelated backlog does not (fail-open: no watermark / bd down ⇒ allow).
+    if decision == "allow" and reason == "wakeup_registered":
+        try:
+            cwd_wk = os.getcwd()
+        except OSError:
+            cwd_wk = ""
+        blocked = _wakeup_work_remains(cwd_wk, thread_dir)
         if blocked is not None:
             decision, reason = blocked
 
