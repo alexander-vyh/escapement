@@ -856,6 +856,41 @@
       }
     },
     {
+      "id": "merge_authorization_gate",
+      "description": "Deterministic merge-authorization gate: resolves .escapement/repo.json instead of leaving the merge decision to agent judgment in conversation.",
+      "source": "claude/hooks/merge_authorization_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/merge_authorization_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_merge_authorization_gate.py::test_codex_merge_authorization_gate_denies_unconfigured_repo",
+            "claude/hooks/tests/test_merge_authorization_gate.py::test_codex_merge_authorization_gate_allows_authorized_repo"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash(gh pr merge:*)",
+              "command": "python3 -B ~/.claude/hooks/merge_authorization_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_merge_authorization_gate.py"
+          ]
+        }
+      }
+    },
+    {
       "id": "review_nudge",
       "description": "Nudge toward /review when a prompt looks like a review request.",
       "source": "claude/hooks/review_nudge.py",

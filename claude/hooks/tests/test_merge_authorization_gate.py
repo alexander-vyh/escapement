@@ -158,3 +158,22 @@ def test_merge_command_embedded_after_shell_separator_is_detected(tmp_path: Path
         _bash_payload("echo done && gh pr merge 262 --squash", cwd=tmp_path)
     )
     assert _decision(result) == "deny"  # unconfigured repo — still no fabricated allow
+
+
+def test_codex_merge_authorization_gate_denies_unconfigured_repo(tmp_path: Path) -> None:
+    """Codex wires this same script to a broad `Bash` matcher (no argument-scoped
+    matcher support) — the script's own `_is_merge_command` filter does the work
+    the matcher does for Claude Code. Same payload schema, same script, same test
+    harness as the Claude-side tests above."""
+    code, result, _raw = _run_payload(_bash_payload("gh pr merge 262 --squash", cwd=tmp_path))
+    assert code == 0
+    assert _decision(result) == "deny"
+
+
+def test_codex_merge_authorization_gate_allows_authorized_repo(tmp_path: Path) -> None:
+    _write_declaration(
+        tmp_path, {"intended_outcome": "merged", "auto_merge_on_green": True}
+    )
+    code, result, raw = _run_payload(_bash_payload("gh pr merge 262 --squash", cwd=tmp_path))
+    assert code == 0
+    assert raw == ""
