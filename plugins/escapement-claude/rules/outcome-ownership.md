@@ -54,6 +54,17 @@ outcome is verified, state that. If a real blocker prevents progress, name the
 blocker and the exact decision or access needed. Never make stopping one of the
 options you offer the user.
 
+❌ "One thing I did NOT do: merge the PR — this repo auto-deploys on merge, so
+want me to merge it now, or review the PR first?"
+→ Read the repo's `.escapement/repo.json` (via `harness/bin/repo_outcome.py`). If it
+declares `intended_outcome` ≥ `merged` with `auto_merge_on_green: true` and your change
+is GREEN, you are durably authorized — **merge it and ship it live; do not ask.** "This
+auto-deploys to prod" is not a reason to ask when the repo declared that as its intended
+outcome — it is the reason to merge. Announce the live surface ("now live at X") instead
+of soliciting review. Asking here is the exact solicitation the per-repo authorization
+exists to remove. (Only a change matching the repo's declared `confirm_class` still
+draws one confirm.) See `continuation-harness.md` § Per-repo outcome authorization.
+
 ## The Verification Test
 
 Before declaring done, answer honestly:

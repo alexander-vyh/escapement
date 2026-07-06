@@ -357,6 +357,15 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/merge_authorization_gate.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash(gh pr merge:*)"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/serena_preference_gate.py\"",
             "type": "command"
           }

@@ -98,6 +98,50 @@ all the way to a verified live outcome; if a step genuinely requires a human (a
 credential, an irreversible external action), name the exact blocker and continue the
 rest — do not treat "PR opened" as done.
 
+### Per-repo outcome authorization — the durable authorization the base prompt defers to
+
+The base Claude Code system prompt says: *confirm before hard-to-reverse or
+outward-facing actions — unless durably authorized.* A repo's committed
+`.escapement/repo.json` (the per-project options manifest) **is** that durable
+authorization. Read it before deciding whether to merge (`harness/bin/repo_outcome.py`
+resolves it):
+
+- `intended_outcome` at or above `merged` **and** `auto_merge_on_green: true` →
+  **you are pre-authorized.** When your change reaches green verification, **merge it
+  and ship it live. Do NOT ask "want me to merge it now, or review the PR first?"** —
+  that solicitation is the exact anti-pattern this authorization exists to remove. If
+  the repo also declares a `deploy` surface, name it in your report ("now live at X")
+  rather than ask about it.
+- No declaration, malformed, or `auto_merge_on_green: false` → the conservative
+  default (stop at `pr-opened`, may ask). Unchanged from today. Never assume
+  authorization a repo did not grant.
+
+**The "irreversible external action" carve-out does NOT cover a merge that triggers
+auto-deploy.** That carve-out is for steps you genuinely *cannot* perform without a
+human — typing a credential, clicking an external approval. A `gh pr merge` you have
+the ability to run is not such a step; a repo that declared `merged-and-deployed`
+authorized exactly that outcome. Merging-to-auto-deploy is the *point*, not a blocker
+— do not stretch the carve-out to re-introduce the ask the declaration removed. The
+one exception is a change matching the repo's declared `confirm_class` (a narrow,
+per-repo danger list), which still draws one confirm.
+
+**Always attempt the merge — do not pre-judge authorization in conversation.**
+A real incident (2026-07-04, simplifi/cro-reporting PR #262) showed the failure
+mode this closes: an agent reasoned in prose about whether it was authorized to
+merge, decided it wasn't, and — because no repo.json existed to name as the real
+reason — **invented a fabricated "platform-level gate, not something resolvable
+from my side."** GitHub branch protection confirmed no such gate existed. The fix
+is to stop reasoning about authorization in chat at all: when you reach a green
+PR, **run `gh pr merge <PR> --squash` and let `merge_authorization_gate.py` (a
+`PreToolUse` hook on `Bash(gh pr merge:*)`) return the actual verdict** — it reads
+the same `.escapement/repo.json` `repo_outcome.py` resolves, deterministically. If
+it denies, its `permissionDecisionReason` names the true cause (no declaration,
+or a malformed one) — report *that*, verbatim in substance, never a guess dressed
+up as an external constraint. If the repo genuinely should be configured, offer to
+run `harness/bin/set_repo_outcome.py` (the validated authoring helper — replaces
+hand-editing `.escapement/repo.json`) rather than asking the user to write JSON by
+hand.
+
 ## Status
 
 This rule is paired with the continuation-harness (May 2026). Code installs to `~/.claude/harness/bin/` (deployed by `INSTALL.sh` from the repo's `harness/` source); runtime state lives in `~/.claude/harness/` and is keyed per session (`threads/{session_id}/`) so concurrent agents never clobber each other. The full spec lives in the repo at `openspec/changes/continuation-harness/`. Still v0.1+: full 57-stall regression test, the launchd waker that actually fires scheduled wakeups, bead-derived contracts, and the supervisor daemon.
