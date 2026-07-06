@@ -342,8 +342,9 @@ def _render_claude_marketplace() -> str:
                 "name": "escapement",
                 "description": (
                     "Host-neutral agentic workflow layer with always-on rules "
-                    "injected via a SessionStart hook. Tracks main for continuous "
-                    "auto-update."
+                    "injected via a SessionStart hook. Refresh to the latest main "
+                    "with scripts/plugin-update.sh (the static plugin version makes "
+                    "`claude plugin update` a no-op)."
                 ),
                 "source": {
                     "source": "git-subdir",
