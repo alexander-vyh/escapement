@@ -1,0 +1,8 @@
+{
+  "intended_outcome": "merged-and-deployed",
+  "auto_merge_on_green": true,
+  "deploy": {
+    "on": "manual pinned-checkout ff (harness/bin deploy) \u2014 see escapement-deploy-pinned-checkout",
+    "surface": "~/.claude/.escapement-pinned-* live rules/hooks across all projects"
+  }
+}
