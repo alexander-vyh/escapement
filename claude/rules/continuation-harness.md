@@ -125,6 +125,23 @@ authorized exactly that outcome. Merging-to-auto-deploy is the *point*, not a bl
 one exception is a change matching the repo's declared `confirm_class` (a narrow,
 per-repo danger list), which still draws one confirm.
 
+**Always attempt the merge — do not pre-judge authorization in conversation.**
+A real incident (2026-07-04, simplifi/cro-reporting PR #262) showed the failure
+mode this closes: an agent reasoned in prose about whether it was authorized to
+merge, decided it wasn't, and — because no repo.json existed to name as the real
+reason — **invented a fabricated "platform-level gate, not something resolvable
+from my side."** GitHub branch protection confirmed no such gate existed. The fix
+is to stop reasoning about authorization in chat at all: when you reach a green
+PR, **run `gh pr merge <PR> --squash` and let `merge_authorization_gate.py` (a
+`PreToolUse` hook on `Bash(gh pr merge:*)`) return the actual verdict** — it reads
+the same `.escapement/repo.json` `repo_outcome.py` resolves, deterministically. If
+it denies, its `permissionDecisionReason` names the true cause (no declaration,
+or a malformed one) — report *that*, verbatim in substance, never a guess dressed
+up as an external constraint. If the repo genuinely should be configured, offer to
+run `harness/bin/set_repo_outcome.py` (the validated authoring helper — replaces
+hand-editing `.escapement/repo.json`) rather than asking the user to write JSON by
+hand.
+
 ## Status
 
 This rule is paired with the continuation-harness (May 2026). Code installs to `~/.claude/harness/bin/` (deployed by `INSTALL.sh` from the repo's `harness/` source); runtime state lives in `~/.claude/harness/` and is keyed per session (`threads/{session_id}/`) so concurrent agents never clobber each other. The full spec lives in the repo at `openspec/changes/continuation-harness/`. Still v0.1+: full 57-stall regression test, the launchd waker that actually fires scheduled wakeups, bead-derived contracts, and the supervisor daemon.

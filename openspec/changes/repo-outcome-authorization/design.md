@@ -87,28 +87,32 @@ conservatively when absent.
 - `confirm_class`: optional narrow list of change kinds that STILL get one confirm
   even under `auto_merge_on_green` (see Open Questions — this is the user's call).
 
-### Init-time elicitation (how the declaration gets written) — user-directed
+### Init-time elicitation (how the declaration gets written) — auto-written, then user-directed
 
-The declaration is a **standard per-project option, elicited on by default** at repo
-onboarding — not hand-written. `project-bootstrap.sh`
-already surfaces onboarding NOTEs the agent acts on (it bootstraps beads/serena and
-reports what it did). It gains one more check: if the repo has no `.escapement/repo.json`,
-it surfaces a NOTE — "No outcome policy set for this repo." The agent, seeing that at
-session start, **asks the user once**: how far should agents drive here (`committed` /
-`pr-opened` / `merged` / `merged-and-deployed`), auto-merge on green or not, and (per-repo)
-whether any danger class still needs a confirm. It writes `.escapement/repo.json` from the
-answer.
+**Amended 2026-07-04** (escapement-odfo): the original design had `project-bootstrap.sh`
+surface a NOTE and rely on the agent to interactively elicit + write the declaration.
+In practice this depended on the agent noticing the NOTE and following through *every*
+session in every unconfigured repo — a real incident (cro-executive-dashboard PR #262)
+showed a repo staying silently unconfigured indefinitely, and the agent fabricating a
+"platform-level gate" rather than naming the missing declaration. `bootstrap_outcome`
+now **writes the conservative default immediately** (`intended_outcome: pr-opened`,
+`auto_merge_on_green: false`) the first time it sees no `.escapement/repo.json`, then
+surfaces a NOTE offering to upgrade it — the elicitation-then-write flow becomes
+upgrade-an-existing-file rather than create-from-nothing. `harness/bin/set_repo_outcome.py`
+is the validated helper for that upgrade (or for hand-authoring a non-default
+declaration directly): it rejects an invalid `intended_outcome` and refuses
+`auto_merge_on_green: true` paired with an outcome below `merged`.
 
 Adoption safeguards, so this never becomes a nag:
-- The prompt fires **once per repo** — a written declaration (any level) silences it.
-- **Declining is a first-class answer:** it writes an explicit conservative declaration
-  (`intended_outcome: pr-opened`, `auto_merge_on_green: false`), so "keep asking me / I'll
-  review" is a recorded choice, not a perpetual prompt.
+- The write fires **once per repo** — any existing declaration (including the
+  auto-written default) silences it permanently.
+- **The conservative default IS the "keep asking me" answer**, recorded as a real file
+  instead of an implicit, invisible absence.
 - Only fires in escapement-onboarded repos (same guard as the existing bootstrap steps),
   never in arbitrary directories.
 
 This makes `confirm_class` a **per-repo elicited value**, not a global build-time decision —
-the floor-vs-carveout choice is the user's, asked at init, per repo.
+the floor-vs-carveout choice is the user's, set (or left default) per repo.
 
 ### Resolution semantics (the reader — `repo_outcome.py`)
 
@@ -118,7 +122,7 @@ the floor-vs-carveout choice is the user's, asked at init, per repo.
 - Malformed / unparseable ⇒ same conservative default, plus a surfaced warning (never
   silently treat a broken file as authorization).
 
-### Enforcement — two layers, belt and suspenders
+### Enforcement — three layers
 
 1. **Rule text (proactive).** `continuation-harness.md` gains: the repo's declaration
    IS the durable authorization the base prompt defers to; an agent that reaches green
@@ -132,6 +136,21 @@ the floor-vs-carveout choice is the user's, asked at init, per repo.
    repo and it is still open, **Stop is blocked** with a resumption prompt naming the
    PR to merge. Authorization is gated on *green* — a red/unverified PR never triggers
    this (that would authorize shipping broken code, an anti-metric below).
+3. **PreToolUse merge gate (amendment, escapement-odfo, 2026-07-04).** Layers 1 and 2
+   both operate *around* the merge decision — proactive rule text before it, a Stop-time
+   backstop after it — neither intercepts a `gh pr merge` invocation itself. The
+   incident that motivated this layer (PR #262) was not a red-PR or Stop-time failure;
+   it was an agent reasoning about authorization in free text and fabricating an
+   external constraint rather than attempting the merge and reporting the true reason
+   it was (or wasn't) blocked. `merge_authorization_gate.py`, a `PreToolUse` hook on
+   `Bash(gh pr merge:*)`, resolves `.escapement/repo.json` via the same `repo_outcome.py`
+   and either allows silently (authorized) or denies with the real, non-fabricatable
+   reason (unauthorized) — moving the decision from agent judgment to a deterministic
+   check at the point of action. Escape path: `# merge-authorization-waiver: <reason>`
+   appended to the command once the user has given explicit go-ahead in the
+   conversation. This does not replace layer 1's behavioral instruction to *attempt*
+   the merge rather than pre-judge it in chat — the gate only produces a truthful
+   verdict once that attempt happens.
 
 ## Anti-Metrics
 
@@ -196,10 +215,19 @@ and the same agent still asks (or stops at PR) in an unconfigured repo.
   the agent read the rule.
 - **`confirm_class` carve-out.** Done when a change matching a declared danger class
   (e.g. `db-migration`) still draws one confirm under `auto_merge_on_green` — not when
-  the field merely exists. Gated on the Open Question below.
-- **`bd`/CLI authoring helper** (`set-repo-outcome`), so the declaration is written by
-  a command with validation, not hand-edited JSON. Done when the command writes a
-  schema-valid file and refuses invalid outcome levels.
+  the field merely exists. Gated on the Open Question below. Still open.
+- **`bd`/CLI authoring helper** (`set-repo-outcome`). ✅ BUILT (escapement-odfo,
+  2026-07-04) as `harness/bin/set_repo_outcome.py` — writes a schema-valid
+  `.escapement/repo.json`, refuses an invalid `intended_outcome`, and refuses
+  `auto_merge_on_green: true` paired with an outcome below `merged`.
+- **PreToolUse merge gate.** ✅ BUILT (escapement-odfo, 2026-07-04) as
+  `merge_authorization_gate.py` — see Enforcement layer 3 above. Not anticipated in
+  the original design; added after a real incident showed layers 1–2 don't cover an
+  agent that free-narrates a fabricated reason instead of attempting the merge.
+- **Auto-write the conservative default on absence.** ✅ BUILT (escapement-odfo,
+  2026-07-04) — `scripts/project-bootstrap.sh`'s `bootstrap_outcome` now writes
+  `.escapement/repo.json` immediately instead of only asking the agent to elicit one
+  interactively. See "Init-time elicitation" above.
 
 ## Open Questions
 

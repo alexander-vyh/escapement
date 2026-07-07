@@ -155,6 +155,16 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/merge_authorization_gate.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/spec_id_enforcement.py\"",
             "timeout": 10,
             "type": "command"

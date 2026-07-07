@@ -212,19 +212,36 @@ bootstrap_serena() {
 }
 
 bootstrap_outcome() {
-  # Per-project options manifest: elicit the repo's intended outcome + auto-merge
-  # authorization ON BY DEFAULT (repo-outcome-authorization). Skip in worktrees
-  # (.escapement/ lives at repo root) and once a declaration exists (any answer,
-  # including a conservative "keep asking me", silences this — it never nags twice).
+  # Per-project options manifest: the repo's intended outcome + auto-merge
+  # authorization (repo-outcome-authorization). Skip in worktrees (.escapement/
+  # lives at repo root) and once a declaration exists (any answer, including the
+  # conservative default below, silences this — it never nags twice).
   if [[ "$IS_WORKTREE" == "true" ]]; then
     return 0
   fi
   if [[ -f "$CWD/.escapement/repo.json" ]]; then
     return 0  # Already declared
   fi
-  # Interactive: Claude asks the user and writes .escapement/repo.json.
-  ACTIONS+=("outcome: no per-project outcome policy set")
-  REPORT+=("ACTION: Ask how far agents should drive in this repo (committed / pr-opened / merged / merged-and-deployed), whether to auto-merge on green, and whether any change class still needs a confirm — then write .escapement/repo.json. Declining writes a conservative default (pr-opened, no auto-merge) so this is asked only once. See continuation-harness.md § Per-repo outcome authorization.")
+  # Auto-write the conservative default immediately rather than only asking the
+  # agent to elicit one interactively — an unconfigured repo must never stay
+  # SILENTLY unconfigured. The prior interactive-only design depended on the
+  # agent noticing this NOTE and following through every single session; if it
+  # didn't (or the session ended first), the repo stayed permanently
+  # unconfigured with no visible signal (the 2026-07-04 cro-executive-dashboard
+  # incident: an agent invented a fabricated "platform-level gate" instead of
+  # naming the real, missing declaration). Writing the file up front makes the
+  # merge_authorization_gate and Stop-gate backstop's "ask" behavior an explicit,
+  # recorded fact instead of an invisible default.
+  if mkdir -p "$CWD/.escapement" 2>/dev/null && cat > "$CWD/.escapement/repo.json" <<'JSON' 2>/dev/null
+{
+  "intended_outcome": "pr-opened",
+  "auto_merge_on_green": false
+}
+JSON
+  then
+    ACTIONS+=("outcome: wrote conservative default (pr-opened, no auto-merge)")
+    REPORT+=("NOTE: no outcome policy was set for this repo -- wrote the conservative default (.escapement/repo.json: pr-opened, no auto-merge). ACTION: ask the user how far agents should drive here (committed / pr-opened / merged / merged-and-deployed) and whether to auto-merge on green; update with harness/bin/set_repo_outcome.py if they want more than the default. See continuation-harness.md § Per-repo outcome authorization.")
+  fi
 }
 
 # --- Phase 5: Check and report ---

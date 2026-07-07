@@ -80,6 +80,15 @@
         ]
       },
       {
+        "matcher": "Bash(gh pr merge:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/claude/hooks/merge_authorization_gate.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Bash(bd create:*)",
         "hooks": [
           {
