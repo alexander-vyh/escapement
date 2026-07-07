@@ -568,6 +568,15 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/oracle_downgrade_stop.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/validate_no_shirking.py\"",
             "type": "command"
           }

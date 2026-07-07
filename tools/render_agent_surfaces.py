@@ -25,6 +25,12 @@ SHARED_HOOK_SUPPORT = {
 }
 CLAUDE_EXTRA_HOOK_SUPPORT = {
     "claude/hooks/local_judge_health.py",
+    # oracle_downgrade_stop.py imports this differ at runtime; it is a library
+    # (no events), so it ships as a companion rather than a manifest hook.
+    # The differ in turn loads its parser sibling — ship the whole closure or
+    # the Stop hook silently no-ops in the flat plugin layout.
+    "claude/hooks/oracle_strength_diff.py",
+    "claude/hooks/oracle_strength_parse.py",
 }
 
 # SessionStart rules-injection script for the Claude plugin. Emits the bundled
@@ -336,8 +342,9 @@ def _render_claude_marketplace() -> str:
                 "name": "escapement",
                 "description": (
                     "Host-neutral agentic workflow layer with always-on rules "
-                    "injected via a SessionStart hook. Tracks main for continuous "
-                    "auto-update."
+                    "injected via a SessionStart hook. Refresh to the latest main "
+                    "with scripts/plugin-update.sh (the static plugin version makes "
+                    "`claude plugin update` a no-op)."
                 ),
                 "source": {
                     "source": "git-subdir",
