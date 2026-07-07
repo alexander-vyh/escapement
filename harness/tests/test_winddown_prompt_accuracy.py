@@ -69,19 +69,55 @@ os.environ.setdefault("ESCAPEMENT_LOCAL_JUDGE_TIMEOUT", "20")
 
 
 def _judge_up() -> bool:
-    """Fast reachability probe: GET /v1/models with a short timeout.
+    """Two-endpoint reachability probe: BOTH /v1/models AND the chat endpoint listen.
 
-    Deliberately NOT a generation round-trip — the server intermittently returns an
-    empty completion (the transport fail-open tracked separately), so gating collection
-    on a clean generation would spuriously skip the whole module. `/v1/models` answers
-    in ~0.3s when the server is up and is a true is-it-listening check.
+    `/v1/models` answering 200 is necessary but NOT sufficient: the model-list endpoint
+    can be up (HTTP 200) while the chat-completions endpoint is dead (connection refused
+    / HTTP 000), in which case every `model_verdict` yields None and the positive-case
+    assertion fails instead of skipping (escapement-pgo / u4a0 — observed 2026-07-07:
+    /v1/models=200 while /v1/chat/completions=000).
+
+    CRITICAL — this must NOT suppress a real oracle failure. The chat probe skips ONLY on
+    a CONNECTION-DEAD signal (transport unreachable / non-2xx status). A chat endpoint that
+    RESPONDS 200 — even with the intermittent empty-content fail-open the retry loop is
+    designed to absorb — counts as UP, so a live model that misclassifies a fixture still
+    reaches the assertion and still FAILS (never-suppress: an infra skip may only cover
+    dead transport, never a wrong-but-live verdict). So we key on transport reachability,
+    not on whether a generation produced content.
     """
+    import json as _json
     import urllib.request
-    url = lj.configured_base_url().rstrip("/") + "/models"
+    base = lj.configured_base_url().rstrip("/")
+    # 1) model-list must listen
     try:
-        with urllib.request.urlopen(url, timeout=5) as r:
-            return r.status == 200
+        with urllib.request.urlopen(base + "/models", timeout=5) as r:
+            if r.status != 200:
+                return False
     except Exception:
+        return False
+    # 2) chat endpoint must ALSO be reachable (transport check, minimal generation). A 2xx
+    # of ANY body (including empty-content) => transport up => run the test. Only a
+    # connection failure / non-2xx => skip. We do NOT inspect the completion content, so a
+    # live-but-misclassifying model is never masked.
+    try:
+        req = urllib.request.Request(
+            base + "/chat/completions",
+            data=_json.dumps({
+                "model": lj.DEFAULT_MODEL,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            }).encode(),
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return 200 <= r.status < 300
+    except urllib.error.HTTPError as e:
+        # The server answered with a status — transport is UP. Treat as reachable so a
+        # genuine model/prompt regression is not masked by a skip.
+        return 200 <= e.code < 300
+    except Exception:
+        # Connection refused / timeout / DNS — transport genuinely dead => skip.
         return False
 
 

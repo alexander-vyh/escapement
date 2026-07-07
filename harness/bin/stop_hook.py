@@ -521,11 +521,16 @@ def _winddown_override(
     `winddown_judge_unavailable`; only then can the separate high-confidence outage
     sentinel block the transcript-proven DWDEV-style shapes.
 
-    Scoped DELIBERATELY to the `conversational` allow (would_block_stop.py:176-183) —
-    the free-pass hole. Genuine terminals (verification_passed / user_released /
-    wakeup_registered) and ordinary conversational turns are untouched.
+    Scoped to the `conversational` free-pass allow AND the `wakeup_registered` allow
+    (escapement-lby9). The wakeup path needs the SEMANTIC backstop for the same reason
+    conversational does: the state-based _wakeup_work_remains only catches a
+    session-fresh bead left behind — it is blind to a wind-down-shaped final message
+    with a clean bd queue but reversible git work ("shipped it, want me to tackle X
+    next session?"). The reversible-work gate below still prevents nagging a legitimate
+    wakeup pause (waiting on CI, clean tree). Genuine terminals (verification_passed /
+    user_released) remain untouched — widening here must NOT leak to them.
     """
-    if reason != "conversational" or _wj is None:
+    if reason not in ("conversational", "wakeup_registered") or _wj is None:
         return None
     text = _read_last_assistant_message(transcript_path)
     if not text:
@@ -1061,19 +1066,29 @@ def main() -> int:
     # watermark-scoped queue oracle the task-mode wakeup path already uses
     # (_check_wakeup_blockers → _check_bd_queue_implicit scope). Session-fresh work
     # blocks; unrelated backlog does not (fail-open: no watermark / bd down ⇒ allow).
+    winddown_display = None
     if decision == "allow" and reason == "wakeup_registered":
         try:
             cwd_wk = os.getcwd()
         except OSError:
             cwd_wk = ""
+        # 1) Deterministic state-check first: session-fresh work left behind (51w3).
         blocked = _wakeup_work_remains(cwd_wk, thread_dir)
         if blocked is not None:
             decision, reason = blocked
+        else:
+            # 2) Semantic backstop (escapement-lby9): the state-check is blind to a
+            # wind-down-shaped final message with a clean bd queue but reversible git
+            # work. Run the judge on the wakeup path too — same as conversational.
+            winddown_display = _winddown_override(
+                "wakeup_registered", transcript_path, cwd_wk, thread_dir
+            )
+            if winddown_display:
+                decision, reason = "block", "winddown_offer_work_remains"
 
     # Wind-down rung: a `conversational` allow that is actually a wind-down / decision-
     # punt offer WITH reversible work remaining is overridden to a block (closes the
     # would_block_stop.py:176-183 free-pass). Surgical: only the conversational path.
-    winddown_display = None
     if decision == "allow" and reason == "conversational":
         try:
             cwd_now = os.getcwd()
