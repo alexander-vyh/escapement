@@ -109,6 +109,18 @@ new_path="$(resolve_install_path)"
 if [[ -z "$new_path" ]]; then
   echo "FATAL: could not resolve plugin installPath after reinstall" >&2; exit 1
 fi
+
+# Self-heal the exec bit (escapement-rkl5): the plugin vendors harness/bin/* as
+# text (git mode 100644), but verify/workflow_status are invoked BARE by the
+# continuation-harness rule and need +x. A reinstall re-clones them non-executable,
+# so restore it on every refresh.
+if [[ "$DRY_RUN" == true ]]; then
+  echo "    [dry-run] chmod +x $new_path/harness/bin/*"
+else
+  chmod +x "$new_path"/harness/bin/* 2>/dev/null || true
+  echo "    restored +x on vendored harness executables"
+fi
+
 if [[ "$harness_target" == *"/plugins/cache/escapement/"* ]]; then
   run "ln -sfn '$new_path/harness/bin' '$harness_link'"
   echo "    repointed harness/bin -> $new_path/harness/bin (post-cutover)"
