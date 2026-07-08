@@ -119,6 +119,7 @@ declare -a PLAN=(
   "claude/rules/gate-design.md|$CLAUDE_DIR/rules/gate-design.md"
   "claude/rules/research-findings-persistence.md|$CLAUDE_DIR/rules/research-findings-persistence.md"
   "claude/rules/why-drilling.md|$CLAUDE_DIR/rules/why-drilling.md"
+  "claude/rules/worktree-discipline.md|$CLAUDE_DIR/rules/worktree-discipline.md"
 
   # Agents (workflow-integral only — personal advisor agents live in the user's
   # own config, not in this framework. adversarial-reviewer is dispatched by
