@@ -31,6 +31,10 @@ CACHE="$HOME_DIR/.claude/plugins/cache/escapement/escapement/1.0.0"
 # Canary file the script diffs against the repo's plugin source; make it match so
 # the freshness check reports OK (its mismatch path only WARNs, never fails).
 cp "$REPO/plugins/escapement-claude/harness/bin/stop_hook.py" "$CACHE/harness/bin/stop_hook.py"
+# Vendored NON-executable (git mode 100644, as the renderer writes it) — the
+# self-heal must restore +x (escapement-rkl5).
+printf '#!/bin/bash\nexit 0\n' > "$CACHE/harness/bin/verify"
+chmod 644 "$CACHE/harness/bin/verify"
 
 # Pre-state: plugin DISABLED, an explicit model key set, harness/bin -> legacy pin.
 mkdir -p "$HOME_DIR/.claude/.escapement-pinned/harness/bin"
@@ -88,6 +92,9 @@ case "$htarget" in
   *"/.escapement-pinned/"*) ok "harness/bin left on legacy pin (no premature cutover)" ;;
   *) bad "harness/bin repointed to '$htarget' pre-cutover — update must not cut over" ;;
 esac
+# escapement-rkl5: bare-invoked harness executables must be +x after a refresh.
+if [ -x "$CACHE/harness/bin/verify" ]; then ok "verify exec bit restored (self-heal)"
+else bad "verify not executable after refresh — ~/.claude/harness/bin/verify would 'permission denied'"; fi
 
 # --- CASE 2: post-cutover (harness/bin already -> plugin) repoints to installPath. ---
 ln -sfn "$CACHE/harness/bin" "$HOME_DIR/.claude/harness/bin"
