@@ -10,7 +10,7 @@ building the gate.
 It is a NUDGE, not a gate: it must NEVER block an edit. The contract:
 
   Positive control — Writing/Editing a gate-ish path (a hook .py, a *gate*
-  file, or settings.template.json) emits a non-blocking systemMessage that
+  file, or a settings/hooks JSON) emits a non-blocking systemMessage that
   points at the gate-design skill. If this never fired, the conversion would
   silently drop gate-design discipline on the file-edit path (the whole point
   of option B).
@@ -129,14 +129,14 @@ def test_ordinary_path_is_silent(tool, path):
 # ---------------------------------------------------------------------------
 
 def test_nudge_registered_on_write_and_edit():
-    template = Path(__file__).resolve().parents[2] / "claude" / "settings.template.json"
+    template = Path(__file__).resolve().parents[2] / "plugins" / "escapement-claude" / "hooks" / "hooks.json"
     if not template.is_file():
         for parent in Path(__file__).resolve().parents:
-            cand = parent / "settings.template.json"
+            cand = parent / "plugins" / "escapement-claude" / "hooks" / "hooks.json"
             if cand.is_file():
                 template = cand
                 break
-    assert template.is_file(), f"settings template not found at {template}"
+    assert template.is_file(), f"plugin hooks.json not found at {template}"
     settings = json.loads(template.read_text(encoding="utf-8"))
     matchers = set()
     for entry in settings.get("hooks", {}).get("PreToolUse", []):

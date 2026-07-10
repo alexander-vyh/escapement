@@ -1371,6 +1371,31 @@
           ]
         }
       }
+    },
+    {
+      "id": "project_bootstrap",
+      "description": "Per-project bootstrap at session start (Serena registration, project wiring).",
+      "source": "scripts/project-bootstrap.sh",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Bootstraps Claude-specific project wiring (Serena project registration, ~/.claude layout); a Codex equivalent needs its own adapter."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/project-bootstrap.sh\"",
+              "timeout_seconds": 15
+            }
+          ],
+          "fixtures": [
+            "tests/test_no_dual_hook_registration.py::test_plugin_bootstrap_command_does_not_rely_on_the_exec_bit"
+          ]
+        }
+      }
     }
   ],
   "distribution": {
@@ -1379,8 +1404,7 @@
       "status": "ready",
       "manifest": ".claude-plugin/plugin.json",
       "hooks_target": "hooks/hooks.json",
-      "source": "claude/settings.template.json",
-      "notes": "Full Claude hook set via ${CLAUDE_PLUGIN_ROOT} paths. Excludes ~/.claude/project-bootstrap.sh (user-specific, not repo-resident). Timeout values converted from milliseconds to seconds."
+      "notes": "Full Claude hook set via ${CLAUDE_PLUGIN_ROOT} paths. The plugin is the SOLE owner of hook registration; claude/settings.template.json registers none (escapement-ptzz: dual registration double-fired 38 gates). project-bootstrap.sh is repo-resident (scripts/) and is vendored into the plugin like any other hook source. Timeout values converted from milliseconds to seconds."
     },
     "codex": {
       "mechanism": "plugin",

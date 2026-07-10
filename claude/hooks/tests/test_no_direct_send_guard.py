@@ -4,11 +4,11 @@ This hook protects one business outcome: a human reviews any Slack/email
 message before it is actually sent. The mechanism is a two-part contract:
 
   1. The hook itself ALWAYS denies — it is only ever invoked on tool names
-     that are on the block list (the matchers in settings.template.json). So
+     that are on the block list (the matchers in the plugin's hooks.json). So
      the hook's own behavioral contract is: "deny, and redirect to the draft
      equivalent of the tool that was attempted."
 
-  2. The DRAFT tools must NOT be wired to this hook in the settings template,
+  2. The DRAFT tools must NOT be wired to this hook in the plugin's hooks.json,
      so a draft send passes through untouched.
 
 Both halves are tested here so neither can regress silently:
@@ -20,7 +20,7 @@ Both halves are tested here so neither can regress silently:
   un-reviewed — the exact failure this gate exists to prevent.
 
   Positive control — the draft tools (slack_send_message_draft) are NOT
-  matched by this hook in settings.template.json, so they reach the MCP
+  matched by this hook in the plugin's hooks.json, so they reach the MCP
   server. We assert against the real settings registration, not the hook's
   internal table, so this control catches a regression where someone wires
   the guard onto the draft tool and accidentally blocks the allowed path.
@@ -71,13 +71,13 @@ _DRAFT_TOOLS = (
 )
 
 _SETTINGS_TEMPLATE = (
-    Path(__file__).resolve().parents[2] / "claude" / "settings.template.json"
+    Path(__file__).resolve().parents[2] / "plugins" / "escapement-claude" / "hooks" / "hooks.json"
 )
 # When the tests run from the repo's claude/ tree, parents[2] may already be
 # the repo root; resolve robustly by searching upward for the template.
 if not _SETTINGS_TEMPLATE.is_file():
     for parent in Path(__file__).resolve().parents:
-        candidate = parent / "settings.template.json"
+        candidate = parent / "plugins" / "escapement-claude" / "hooks" / "hooks.json"
         if candidate.is_file():
             _SETTINGS_TEMPLATE = candidate
             break

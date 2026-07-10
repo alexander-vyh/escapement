@@ -206,11 +206,13 @@ def test_prune_preserves_other_creators(tmp_path):
 # never invokes is dead-on-arrival for everyone but the author.)
 
 def test_shipped_template_wires_schedulewakeup_bridge():
-    template = json.loads((REPO / "claude" / "settings.template.json").read_text())
+    template = json.loads(
+        (REPO / "plugins" / "escapement-claude" / "hooks" / "hooks.json").read_text()
+    )
     post = template.get("hooks", {}).get("PostToolUse", [])
     groups = [g for g in post if g.get("matcher") == "ScheduleWakeup"]
     assert groups, (
-        "settings.template.json has no PostToolUse matcher for ScheduleWakeup — "
+        "plugin hooks.json has no PostToolUse matcher for ScheduleWakeup — "
         "distributees get a dead path-2 (the documented resumption escape never fires)"
     )
     cmds = [h.get("command", "") for g in groups for h in g.get("hooks", [])]

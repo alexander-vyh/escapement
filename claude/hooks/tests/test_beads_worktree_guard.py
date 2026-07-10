@@ -29,7 +29,7 @@ hides, so the controls are built around it:
   from the repo root; an exact-cwd-only beads check would pass the simple
   negative control yet silently fail real usage.
 
-  Settings registration — the guard is wired in settings.template.json on the
+  Plugin registration — the guard is wired in the plugin's hooks.json on the
   ``Bash(git worktree add:*)`` matcher (scoped so it fires only on that command
   prefix — zero overhead on every other Bash call). Asserted against the real
   template, not the hook's internals, so a de-registration regression bites.
@@ -67,11 +67,11 @@ _spec.loader.exec_module(hook)
 
 
 _SETTINGS_TEMPLATE = (
-    Path(__file__).resolve().parents[2] / "claude" / "settings.template.json"
+    Path(__file__).resolve().parents[2] / "plugins" / "escapement-claude" / "hooks" / "hooks.json"
 )
 if not _SETTINGS_TEMPLATE.is_file():
     for parent in Path(__file__).resolve().parents:
-        candidate = parent / "settings.template.json"
+        candidate = parent / "plugins" / "escapement-claude" / "hooks" / "hooks.json"
         if candidate.is_file():
             _SETTINGS_TEMPLATE = candidate
             break
