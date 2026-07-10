@@ -64,20 +64,42 @@ Behavior that must change:
 
 ## Riskiest Assumption
 
-**Betting** that a Codex plugin cannot deliver hooks or agents — so escapement's gates
-and per-role model bindings on Codex must be installed by the `escapement` CLI rather
-than by `codex plugin add`.
+### v1 assumption — RESOLVED 2026-07-10, and **REFUTED**
 
-**Wrong when** a `hooks` (or `agents`) manifest key exists in the Codex plugin schema
-and is simply unused by the 12 first-party plugins I sampled. The evidence is
-convergent-empirical (no `hooks`/`agents` key in any of 12 shipped `plugin.json`; zero
-`hooks.json` and zero `agents/` dirs found across every shipped plugin directory) but is
-**not** a published schema.
+> ~~Betting that a Codex plugin cannot deliver hooks or agents — so escapement's gates
+> and per-role model bindings on Codex must be installed by the CLI rather than by
+> `codex plugin add`.~~
 
-**Would know within ~1 day** by authoring a minimal Codex plugin that declares a `hooks`
-key with one trivial hook, installing it via `codex plugin add`, and observing whether
-the hook fires. One trivial hook, one observation, one answer. If it fires, the CLI's
-Codex scope collapses to config-merge + beads formulas and Codex reaches near-parity.
+**Refuted by direct observation.** `~/.codex/config.toml` holds **17 live hook
+registrations** for `escapement@escapement-local:hooks/hooks.json` (`pre_tool_use` ×11,
+`session_start` ×5, `pre_compact` ×1) — despite `.codex-plugin/plugin.json` declaring
+**no** `hooks` key. Codex **default-discovers** `hooks/hooks.json` at the plugin root.
+A live `codex exec` run emitted `hook: SessionStart` ×7 and `hook: Stop`.
+
+The error was reading **absence of an explicit declaration** (across 12 shipped plugins)
+as **absence of capability**. The mechanism was implicit discovery. Recorded here rather
+than silently edited away: the flag did its job — the assumption was the thing that
+broke, exactly where it was predicted to.
+
+Half the bet was right: **agents** are *not* plugin-deliverable on Codex.
+
+### Current riskiest assumption
+
+**Betting** that **Claude-only model tiering is acceptable**, because per-agent
+`model`/`effort` has *no expression in Codex at any layer* — the role-file validator
+accepts only `name`/`description`/`nickname_candidates`/`developer_instructions`,
+`ConfigLayerSource` has no `Agent` variant, and the config reference places `model` only
+at top level. Codex's only levers are session-wide (top-level config, `--profile`,
+`-c model=`).
+
+**Wrong when** the owner considers a Claude-only cost lever insufficient — i.e. if Codex
+sessions are a large enough share of spend that a session-level profile lever
+(`codex --profile cheap`) must be built and documented as a *distinct, non-equivalent*
+mechanism rather than omitted.
+
+**Would know within ~1 week** by measuring the Claude-vs-Codex split of actual session
+spend. If Codex is a minority of usage, ship Claude-only tiering and document the
+asymmetry. Tracked: `escapement-8jsb`.
 
 ## Success Criteria
 
