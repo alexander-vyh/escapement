@@ -51,7 +51,20 @@ def _contract(*, exit_code=None, ts=None, expected_exit=0):
     return c
 
 
-CASES = [
+def _cases() -> list[dict]:
+    """Built at CALL time, never at import time.
+
+    `_now_iso()` / `_future_iso()` freeze ABSOLUTE timestamps. As a module-level
+    constant these were evaluated during pytest collection — before any test ran.
+    A slow suite (>60s to reach this test) pushed the "future" wakeups into the
+    past, so the gate correctly reported no pending wakeup and the case degraded
+    wakeup_registered -> conversational. Likewise a "fresh" verification goes
+    stale once the suite exceeds the 5-minute recency window.
+
+    Symptom: `test_gate_decision_cases` passed in isolation (fast) and failed in
+    the full suite (slow) — a time-bomb fixture, not a logic regression.
+    """
+    return [
     # Positive control #1 — happy path must not be broken.
     {
         "name": "verification_passed (fresh)",
@@ -181,13 +194,13 @@ CASES = [
         "state": {"contract": _contract(exit_code=0, ts=_now_iso(), expected_exit=42)},
         "expect": ("block", "no_completion_or_resumption_proof"),
     },
-]
+    ]
 
 
 def run() -> int:
     passed = 0
     failed = 0
-    for case in CASES:
+    for case in _cases():
         got = would_block_stop(case["state"])
         ok = got == case["expect"]
         status = "PASS" if ok else "FAIL"
@@ -1103,3 +1116,34 @@ if __name__ == "__main__":
     rc_implicit = run_implicit_queue()
     rc_wakeup = run_wakeup_blocker_wiring()
     sys.exit(rc_gate or rc_iso or rc_port or rc_hook or rc_task or rc_implicit or rc_wakeup)
+
+
+def test_cases_are_built_lazily_not_frozen_at_import():
+    """Regression guard: `CASES` was a module constant (escapement-ptzz session).
+
+    `_future_iso()` / `_now_iso()` freeze ABSOLUTE timestamps. Evaluated at import
+    (pytest collection), a "60 seconds ahead" wakeup expires before a slow suite
+    reaches this test, and the gate degrades wakeup_registered -> conversational.
+    The failure was a function of SUITE DURATION, not of gate logic.
+
+    Two calls must produce different timestamps. Identical ones mean the fixture
+    is frozen again.
+    """
+
+    def _wake_ats(cases: list[dict]) -> list[str]:
+        return [
+            entry["wake_at"]
+            for case in cases
+            for entry in case.get("state", {}).get("scheduled", []) or []
+            if isinstance(entry, dict) and "wake_at" in entry
+        ]
+
+    first, second = _cases(), _cases()
+    a, b = _wake_ats(first), _wake_ats(second)
+
+    # Positive control: without this, an empty list would make the guard vacuous.
+    assert a, "no scheduled wake_at present in the cases — this guard proves nothing"
+    assert a != b, (
+        "wake_at timestamps are identical across two _cases() calls — the fixture is "
+        "frozen at import again; the suite will fail once it runs slower than the horizon"
+    )
