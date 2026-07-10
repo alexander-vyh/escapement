@@ -22,7 +22,9 @@ EXPECTED_CODEX_GATE = {
 CODEX_FINAL_RESPONSE_GAP_COMMAND = "python3 -B claude/hooks/codex_final_response_gap.py"
 CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = 'python3 -B "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"'
 ROOT_CHECKOUT_GUARD_COMMAND = "python3 -B claude/hooks/root_checkout_guard.py"
-CLAUDE_ROOT_CHECKOUT_GUARD_COMMAND = "python3 -B ~/.claude/hooks/root_checkout_guard.py"
+CLAUDE_PLUGIN_ROOT_CHECKOUT_GUARD_COMMAND = (
+    'python3 -B "${CLAUDE_PLUGIN_ROOT}/hooks/root_checkout_guard.py"'
+)
 CODEX_PLUGIN_ROOT_CHECKOUT_GUARD_FRAGMENT = 'python3 -B "${PLUGIN_ROOT}/claude/hooks/root_checkout_guard.py"'
 MINIMUM_VERIFIED_DELIVERY_FRAGMENTS = (
     "Escapement optimizes for minimum verified delivery.",
@@ -206,7 +208,12 @@ def test_codex_repo_relative_python_hooks_disable_bytecode():
 
 
 def test_claude_python_hooks_disable_bytecode():
-    """Claude templates and vendored plugin hooks should not write Python bytecode caches."""
+    """Vendored plugin hooks must not write Python bytecode caches.
+
+    The plugin is the sole owner of Claude hook registration (escapement-ptzz), so
+    ``claude/settings.template.json`` registers nothing. The ``-B`` invariant and its
+    positive control therefore live on the plugin's hooks.json, not on the template.
+    """
     settings = json.loads((ROOT / "claude" / "settings.template.json").read_text())
     setting_commands = [
         hook["command"]
@@ -214,11 +221,10 @@ def test_claude_python_hooks_disable_bytecode():
         for item in event_items
         for hook in item.get("hooks", [])
     ]
-    setting_offenders = [
-        command for command in setting_commands if command.startswith("python3 ~/.claude/")
-    ]
-    assert setting_offenders == []
-    assert any(command.startswith("python3 -B ~/.claude/") for command in setting_commands)
+    assert setting_commands == [], (
+        "claude/settings.template.json must register no hooks — the plugin owns them. "
+        "Dual registration double-fires every gate (escapement-ptzz)."
+    )
 
     plugin_hooks = json.loads((ROOT / "plugins" / "escapement-claude" / "hooks" / "hooks.json").read_text())["hooks"]
     plugin_commands = [
@@ -233,6 +239,11 @@ def test_claude_python_hooks_disable_bytecode():
         if command.startswith('python3 "${CLAUDE_PLUGIN_ROOT}/')
     ]
     assert plugin_offenders == []
+    # Positive control (migrated from the template): proves the -B check above is
+    # scanning a non-empty set of real python hook commands.
+    assert any(
+        command.startswith('python3 -B "${CLAUDE_PLUGIN_ROOT}/') for command in plugin_commands
+    ), "no bytecode-disabled python hook found in the plugin — the -B check is vacuous"
 
 
 def test_codex_hooks_include_final_response_gap_warning():
@@ -302,12 +313,17 @@ def test_root_checkout_guard_is_manifested_and_rendered_for_claude_and_codex():
     }
     assert {"Bash", "Write", "Edit", "NotebookEdit"} <= codex_matchers
 
-    claude_settings = json.loads((ROOT / "claude" / "settings.template.json").read_text())
+    # The Claude PLUGIN is the sole owner of hook registration (escapement-ptzz).
+    # This assertion is re-pointed from settings.template.json, not weakened: the
+    # same four matchers must still be wired for the guard to protect the root checkout.
+    claude_plugin_hooks = json.loads(
+        (ROOT / "plugins" / "escapement-claude" / "hooks" / "hooks.json").read_text()
+    )["hooks"]
     claude_matchers = {
         item.get("matcher", "")
-        for item in claude_settings["hooks"]["PreToolUse"]
+        for item in claude_plugin_hooks["PreToolUse"]
         for hook in item.get("hooks", [])
-        if hook.get("command") == CLAUDE_ROOT_CHECKOUT_GUARD_COMMAND
+        if hook.get("command") == CLAUDE_PLUGIN_ROOT_CHECKOUT_GUARD_COMMAND
     }
     assert {"Bash", "Write", "Edit", "NotebookEdit"} <= claude_matchers
 

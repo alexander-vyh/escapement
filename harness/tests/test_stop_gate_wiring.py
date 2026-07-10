@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""B1 regression — the SHIPPED settings template must WIRE the harness Stop gate,
+"""B1 regression — the SHIPPED plugin hooks.json must WIRE the harness Stop gate,
 and the wired gate must actually BLOCK an unverified Stop.
 
 Source / oracle brief: docs/assessments/2026-05-28-critical-assessment.md (B1),
@@ -7,7 +7,7 @@ bead escapement-fxh.1.
 
 Business invariant
 ------------------
-A user who installs from claude/settings.template.json gets a LIVE
+A user who installs the escapement plugin gets a LIVE
 continuation-harness Stop gate — not merely the stop_hook.py file on disk. The
 bug being guarded: the template's Stop block invoked only validate_no_shirking.py,
 so distributees who merge it (per INSTALL.sh) symlinked the harness code but never
@@ -38,11 +38,13 @@ sys.path.insert(0, str(HARNESS_BIN))
 
 from would_block_stop import would_block_stop  # noqa: E402
 
-TEMPLATE = REPO / "claude" / "settings.template.json"
+# The Claude PLUGIN is the sole owner of hook registration (escapement-ptzz).
+# The "shipped surface" is now the plugin's hooks.json, not settings.template.json.
+TEMPLATE = REPO / "plugins" / "escapement-claude" / "hooks" / "hooks.json"
 
 
 def _stop_commands() -> list[str]:
-    """All command strings wired under hooks.Stop in the shipped template."""
+    """All command strings wired under hooks.Stop in the shipped plugin."""
     data = json.loads(TEMPLATE.read_text())
     cmds: list[str] = []
     for group in data.get("hooks", {}).get("Stop", []):

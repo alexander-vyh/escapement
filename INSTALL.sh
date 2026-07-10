@@ -328,20 +328,36 @@ resolve_effective_pin_dir() {
   echo "$ESCAPEMENT_PIN_DIR"
 }
 
-# Merge the template's hooks block into the live settings.json so newly-registered
-# hooks actually fire (e9v.8) — additive, deduped, backup-first. Replaces the old
-# 'merge it manually' step.
+# The Claude PLUGIN is the sole owner of hook registration (escapement-ptzz).
+#
+# Previously this MERGED claude/settings.template.json's hooks into the live
+# settings.json — while the plugin registered the same scripts via its own
+# hooks.json. Claude Code does not dedupe, so 38 gates fired TWICE per matching
+# tool call. The template now registers nothing; this converges the live settings
+# by REMOVING the duplicates instead of adding them.
+#
+# Safe by construction: it prunes against the hooks the INSTALLED plugin actually
+# registers, so it can never remove a gate the live plugin does not supply. The
+# user's own hooks (not shipped by escapement) are preserved verbatim.
 merge_settings() {
-  local template="$REPO_DIR/claude/settings.template.json"
   local live="$CLAUDE_DIR/settings.json"
-  if [[ ! -f "$template" ]]; then
-    echo "    ⚠  settings template missing — skipping hooks merge."; return 0
+  local plugin_hooks
+  plugin_hooks=$(find "$CLAUDE_DIR/plugins/cache/escapement/escapement" -maxdepth 2 \
+    -name hooks.json -path '*/hooks/*' 2>/dev/null | head -1)
+
+  if [[ -z "$plugin_hooks" ]]; then
+    echo "    ⚠  escapement plugin not installed — cannot prune settings hooks."
+    echo "       Install it first:  /plugin marketplace add alexander-vyh/escapement"
+    echo "                          /plugin install escapement@escapement"
+    return 0
   fi
   if [[ "$DRY_RUN" == true ]]; then
-    echo "    (dry-run) would merge $template hooks into $live"; return 0
+    python3 "$REPO_DIR/scripts/prune_settings_hooks.py" "$plugin_hooks" "$live" --dry-run 2>&1 \
+      | sed 's/^/    /'
+    return 0
   fi
-  python3 "$REPO_DIR/scripts/merge_settings_hooks.py" "$template" "$live" 2>&1 \
-    | sed 's/^/    /' || echo "    ⚠  settings merge failed — merge manually."
+  python3 "$REPO_DIR/scripts/prune_settings_hooks.py" "$plugin_hooks" "$live" 2>&1 \
+    | sed 's/^/    /' || echo "    ⚠  settings prune failed — remove duplicate hooks manually."
 }
 
 # --- Execute ---
@@ -370,8 +386,9 @@ elif [[ "$MODE" == "install" ]]; then
   merge_settings
   echo
   echo "==> next steps"
-  echo "    1. Merged hook entries from claude/settings.template.json into your"
-  echo "       ~/.claude/settings.json automatically; review env blocks manually."
+  echo "    1. The escapement PLUGIN owns hook registration; duplicate entries were"
+  echo "       pruned from ~/.claude/settings.json (backup written). Your own hooks"
+  echo "       are untouched. Review env blocks manually."
   echo "    2. Read claude/rules/*.md and edit to match your philosophy."
   echo "    3. Open Claude Code in any git repo to trigger bootstrap."
   echo "       Optional: set ESCAPEMENT_BOOTSTRAP_ROOTS=/path/a:/path/b to limit it."
