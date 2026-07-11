@@ -663,6 +663,103 @@ def test_claude_plugin_bundles_all_rules():
     assert bundled == source_rules and source_rules, "all rules must be bundled, none dropped"
 
 
+# escapement-w4sn: the always-on rules must be injected through exactly ONE channel.
+# A distinctive phrase that lives in exactly one rule body (continuation-harness.md)
+# is the dedup sentinel — it must appear once across the union of both channels.
+RULE_DEDUP_PHRASE = "outcome-bias over action-bias"
+
+
+def _install_dry_run_plan(tmp_home):
+    """stdout of `INSTALL.sh --dev --dry-run` against a sandboxed HOME.
+
+    --dev skips the pinned-checkout git clone (hermetic — no network); --dry-run
+    prints the planned symlinks (`    link:   <dest> -> <src_rel>`) without touching
+    the filesystem. This exercises INSTALL.sh's real PLAN, not a regex on its source.
+    """
+    result = subprocess.run(
+        ["bash", str(ROOT / "INSTALL.sh"), "--dev", "--dry-run"],
+        cwd=ROOT,
+        env={**os.environ, "HOME": str(tmp_home)},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def _planned_rule_symlink_sources(plan_stdout):
+    """Sources INSTALL.sh would symlink into a `.../rules/*.md` destination."""
+    sources = []
+    for line in plan_stdout.splitlines():
+        if "link:" not in line:
+            continue
+        _, _, rest = line.partition("link:")
+        dest, sep, src_rel = rest.partition("->")
+        if not sep:
+            continue
+        dest, src_rel = dest.strip(), src_rel.strip()
+        if "/rules/" in dest and dest.endswith(".md"):
+            sources.append(src_rel)
+    return sources
+
+
+def test_install_does_not_symlink_rules_into_claude_dir(tmp_path):
+    """INSTALL.sh must NOT symlink claude/rules/*.md into ~/.claude/rules/.
+
+    Regression for escapement-w4sn: those native symlinks loaded every rule body as
+    the claudeMd block WHILE the plugin's inject-rules.sh hook injected the same
+    bodies — every session paid ~20K tokens of duplicate rules on turn 0. The plugin
+    SessionStart hook is now the sole channel. Negative control: this fails against
+    the pre-fix INSTALL.sh, which planned 13 such symlinks.
+    """
+    plan = _install_dry_run_plan(tmp_path)
+    # Sanity: the plan is real (other surfaces still symlink), so an empty rules
+    # result means "removed", not "dry-run emitted nothing".
+    assert "link:" in plan, "dry-run produced no symlink plan at all"
+    rule_links = _planned_rule_symlink_sources(plan)
+    assert rule_links == [], (
+        "INSTALL.sh must not symlink rule bodies into ~/.claude/rules "
+        f"(Channel A duplicate); found {rule_links}"
+    )
+
+
+def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
+    """Each rule body appears exactly once across the combined injection surface.
+
+    Channel A = rule bodies INSTALL.sh would symlink into ~/.claude/rules (native
+    claudeMd load). Channel B = the plugin SessionStart hook's additionalContext.
+    The dedup sentinel — a phrase in exactly one rule body — must appear ONCE across
+    the union (pre-fix it appeared twice). Positive control: Channel B alone still
+    carries it and every bundled rule body, so delivery is not dropped to zero.
+    """
+    plan = _install_dry_run_plan(tmp_path)
+    channel_a = "\n".join(
+        (ROOT / src).read_text() for src in _planned_rule_symlink_sources(plan)
+    )
+
+    inj = subprocess.run(
+        ["bash", str(CLAUDE_PLUGIN / "hooks" / "inject-rules.sh")],
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(CLAUDE_PLUGIN)},
+        capture_output=True,
+        text=True,
+    )
+    assert inj.returncode == 0, inj.stderr
+    channel_b = json.loads(inj.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    combined = channel_a + "\n" + channel_b
+    assert combined.count(RULE_DEDUP_PHRASE) == 1, (
+        "rule bodies must be injected exactly once across INSTALL.sh + plugin hook; "
+        f"dedup-phrase count = {combined.count(RULE_DEDUP_PHRASE)}"
+    )
+    # Positive control: the surviving channel still delivers the sentinel AND every
+    # bundled rule body verbatim — the fix removed the duplicate, not the rules.
+    assert channel_b.count(RULE_DEDUP_PHRASE) == 1
+    for rule_file in sorted((CLAUDE_PLUGIN / "rules").glob("*.md")):
+        assert rule_file.read_text() in channel_b, (
+            f"surviving channel dropped rule body: {rule_file.name}"
+        )
+
+
 def test_claude_plugin_injects_rules_with_imperative_framing(tmp_path):
     """Behavioral: running inject-rules.sh emits SessionStart additionalContext
     carrying the bundled rules AND imperative framing (so injected rules match

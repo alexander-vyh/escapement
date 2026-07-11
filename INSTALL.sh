@@ -102,24 +102,15 @@ declare -a PLAN=(
   "claude/skills/gate-design|$CLAUDE_DIR/skills/gate-design"
   "claude/skills/vocab|$CLAUDE_DIR/skills/vocab"
 
-  # Rules (individual files so user can keep their own alongside)
-  "claude/rules/planning-discipline.md|$CLAUDE_DIR/rules/planning-discipline.md"
-  "claude/rules/molecule-awareness.md|$CLAUDE_DIR/rules/molecule-awareness.md"
-  "claude/rules/tdd-enforcement.md|$CLAUDE_DIR/rules/tdd-enforcement.md"
-  "claude/rules/agent-teams-default.md|$CLAUDE_DIR/rules/agent-teams-default.md"
-  "claude/rules/outcome-ownership.md|$CLAUDE_DIR/rules/outcome-ownership.md"
-  "claude/rules/evidence-provenance.md|$CLAUDE_DIR/rules/evidence-provenance.md"
-  # beads-worktree-integration.md retired as an always-on rule — its enforcement
-  # moved to the beads_worktree_guard.py PreToolUse hook (mechanical, zero
-  # resident tokens) and its how-to to the `beads-worktree` skill (on-demand).
-  "claude/rules/never-suppress.md|$CLAUDE_DIR/rules/never-suppress.md"
-  "claude/rules/serena-first.md|$CLAUDE_DIR/rules/serena-first.md"
-  "claude/rules/continuation-harness.md|$CLAUDE_DIR/rules/continuation-harness.md"
-  "claude/rules/delicate-art-of-bureaucracy.md|$CLAUDE_DIR/rules/delicate-art-of-bureaucracy.md"
-  "claude/rules/gate-design.md|$CLAUDE_DIR/rules/gate-design.md"
-  "claude/rules/research-findings-persistence.md|$CLAUDE_DIR/rules/research-findings-persistence.md"
-  "claude/rules/why-drilling.md|$CLAUDE_DIR/rules/why-drilling.md"
-  "claude/rules/worktree-discipline.md|$CLAUDE_DIR/rules/worktree-discipline.md"
+  # Rules are NOT symlinked here (bead escapement-w4sn). The plugin's SessionStart
+  # hook (plugins/escapement-claude/hooks/inject-rules.sh) is the SOLE injection
+  # channel for the always-on rules. Symlinking claude/rules/*.md into
+  # ~/.claude/rules/ ALSO loaded them as the native claudeMd block, so every
+  # session carried all rule bodies TWICE (~20K tokens of pure duplicate on turn 0).
+  # inject-rules.sh self-resolves ${CLAUDE_PLUGIN_ROOT} and is portable to
+  # plugin-only installs, so it is the channel we keep. Do not re-add the
+  # claude/rules/*.md -> $CLAUDE_DIR/rules/*.md entries; test_agent_surfaces.py
+  # asserts they stay gone and that inject-rules.sh still delivers every rule.
 
   # Agents (workflow-integral only — personal advisor agents live in the user's
   # own config, not in this framework. adversarial-reviewer is dispatched by
@@ -342,8 +333,12 @@ resolve_effective_pin_dir() {
 merge_settings() {
   local live="$CLAUDE_DIR/settings.json"
   local plugin_hooks
+  # `|| true`: when the plugin cache dir does not exist yet (fresh machine, plugin
+  # not installed), `find` exits non-zero and `pipefail` propagates it, which under
+  # `set -e` would abort the whole install BEFORE the graceful branch below can run.
+  # Tolerate it so the "plugin not installed" hint actually fires (escapement-w4sn).
   plugin_hooks=$(find "$CLAUDE_DIR/plugins/cache/escapement/escapement" -maxdepth 2 \
-    -name hooks.json -path '*/hooks/*' 2>/dev/null | head -1)
+    -name hooks.json -path '*/hooks/*' 2>/dev/null | head -1) || true
 
   if [[ -z "$plugin_hooks" ]]; then
     echo "    ⚠  escapement plugin not installed — cannot prune settings hooks."
