@@ -128,9 +128,28 @@ else
   echo "    harness/bin left at legacy pin (pre-cutover) — update did not cut over"
 fi
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# --- Converge settings.json: the plugin is the SOLE owner of hook registration
+# (escapement-ptzz). A freshly-refreshed cache may register a hook that also
+# lingers in the user's settings.json (e.g. project-bootstrap, promoted into the
+# plugin by ptzz), which Claude Code then double-fires. Prune those duplicates so
+# an update always leaves ZERO double-fires. Safe by construction: prunes only what
+# the just-installed plugin registers; the user's own hooks survive. (A pre-ptzz
+# cache that registers none simply prunes nothing.)
+pruner="$REPO_DIR/scripts/prune_settings_hooks.py"
+plugin_hooks="$new_path/hooks/hooks.json"
+if [[ -f "$pruner" && -f "$plugin_hooks" ]]; then
+  if [[ "$DRY_RUN" == true ]]; then
+    python3 "$pruner" "$plugin_hooks" "$SETTINGS" --dry-run 2>&1 | sed 's/^/    /'
+  else
+    python3 "$pruner" "$plugin_hooks" "$SETTINGS" 2>&1 | sed 's/^/    /' \
+      || echo "    WARN: settings prune failed — remove duplicate hooks manually." >&2
+  fi
+fi
+
 # --- Verify freshness against repo main (canary: stop_hook.py). ---
 if [[ "$DRY_RUN" != true ]]; then
-  REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   canary="$new_path/harness/bin/stop_hook.py"
   repo_canary="$REPO_DIR/plugins/escapement-claude/harness/bin/stop_hook.py"
   if [[ -f "$canary" && -f "$repo_canary" ]]; then
