@@ -112,6 +112,40 @@ def test_codex_plugin_wrapper_manifest_uses_current_ingestion_contract():
     assert (CODEX_WRAPPER / "hooks" / "hooks.json").is_file()
 
 
+def test_claude_plugin_manifest_has_no_version_so_auto_update_works():
+    """The Claude plugin must NOT declare a `version` (escapement-9mki).
+
+    Claude Code resolves an unversioned git-subdir plugin's version from the
+    source commit SHA, so every commit to main is a new version and
+    `claude plugin update escapement@escapement` actually advances the install.
+    A static `version` pins resolution to that literal and makes update a
+    permanent no-op.
+
+    Proven 2026-07-10 against a real git-subdir-from-GitHub probe: the
+    unversioned install updated 99d69bd -> bf09f86 on a new commit; a
+    statically-versioned one reported "already at the latest version".
+
+    Negative control: re-adding `"version"` to the manifest fails this test —
+    which is the whole point, since it silently disables auto-update.
+    """
+    manifest = json.loads(
+        (ROOT / "plugins" / "escapement-claude" / ".claude-plugin" / "plugin.json").read_text()
+    )
+    assert manifest["name"] == "escapement"
+    assert "version" not in manifest, (
+        "Claude plugin.json declares a `version` — this pins `claude plugin update` "
+        "to a no-op and disables auto-update (escapement-9mki). Remove it."
+    )
+    # The marketplace entry must not smuggle a version back in either (it would
+    # override the plugin.json absence per Claude's version-resolution order).
+    marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
+    entry = next(p for p in marketplace["plugins"] if p["name"] == "escapement")
+    assert "version" not in entry, (
+        "marketplace entry pins a `version`, overriding the unversioned plugin.json "
+        "and re-disabling auto-update (escapement-9mki)"
+    )
+
+
 def test_codex_plugin_wrapper_contains_current_codex_skills():
     source_skills = {
         path.parent.name: path.read_text(encoding="utf-8")

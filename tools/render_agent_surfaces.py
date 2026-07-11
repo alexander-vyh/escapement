@@ -312,7 +312,14 @@ def _render_claude_plugin_manifest() -> str:
             "oracle-discipline gates, TDD enforcement, and outcome-bias "
             "continuation. Always-on rules are injected via a SessionStart hook."
         ),
-        "version": "1.0.0",
+        # NO `version` field — deliberate (escapement-9mki). Claude Code resolves an
+        # unversioned plugin's version from the git commit SHA of the git-subdir
+        # source, so every commit to main is a new version and `claude plugin update`
+        # actually advances the install. A static `version` (e.g. "1.0.0") pins
+        # resolution to that literal and makes `claude plugin update` a permanent
+        # no-op. Verified 2026-07-10 against a real git-subdir-from-GitHub probe:
+        # unversioned install updated 99d69bd->bf09f86 on a new commit; a static
+        # version reported "already at latest". Do NOT add a version field back.
         "author": {"name": "alexander-vyh"},
         "repository": "https://github.com/alexander-vyh/escapement",
         "homepage": "https://github.com/alexander-vyh/escapement",
@@ -342,9 +349,10 @@ def _render_claude_marketplace() -> str:
                 "name": "escapement",
                 "description": (
                     "Host-neutral agentic workflow layer with always-on rules "
-                    "injected via a SessionStart hook. Refresh to the latest main "
-                    "with scripts/plugin-update.sh (the static plugin version makes "
-                    "`claude plugin update` a no-op)."
+                    "injected via a SessionStart hook. Unversioned, so `claude "
+                    "plugin update escapement@escapement` tracks main automatically; "
+                    "scripts/plugin-update.sh forces a refresh and also preserves "
+                    "your model key and prunes duplicate hook registrations."
                 ),
                 "source": {
                     "source": "git-subdir",

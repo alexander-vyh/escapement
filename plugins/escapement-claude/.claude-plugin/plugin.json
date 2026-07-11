@@ -2,7 +2,6 @@
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "escapement",
   "description": "Host-neutral agentic workflow layer: beads issue tracking, oracle-discipline gates, TDD enforcement, and outcome-bias continuation. Always-on rules are injected via a SessionStart hook.",
-  "version": "1.0.0",
   "author": {
     "name": "alexander-vyh"
   },
