@@ -84,7 +84,7 @@ def test_codex_repo_marketplace_points_to_installable_wrapper():
     marketplace = json.loads(marketplace_path.read_text())
     entries = [entry for entry in marketplace["plugins"] if entry["name"] == "escapement"]
 
-    assert marketplace["name"] == "escapement-local"
+    assert marketplace["name"] == "escapement"
     assert entries == [
         {
             "name": "escapement",
@@ -107,7 +107,13 @@ def test_codex_plugin_wrapper_manifest_uses_current_ingestion_contract():
     assert manifest["name"] == "escapement"
     assert manifest["version"] == "1.0.0"
     assert manifest["skills"] == "./skills/"
-    assert "hooks" not in manifest, "current Codex plugin validation rejects a hooks manifest field"
+    # Codex 0.144.1 ACCEPTS an explicit hooks key (escapement-z506) — verified by
+    # installing a probe plugin declaring `"hooks": "./hooks/hooks.json"`. The old
+    # assertion ("validation rejects a hooks field") was stale from an earlier Codex.
+    assert manifest["hooks"] == "./hooks/hooks.json", (
+        "Codex plugin must declare its hooks explicitly rather than rely on "
+        "undocumented default discovery of hooks/hooks.json"
+    )
     assert (CODEX_WRAPPER / "skills").is_dir()
     assert (CODEX_WRAPPER / "hooks" / "hooks.json").is_file()
 
@@ -281,10 +287,22 @@ def test_claude_python_hooks_disable_bytecode():
 
 
 def test_codex_hooks_include_final_response_gap_warning():
-    """Codex has no Stop/final-response hook; the gap must be explicit at startup."""
+    """No Stop GATE is ported to Codex yet; the gap must be explicit at startup.
+
+    Codex 0.144.1 DOES support a `stop` hook event (verified: codex@openai-codex
+    registers one and a real `codex exec` printed `hook: Stop`). But escapement's
+    continuation-harness Stop gate (harness/bin/stop_hook.py, ~1144 lines) assumes
+    Claude Stop payloads, Claude transcript layout, ScheduleWakeup, and ~/.claude
+    state — porting it is its own effort, tracked separately. Until that lands,
+    escapement ships NO Codex Stop hook, and the SessionStart advisory names the
+    gap. This guard prevents a half-baked Stop hook shipping before the real port.
+    """
     hooks = json.loads((ROOT / ".codex" / "hooks.json").read_text())["hooks"]
 
-    assert "Stop" not in hooks, "Codex must not pretend it has a Claude-style Stop event"
+    assert "Stop" not in hooks, (
+        "escapement has not ported its Stop gate to Codex yet — do not ship a Codex "
+        "Stop hook until the continuation-harness port lands (see the Stop-gate bead)"
+    )
     session_start_commands = [
         hook["command"]
         for item in hooks.get("SessionStart", [])

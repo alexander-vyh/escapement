@@ -1,7 +1,7 @@
 {
-  "name": "escapement-local",
+  "name": "escapement",
   "interface": {
-    "displayName": "Escapement Local"
+    "displayName": "Escapement"
   },
   "plugins": [
     {

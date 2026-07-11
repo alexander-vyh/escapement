@@ -185,6 +185,12 @@ def _render_codex_plugin_manifest() -> str:
             "agentic",
         ],
         "skills": "./skills/",
+        # Declare hooks explicitly rather than rely on Codex's undocumented default
+        # discovery of hooks/hooks.json (escapement-z506). Verified accepted by
+        # codex-cli 0.144.1: a plugin declaring `"hooks": "./hooks/hooks.json"`
+        # installs cleanly. The embedded plugin-json-spec confirms the key
+        # supplements (does not replace) default discovery.
+        "hooks": "./hooks/hooks.json",
         "interface": {
             "displayName": "Escapement",
             "shortDescription": "Agentic workflow gates: oracle discipline, TDD enforcement, beads tracking",
@@ -217,9 +223,15 @@ def _render_codex_plugin_manifest() -> str:
 
 def _render_codex_marketplace() -> str:
     payload = {
-        "name": "escapement-local",
+        # Public-install name (escapement-z506). Verified: adding this repo via a
+        # git URL (`codex plugin marketplace add https://github.com/alexander-vyh/
+        # escapement`) resolves the plugin from its `local` source relative to the
+        # cloned marketplace root, and `codex plugin marketplace upgrade escapement`
+        # then tracks main — so the install command is `codex plugin add
+        # escapement@escapement`, not the dev-only `@escapement-local`.
+        "name": "escapement",
         "interface": {
-            "displayName": "Escapement Local",
+            "displayName": "Escapement",
         },
         "plugins": [
             {
