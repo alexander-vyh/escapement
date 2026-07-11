@@ -2,11 +2,15 @@
 # Test: scripts/plugin-update.sh refreshes the escapement plugin to main HEAD
 # while PRESERVING state across the reinstall (bead escapement-06g).
 #
-# Business invariant: `claude plugin update` is a no-op for this plugin (static
-# version 1.0.0), so the refresh path force-reinstalls. A reinstall re-enables
-# the plugin and drops the settings.json `model` key. The script must undo BOTH
-# side effects, and must NOT perform the cutover (repoint ~/.claude/harness/bin)
-# when the machine is still on the legacy pin.
+# Business invariant: `claude plugin update` now DOES advance this plugin (the
+# manifest is unversioned, so Claude tracks the git-subdir SHA — escapement-9mki).
+# plugin-update.sh remains the force-refresh path that additionally preserves
+# state a bare reinstall clobbers: a reinstall re-enables the plugin and drops the
+# settings.json `model` key, so the script must undo BOTH side effects, and must
+# NOT perform the cutover (repoint ~/.claude/harness/bin) when the machine is still
+# on the legacy pin.
+# NOTE: the `1.0.0` cache path below is a synthetic fixture label for the mock
+# install; the real cache dir is SHA-derived now that the plugin is unversioned.
 #
 # Fragile implementations this rejects:
 #   - refresh that leaves the plugin ENABLED (double-fire risk pre-cutover)

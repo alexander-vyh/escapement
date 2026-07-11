@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "escapement",
-      "description": "Host-neutral agentic workflow layer with always-on rules injected via a SessionStart hook. Refresh to the latest main with scripts/plugin-update.sh (the static plugin version makes `claude plugin update` a no-op).",
+      "description": "Host-neutral agentic workflow layer with always-on rules injected via a SessionStart hook. Unversioned, so `claude plugin update escapement@escapement` tracks main automatically; scripts/plugin-update.sh forces a refresh and also preserves your model key and prunes duplicate hook registrations.",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/alexander-vyh/escapement",
