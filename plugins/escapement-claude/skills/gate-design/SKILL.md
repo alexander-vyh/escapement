@@ -280,3 +280,76 @@ learning loop; Kelman 2019 on bureaucracies as learning organizations).
 Rule 3 derives from Wiesche et al. (2013) on *mock bureaucracy* as a
 failure mode that even enabling-by-design can produce when
 implementation conditions are wrong.
+
+## Bureaucracy principle — deeper context (relocated from `delicate-art-of-bureaucracy.md`)
+
+The always-on `claude/rules/delicate-art-of-bureaucracy.md` rule carries the
+operative core (the four design features, the four failure modes, the operating
+rules) and points here for the *why*. That non-operative deep-context tail was
+relocated into this skill to keep the always-on rule lean; it is preserved in
+full below.
+
+### The operative thesis (Schwartz, 2020)
+
+Schwartz names the operative frame directly: *"We bureaucratize as a way to
+turn our problem-solving successes into problem-solved routines."* The
+routines are how we don't re-solve the same problem twice. Whether they
+remain useful depends on whether they stay enabling or drift coercive.
+
+### Bureaucracy lineage (full)
+
+The framework is not Schwartz's invention. He popularized it for a
+practitioner audience; the operative content traces back through Adler:
+
+- **Gouldner (1954)** — first denounced the "metaphysical pathos" around
+  the term *bureaucracy* and argued that bureaucracy could deliver
+  efficiency without enslavement. The original challenge.
+- **Adler & Borys (1996)** — answered Gouldner's challenge by
+  distinguishing enabling from coercive formalization along the four
+  dimensions (repair, internal transparency, global transparency,
+  flexibility) and showing empirically that the difference matters.
+  *The* operative source.
+- **Adler (1992) / Shook (2010)** — empirical anchor in the NUMMI plant:
+  standardized work as the *foundation* of learning, not the enemy of it.
+- **Schwartz (2020)** — popularized the framework for IT practitioners and
+  added the three "ways" (Monkey, Razor, Sumo Wrestler) and 25+ named
+  plays as a practitioner playbook.
+- **Wiesche, Schermann & Krcmar (2013)** — named "mock bureaucracy" and
+  showed that enabling design is not a guaranteed cure.
+
+### What this lineage doesn't cover
+
+Two practitioner traditions are absent from Schwartz's bibliography but
+belong in this lineage:
+
+- **The management-thinker tradition** — Grove (*High Output Management*,
+  1983), Lencioni (*Five Dysfunctions of a Team*, 2002), Kim Scott
+  (*Radical Candor*, 2017), Brown (*Daring to Lead*, 2018). These give
+  operative vocabulary for *how* enabling rules work in practice: leverage
+  ratios, trust before accountability, care-personally-challenge-directly
+  feedback, clear-is-kind specificity.
+- **The individual-lean tradition** — Allen (*Getting Things Done*, 2001),
+  Benson & Barry (*Personal Kanban*, 2011), Newport (*Deep Work*, 2016),
+  Torres (*Continuous Discovery Habits*, 2021). These give the
+  scale-of-one lean techniques Schwartz's executive-audience bibliography
+  skips. WIP limits for one, capture-clarify-organize, attention-cost
+  analysis of interruption — directly applicable to a personal
+  workflow-tooling repo.
+
+### Citations
+
+- Adler, P. S., & Borys, B. (1996). Two Types of Bureaucracy: Enabling and
+  Coercive. *Administrative Science Quarterly*, 41(1), 61–89.
+- Adler, P. S. (1992). The "Learning Bureaucracy": New United Motor
+  Manufacturing, Inc. In *Research in Organizational Behavior*, Vol. 15.
+- Gouldner, A. W. (1954). *Patterns of Industrial Bureaucracy*. The Free
+  Press.
+- Schwartz, M. (2020). *The (Delicate) Art of Bureaucracy: Digital
+  Transformation with the Monkey, the Razor, and the Sumo Wrestler.* IT
+  Revolution Press.
+- Shook, J. (2010). How to Change a Culture: Lessons from NUMMI. *MIT
+  Sloan Management Review*, 51(2), 63–68.
+- Wiesche, M., Schermann, M., & Krcmar, H. (2013). When IT Risk
+  Management Produces More Harm than Good: The Phenomenon of "Mock
+  Bureaucracy." *46th Hawaii International Conference on System
+  Sciences*.
