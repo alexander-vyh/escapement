@@ -18,6 +18,7 @@
     "agentic"
   ],
   "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Escapement",
     "shortDescription": "Agentic workflow gates: oracle discipline, TDD enforcement, beads tracking",
