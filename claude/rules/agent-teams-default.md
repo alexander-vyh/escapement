@@ -79,110 +79,32 @@ Named agents and beads are complementary. Beads tracks *what* to do (`bd ready`,
 When dispatching implementation agents, consider pairing them with independent
 QA agents that work from the success criteria or spec — NOT from the code.
 
-### Independent Test Agent Pattern
+The full QA-pattern catalog — with dispatch templates and worked examples — lives
+in the **`dispatching-parallel-agents` skill**; load it when you actually pair.
+The operative directive for each pattern, one line, stays here:
 
-For any non-trivial implementation task, dispatch alongside the implementer:
+- **Independent Test Agent Pattern** — for any non-trivial implementation, pair a
+  `qa-tester` with the `implementer`; the tester writes tests from the SPEC /
+  success criteria and NEVER from the code, producing behavioral tests +
+  positive/negative controls + a statement of which bad implementations they
+  reject. The implementer must pass them.
+- **Mutation Challenger Pattern** — before a non-trivial behavior change, dispatch
+  a challenger (no production code) that invents 2-5 plausible bad implementations
+  including the tempting shortcut, and BLOCKS implementation until the named
+  fragile implementation fails at least one behavioral / fixture / contract /
+  architecture / static check.
+- **Outcome Verifier** — after implementation and review, dispatch a verifier that
+  checks the actual user-facing result (run the report/query, call the endpoint,
+  exercise the UI flow, verify the data/sync target), NEVER accepting "tests pass"
+  or "looks correct" as proof.
+- **Completeness Critic** — after the per-lens reviewers report and before
+  declaring the review done, dispatch a generative, blinded critic that surfaces
+  what is MISSING (gaps no lens owned), UNDERSTATED (severity to calibrate up),
+  and MIS-SCOPED; each gap re-enters the loop as a new finding. Run
+  loop-until-dry.
 
-```
-Agent(name="implementer", prompt="Implement the auth flow per spec...")
-Agent(name="qa-tester", prompt="Write tests for the auth flow.
-  Work from the SUCCESS CRITERIA and SPEC — do NOT read the implementation code.
-  Your tests verify the OUTCOMES, not the implementation details.
-  Share your test file via SendMessage when ready for the implementer to run.")
-```
-
-The QA agent writes tests that the implementer must pass. The tests catch the gap
-between what the spec says and what the code does — because the tester never saw
-the code.
-
-The QA agent must write tests from the success criteria, business outcome,
-independent oracle, solution constraints, and invalid solution classes. The QA
-agent should not depend on the implementer's chosen code approach.
-
-The QA agent must produce:
-1. Behavioral tests for the outcome
-2. Positive and negative controls
-3. Contract, architecture, or static checks when invalid implementations could
-   otherwise pass
-4. A statement of which bad implementations the tests reject
-
-### Mutation Challenger Pattern
-
-For non-trivial behavior changes, dispatch a mutation-challenger before
-implementation. The mutation challenger does not write production code.
-
-The mutation challenger must:
-1. Read the Test Oracle Brief and proposed tests.
-2. Invent 2-5 plausible bad implementations.
-3. Include the known tempting shortcut.
-4. For each bad implementation, answer:
-   - Would the current tests/checks fail it?
-   - If not, what test/check must be strengthened?
-5. Block implementation until the named fragile implementation fails at least
-   one behavioral, fixture, contract, architecture, or static check.
-
-Common bad implementation classes:
-- Hardcoded generated IDs instead of semantic business keys
-- Filtering at the wrong layer
-- Testing only an intermediate artifact when the user cares about final output
-- Status code correct but persisted state wrong
-- Permission check mocked but real endpoint still allows access
-- Snapshot updated but interaction/accessibility behavior broken
-- Job stops crashing but output is incomplete or duplicated
-
-### Outcome Verifier
-
-After implementation and code review, dispatch an outcome-verifier. The
-outcome-verifier verifies the actual result the user cares about, not just test
-status or code quality.
-
-Examples:
-- Report task: run the report/query and inspect returned rows or metrics
-- API task: call the public endpoint and verify state, response, and permissions
-- UI task: exercise the user flow, not just component internals
-- Data task: verify the final fact/report, not only intermediate models
-- Sync job: verify target data is correct, complete, and in the expected location
-
-The outcome-verifier must not accept:
-- "Tests pass" as sufficient proof
-- "Implementation looks correct"
-- "Intermediate model is fixed" when the user cares about downstream output
-
-Tests pass only counts as outcome verification when those tests exercise the
-actual desired outcome and reject known fragile implementations.
-
-### Completeness Critic
-
-The Mutation Challenger and the adversarial review pass both attack **overreach**:
-they refute findings that exist and are inflated. They are blind to **underreach**
-by construction — a true finding that no reviewer lens was pointed at is never
-generated, so there is nothing to refute or mutate. A real defect can slip every
-seam between the lenses and be caught only by a human afterward. (This is not
-hypothetical: the 2026-05-28 critique's verify phase refuted five inflated claims
-but never surfaced the write-side triplicate-authoring lean violation — no lens
-owned it.)
-
-After the per-lens reviewers report — and before declaring the review done —
-dispatch a **completeness-critic** agent. Unlike the other QA agents it is
-**generative, not verifying**. Brief it blinded to the other reviewers' verdicts
-(give it the artifact and the *list of lenses that ran*, not their findings) so it
-reasons about what those lenses structurally could not cover. It must answer:
-
-1. **What is missing?** Coverage gaps owned by *no* lens that ran. Name the gap and
-   the absent lens that would have owned it.
-2. **What is understated?** Findings whose severity should be calibrated **up**.
-   Severity calibration is bidirectional — the verify pass argues findings down, the
-   critic argues the under-rated ones up. A recurring nit may be a systemic
-   violation.
-3. **What is mis-scoped?** A finding attached to the wrong layer, or a symptom
-   standing in for a deeper cause.
-
-The critic does not get the last word — it **restarts the loop**. Each gap it names
-is a new finding with no verdict, so it re-enters the pipeline: dispatch a lens at
-it, then verify it adversarially like any other finding. Run the critic
-**loop-until-dry** (repeat until a round surfaces nothing new), not once. If the
-critic finds nothing, it must justify *why the lens set was exhaustive for this
-artifact* — "nothing missing" without that justification is a rubber stamp.
+See the `dispatching-parallel-agents` skill for the full write-ups, the bad-
+implementation-class checklist, and the dispatch templates.
 
 ### When to Pair
 
