@@ -165,6 +165,16 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/outcome_ownership_nudge.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/spec_id_enforcement.py\"",
             "timeout": 10,
             "type": "command"

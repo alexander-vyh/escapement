@@ -916,6 +916,41 @@
       }
     },
     {
+      "id": "outcome_ownership_nudge",
+      "description": "Advisory just-in-time outcome-ownership salience at the PR-ship boundary (gh pr create / gh pr merge). Non-blocking; re-surfaces the operative outcome-ownership.md lines where session-start injection has decayed.",
+      "source": "claude/hooks/outcome_ownership_nudge.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/outcome_ownership_nudge.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_outcome_ownership_nudge.py::test_codex_outcome_ownership_nudge_fires_on_ship",
+            "claude/hooks/tests/test_outcome_ownership_nudge.py::test_codex_outcome_ownership_nudge_silent_off_ship"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B ~/.claude/hooks/outcome_ownership_nudge.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_outcome_ownership_nudge.py"
+          ]
+        }
+      }
+    },
+    {
       "id": "review_nudge",
       "description": "Nudge toward /review when a prompt looks like a review request.",
       "source": "claude/hooks/review_nudge.py",
