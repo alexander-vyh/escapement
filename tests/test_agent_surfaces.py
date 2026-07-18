@@ -152,6 +152,43 @@ def test_claude_plugin_manifest_has_no_version_so_auto_update_works():
     )
 
 
+def test_repo_root_is_a_marketplace_not_a_shadow_plugin():
+    """The repo root must expose ONLY a marketplace, never a self-plugin (escapement-hnid).
+
+    The renderer writes the Claude plugin to `plugins/escapement-claude/` and only
+    `.claude-plugin/marketplace.json` at the root; it never targets root
+    `.claude-plugin/plugin.json` or root `hooks/hooks.json`. Those two files once
+    existed at the root as pre-`plugins/`-split vestiges and were NON-rendered, so
+    they silently drifted — root `hooks/hooks.json` still carried the pre-#120
+    prefix-matcher wiring (Bash(gh pr merge:*)) that the bypass fix removed
+    everywhere the renderer actually writes. Their danger is that a `/plugin install`
+    pointed straight at the repo root would default-discover them (a plugin.json
+    makes root a plugin; hooks/hooks.json is then auto-discovered) and load the stale
+    gate wiring. Deleting both makes root unambiguously a marketplace whose sole
+    plugin lives in the rendered subdir.
+
+    Negative control: recreating either root orphan fails this test.
+    Positive control: the marketplace manifest MUST remain — it is how
+    `/plugin marketplace add alexander-vyh/escapement` resolves the git-subdir plugin.
+    """
+    assert not (ROOT / "hooks" / "hooks.json").exists(), (
+        "root hooks/hooks.json is back — it is a NON-rendered orphan that drifts from "
+        "the manifest and would be auto-discovered by a root `/plugin install`, loading "
+        "stale gate wiring (escapement-hnid). The rendered plugin hooks live at "
+        "plugins/escapement-claude/hooks/hooks.json."
+    )
+    assert not (ROOT / ".claude-plugin" / "plugin.json").exists(), (
+        "root .claude-plugin/plugin.json is back — it makes the repo root look "
+        "installable as a plugin, shadowing the real rendered manifest at "
+        "plugins/escapement-claude/.claude-plugin/plugin.json (escapement-hnid). "
+        "Root is a marketplace, not a plugin."
+    )
+    assert (ROOT / ".claude-plugin" / "marketplace.json").exists(), (
+        "root .claude-plugin/marketplace.json is missing — it is the install entrypoint "
+        "for `/plugin marketplace add alexander-vyh/escapement` and MUST remain."
+    )
+
+
 def test_codex_plugin_wrapper_contains_current_codex_skills():
     source_skills = {
         path.parent.name: path.read_text(encoding="utf-8")

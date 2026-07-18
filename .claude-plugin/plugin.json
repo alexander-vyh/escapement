@@ -1,8 +1,0 @@
-{
-  "name": "escapement",
-  "version": "1.0.0",
-  "description": "Host-neutral agentic workflow layer: beads issue tracking, oracle-discipline gates, TDD enforcement, and outcome-bias continuation for Claude Code sessions.",
-  "author": {
-    "name": "alexander-vyh"
-  }
-}
