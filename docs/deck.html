@@ -277,10 +277,10 @@
   <h1>escapement</h1>
   <div class="tagline">OpenSpec, opinionated.</div>
   <p class="lede">
-    A snapshot of one working Claude Code setup. Built on top of
+    A shared workflow for Claude Code and Codex. Built on top of
     <a href="https://github.com/Fission-AI/OpenSpec">OpenSpec</a>,
     wired to <a href="https://github.com/steveyegge/beads">Beads</a>,
-    enforced by Claude Code hooks. Strong opinions. Take what's useful, ignore the rest.
+    enforced through host-specific hooks and instructions. Strong opinions. Take what's useful, ignore the rest.
   </p>
   <p class="lede" style="margin-top:0.5rem;">
     <a href="https://github.com/alexander-vyh/escapement">github.com/alexander-vyh/escapement</a>
@@ -638,7 +638,7 @@ after execute-full     production code + passing tests
 
   <div class="warn">
     <strong>Hooks are load-bearing.</strong>
-    Skills produce guidance. Hooks produce enforcement. Skills without hooks → Claude drifts. Hooks without skills → blocks without a path forward. Install both, or neither.
+    Skills produce guidance. Hooks produce enforcement. Skills without hooks → agents drift. Hooks without skills → blocks without a path forward. Install both, or neither.
   </div>
 
   <div class="warn">
@@ -655,7 +655,7 @@ after execute-full     production code + passing tests
 <!-- ============================================================== -->
 <section class="slide" id="s12">
   <div class="slide-number">12</div>
-  <h2>Try it</h2>
+  <h2>Try it with Claude Code</h2>
   <pre><code>mkdir -p "$HOME/src"
 git clone https://github.com/alexander-vyh/escapement "$HOME/src/escapement"
 cd "$HOME/src/escapement"

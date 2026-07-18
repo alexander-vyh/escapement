@@ -1,25 +1,31 @@
 ---
 name: beads-worktree
-description: Use when creating, removing, or listing git worktrees in a project that uses beads (a `.beads/` directory exists), or when `bd` commands fail inside a worktree ("database not found", empty `.beads/`, or a worktree's bd seems to have its own separate issues). Explains why `bd worktree create` is required instead of `git worktree add`, and how to recover a worktree that was created the wrong way.
+description: Use when creating, removing, or listing git worktrees in a project that uses beads (a `.beads/` directory exists), or when tracker resolution needs checking inside a worktree. Explains why new worktrees use `bd worktree create` instead of `git worktree add`, and how Beads 1.0.5 shares state through Git's common directory.
 ---
 
 # Beads + Git Worktrees
 
-In a project with a `.beads/` directory, **always create worktrees with
-`bd worktree create`, never `git worktree add`.** `bd worktree create` writes a
-`.beads/redirect` file so the new worktree shares the main repo's Dolt
-database. (A `PreToolUse` hook, `beads_worktree_guard.py`, also enforces this
-mechanically — it denies `git worktree add` in beads projects and redirects you
-here.)
+In a project with a `.beads/` directory, **create new worktrees with
+`bd worktree create`, not `git worktree add`.** This keeps creation on the
+repository-managed path and lets the location guard prevent indexers from
+scanning an unignored worktree. A `PreToolUse` hook,
+`beads_worktree_guard.py`, enforces that creation rule.
 
-## Why `git worktree add` breaks beads
+## Existing linked worktrees
 
-A bare `git worktree add` in a beads project creates a broken state:
+Beads 1.0.5 resolves a linked worktree's tracker through Git's common
+directory; a `.beads/redirect` file is not required. Once a linked worktree
+exists, normal Git operations such as commit, push, merge, and rebase must be
+allowed. Check its state with:
 
-- the worktree gets an empty `.beads/` directory with no database;
-- `bd` commands fail with "database not found";
-- running `bd init` to "fix" it makes things worse — it starts a separate empty
-  Dolt server that shadows the main repo's working database.
+```bash
+bd worktree info
+git rev-parse --path-format=absolute --git-common-dir
+bd show <known-issue-id>
+```
+
+The last command should return the same issue state from the primary checkout
+and the linked worktree. **Do not run `bd init` inside a worktree.**
 
 ## Commands
 
@@ -29,17 +35,11 @@ A bare `git worktree add` in a beads project creates a broken state:
 | Remove worktree | `bd worktree remove <path>` |
 | List worktrees | `bd worktree list` |
 
-## Safety net
+## If tracker resolution fails
 
-Some repos (e.g. cake) export `BEADS_DIR` in `.envrc`, pointing at the main
-repo's `.beads/`. That lets `bd` find the right database even if a worktree was
-created with plain `git worktree add` — but `bd worktree create` is still
-preferred because it also writes the redirect file.
-
-## If beads already broke in a worktree
-
-1. Stop the local Dolt server: `bd dolt stop`
-2. Remove the worktree's `.beads/` directory: `rm -rf .beads/`
-3. Verify: `bd count` should show the main repo's issues.
-
-**Do NOT run `bd init` inside a worktree** — that recreates the broken state.
+1. Run `bd worktree info` from the linked worktree and inspect the reported
+   main repository.
+2. Compare `bd show <known-issue-id>` from the linked worktree and primary
+   checkout.
+3. If the results differ, stop and investigate the actual Beads/Git layout;
+   do not create a new database with `bd init` or remove `.beads/` blindly.
