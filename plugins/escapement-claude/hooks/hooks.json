@@ -352,7 +352,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash(gh pr create:*)"
+        "matcher": "Bash"
       },
       {
         "hooks": [
@@ -361,7 +361,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash(gh pr merge:*)"
+        "matcher": "Bash"
       },
       {
         "hooks": [

@@ -177,3 +177,40 @@ def test_codex_merge_authorization_gate_allows_authorized_repo(tmp_path: Path) -
     code, result, raw = _run_payload(_bash_payload("gh pr merge 262 --squash", cwd=tmp_path))
     assert code == 0
     assert raw == ""
+
+
+# --- compound / prefixed merge commands (escapement-hel4) -------------------------------
+# The gate previously used a leading-anchor regex AND a Bash(gh pr merge:*) prefix matcher,
+# so a merge that was not the first token bypassed authorization entirely. Verified against
+# cake session cc2d7508 record 602, whose merge was `cd /wt\ngh pr merge 1750 --auto`.
+
+def test_newline_compound_merge_is_caught_in_unauthorized_repo(tmp_path: Path) -> None:
+    _write_declaration(tmp_path, {"intended_outcome": "pr-opened", "auto_merge_on_green": False})
+    cmd = f"cd {tmp_path}\ngh pr merge 1750 --auto --squash"  # the exact cake shape
+    code, result, _raw = _run_payload(_bash_payload(cmd, cwd=tmp_path))
+    assert code == 0
+    assert _decision(result) == "deny"
+
+
+def test_env_prefixed_merge_is_caught_in_unauthorized_repo(tmp_path: Path) -> None:
+    _write_declaration(tmp_path, {"intended_outcome": "pr-opened", "auto_merge_on_green": False})
+    code, result, _raw = _run_payload(_bash_payload("GH_TOKEN=x gh pr merge 262", cwd=tmp_path))
+    assert code == 0
+    assert _decision(result) == "deny"
+
+
+def test_compound_merge_still_allowed_when_authorized(tmp_path: Path) -> None:
+    _write_declaration(tmp_path, {"intended_outcome": "merged", "auto_merge_on_green": True})
+    cmd = f"cd {tmp_path} && gh pr merge 262 --squash"
+    code, result, raw = _run_payload(_bash_payload(cmd, cwd=tmp_path))
+    assert code == 0
+    assert raw == ""
+
+
+def test_echoed_merge_literal_does_not_wrongly_deny(tmp_path: Path) -> None:
+    # A blocking gate must NOT deny a command that never invokes gh. In an unauthorized
+    # repo an echoed literal would deny if detection were a bare substring.
+    _write_declaration(tmp_path, {"intended_outcome": "pr-opened", "auto_merge_on_green": False})
+    code, result, raw = _run_payload(_bash_payload('echo "reminder: gh pr merge 262 later"', cwd=tmp_path))
+    assert code == 0
+    assert raw == "", f"unexpected deny on an echoed literal: {raw}"

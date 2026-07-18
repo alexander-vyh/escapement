@@ -22,6 +22,7 @@ SHARED_HOOK_SUPPORT = {
     "claude/hooks/beads_worktree_location_guard.py",
     "claude/hooks/_gate_signal.py",
     "claude/hooks/_local_judge_client.py",
+    "claude/hooks/_gh_command.py",
 }
 CLAUDE_EXTRA_HOOK_SUPPORT = {
     "claude/hooks/local_judge_health.py",

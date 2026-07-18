@@ -870,7 +870,7 @@
           "events": [
             {
               "event": "PreToolUse",
-              "matcher": "Bash(gh pr create:*)",
+              "matcher": "Bash",
               "command": "python3 -B ~/.claude/hooks/outcome_assertion_gate.py"
             }
           ],
@@ -905,7 +905,7 @@
           "events": [
             {
               "event": "PreToolUse",
-              "matcher": "Bash(gh pr merge:*)",
+              "matcher": "Bash",
               "command": "python3 -B ~/.claude/hooks/merge_authorization_gate.py"
             }
           ],

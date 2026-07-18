@@ -358,3 +358,37 @@ def test_exists():
         )
         data = json.loads(captured.getvalue().strip())
         assert data["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+# --- compound / prefixed gh pr create (escapement-hel4) --------------------------------
+
+def _run_main(command: str, diff: str = "") -> tuple[int, str]:
+    import io as _io
+    from outcome_assertion_gate import main
+    hook_input = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+    captured = _io.StringIO()
+    with patch("sys.stdout", captured), \
+         patch("outcome_assertion_gate.get_test_diff", return_value=diff), \
+         patch("json.load", return_value=hook_input):
+        code = main()
+    return code, captured.getvalue()
+
+
+def test_fires_on_compound_gh_pr_create():
+    # Broad Bash matcher + command-position detection now catch a create that is not the
+    # first token — the Bash(gh pr create:*) matcher silently skipped this.
+    bad = "### FILE: tests/test_x.py\ndef test_exists():\n    assert result is not None\n"
+    code, out = _run_main("cd /wt && gh pr create --title test", diff=bad)
+    assert code == 0
+    assert "OUTCOME ASSERTION CHECK" in out
+
+
+def test_ignores_echoed_create_literal():
+    # A `gh pr create` literal inside a quoted echo is not an invocation — no ask.
+    code, out = _run_main('echo "next step: gh pr create --title X"', diff="anything")
+    assert code == 0
+    assert out == "", f"unexpected output on echoed literal: {out!r}"
