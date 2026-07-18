@@ -31,6 +31,12 @@ except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
 
+try:
+    from _gh_command import is_gh_pr_command
+except ImportError:  # pragma: no cover - fail toward checking on a create-shaped command
+    def is_gh_pr_command(command: str, *_verbs: str) -> bool:
+        return "gh pr create" in (command or "")
+
 
 # ---------------------------------------------------------------------------
 # Assertion classification
@@ -354,7 +360,10 @@ def main() -> int:
         return 0
 
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-    if "gh pr create" not in command:
+    # Command-position aware (shared _gh_command): catches `cd /wt && gh pr create` that
+    # the argument-scoped matcher + a bare substring both let through, without asking on a
+    # `gh pr create` literal inside a quoted echo/commit message.
+    if not is_gh_pr_command(command, "create"):
         return 0
 
     # Get test file content from the diff

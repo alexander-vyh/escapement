@@ -37,12 +37,29 @@ import sys
 from pathlib import Path
 from typing import NoReturn, Optional
 
+# Ensure sibling helpers (_gate_signal, _gh_command) import whether this runs as a script
+# (script-dir on path) or is loaded by importlib from the test harness (dir NOT on path) —
+# without this, the _gh_command import falls to its loose fallback under test.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 try:
     from _gate_signal import record as _record_signal
 except ImportError:  # pragma: no cover - standalone execution fallback
 
     def _record_signal(*_args, **_kwargs) -> None:
         return None
+
+
+try:
+    from _gh_command import is_gh_pr_command
+except ImportError:  # pragma: no cover - fail TOWARD checking, never silently disable
+    # A blocking security gate must not go dark if its sibling helper is missing. This
+    # fallback is looser (no command-position guard) but errs toward resolving
+    # authorization on anything that looks like a merge — the safe direction.
+    _FALLBACK_MERGE_RE = re.compile(r"gh\s+pr\s+merge\b")
+
+    def is_gh_pr_command(command: str, *_verbs: str) -> bool:
+        return bool(command) and _FALLBACK_MERGE_RE.search(command) is not None
 
 
 def _add_repo_outcome_to_path() -> None:
@@ -67,7 +84,8 @@ WAIVER_PLACEHOLDERS = frozenset(
 )
 MIN_WAIVER_REASON_LEN = 20
 
-_MERGE_RE = re.compile(r"(^|[;&|]\s*)gh\s+pr\s+merge(\s|$)")
+# Detection is delegated to the shared _gh_command helper (command-position aware) so a
+# compound/prefixed `gh pr merge` — e.g. `cd /wt\ngh pr merge` — is caught, not bypassed.
 
 _UNAUTHORIZED_REASON = (
     "merge_authorization_gate: this repo has no .escapement/repo.json declaring "
@@ -111,7 +129,7 @@ def _is_substantive_waiver(reason: Optional[str]) -> bool:
 
 
 def _is_merge_command(command: str) -> bool:
-    return _MERGE_RE.search(command) is not None
+    return is_gh_pr_command(command, "merge")
 
 
 def _authorizes_auto_merge(cwd: str) -> Optional[bool]:
