@@ -1,13 +1,12 @@
 """Codex-specific behavioral tests for beads_worktree_guard.py.
 
 Loads the hook from the repo path (no ~/.claude/hooks/ dependency) so these run
-in Codex environments. The beads-project and foreign-worktree filesystem
-boundaries (_in_beads_project, _is_foreign_beads_worktree) are patched so tests
-are hermetic and do not depend on a real .beads/ layout.
+in Codex environments. The beads-project boundary (`_in_beads_project`) is
+patched so tests are hermetic and do not depend on a real .beads/ layout.
 
 The hook fires as PreToolUse on Bash. Its primary contract (B1): `git worktree
 add` inside a beads project is blocked and redirected to `bd worktree create`,
-because a bare git worktree gets an empty .beads/ with no Dolt DB.
+which keeps new worktree creation on the repository-managed path.
 
 Positive control: `git worktree add` OUTSIDE a beads project (plain git) -> allow.
 Negative control: `git worktree add` INSIDE a beads project -> deny + redirect.
@@ -44,13 +43,11 @@ def _run_main(command: str, in_beads_project: bool = True) -> tuple[int, dict | 
     captured = io.StringIO()
     with patch("sys.stdin", io.StringIO(json.dumps(payload))):
         with patch.object(gate, "_in_beads_project", return_value=in_beads_project):
-            # Keep the A2 foreign-worktree path inert so only B1 (worktree-add) is exercised.
-            with patch.object(gate, "_is_foreign_beads_worktree", return_value=False):
-                with patch("sys.stdout", captured):
-                    try:
-                        code = gate.main()
-                    except SystemExit as exc:
-                        code = exc.code or 0
+            with patch("sys.stdout", captured):
+                try:
+                    code = gate.main()
+                except SystemExit as exc:
+                    code = exc.code or 0
     out = captured.getvalue().strip()
     return code, json.loads(out) if out else None
 

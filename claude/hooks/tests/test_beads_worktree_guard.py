@@ -1,10 +1,10 @@
 """Behavioral tests for claude/hooks/beads_worktree_guard.py.
 
-This hook protects one business outcome: in a beads-managed project, a worktree
-is never created with bare ``git worktree add`` — which produces a broken
-worktree (empty ``.beads/`` with no Dolt database, ``bd`` commands failing).
-The agent is mechanically redirected to ``bd worktree create``, which wires up
-the ``.beads/redirect`` so the worktree shares the main repo's database.
+This hook protects one business outcome: new worktrees in a beads-managed
+project use the repository-managed ``bd worktree create`` entrypoint instead
+of bare ``git worktree add``. Existing linked worktrees use Beads 1.0.5's Git
+common-directory tracker discovery and must be allowed to finish their normal
+Git workflow without a legacy ``.beads/redirect`` marker.
 
 Unlike no_direct_send_guard (which ALWAYS denies, because its tools are
 inherently blocked), this guard is CONDITIONAL: it must deny ``git worktree
@@ -433,34 +433,50 @@ def test_a1_documented_falsepositive_on_quoted_string(tmp_path):
 
 
 # ===========================================================================
-# A2 — foreign-worktree-operation guard: a state-changing git command targeting
-# a linked worktree whose MAIN repo has .beads/ but which lacks .beads/redirect
-# must DENY. Read-only git must pass. Plain-git worktrees (main has no .beads/)
-# must pass.
-#
-# Integration point (same hook vs sibling hook) is the developer's choice; these
-# tests pin the OBSERVABLE contract by driving the registered worktree guard's
-# main() with a fabricated worktree layout. They are gated behind a tripwire so
-# they go RED until the behavior lands rather than silently skip.
+# A2 — linked-worktree finishing: Beads 1.0.5 resolves tracker state through
+# Git's common directory, without requiring a `.beads/redirect` marker. The
+# creation guard above still redirects new `git worktree add` commands, but an
+# already-linked worktree must be able to commit, push, merge, or rebase.
 # ===========================================================================
 
-def _make_foreign_beads_worktree(tmp_path: Path, *, with_redirect: bool) -> tuple[Path, Path]:
-    """Fabricate a linked-worktree layout WITHOUT real git.
-
-    Returns (main_repo, worktree). The worktree's `.git` is a FILE containing
-    `gitdir: <main>/.git/worktrees/wt` (the real git worktree marker). The main
-    repo has a `.beads/` dir. `with_redirect` controls whether the worktree has
-    `.beads/redirect` (a bd-created worktree) — when False it is the broken
-    foreign worktree the guard must catch."""
+def _make_redirectless_beads_worktree(tmp_path: Path) -> tuple[Path, Path]:
+    """Fabricate the minimal linked layout used by Beads 1.0.5 common-dir
+    discovery: the primary checkout has `.beads/`; the worktree has no redirect
+    or local Beads files."""
     main = tmp_path / "main"
     (main / ".beads").mkdir(parents=True)
     (main / ".git" / "worktrees" / "wt").mkdir(parents=True)
     wt = tmp_path / "wt"
     wt.mkdir()
     (wt / ".git").write_text(f"gitdir: {main}/.git/worktrees/wt\n", encoding="utf-8")
-    if with_redirect:
-        (wt / ".beads").mkdir()
-        (wt / ".beads" / "redirect").write_text(str(main / ".beads"), encoding="utf-8")
+    return main, wt
+
+
+def _make_actual_redirectless_beads_worktree(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a real Git linked worktree that inherits tracked Beads files."""
+    main = tmp_path / "main"
+    main.mkdir()
+    (main / ".beads").mkdir()
+    (main / ".beads" / "metadata.json").write_text(
+        '{"project_id": "project-primary"}\n', encoding="utf-8"
+    )
+    (main / "README.md").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=main, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=main, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=main, check=True)
+    subprocess.run(["git", "add", "."], cwd=main, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=main, check=True)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "--detach", str(wt), "HEAD"], cwd=main, check=True)
+    common_dir = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=wt,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert Path(common_dir) == main / ".git"
+    assert not (wt / ".beads" / "redirect").exists()
     return main, wt
 
 
@@ -475,94 +491,38 @@ def _make_plain_git_worktree(tmp_path: Path) -> tuple[Path, Path]:
     return main, wt
 
 
-# Tripwire: the foreign-worktree-operation guard is new behavior. We detect it via
-# a sentinel attribute the developer exposes (a module-level callable named
-# `evaluate_worktree_operation` on the hook, OR a sibling module). Until it exists,
-# this single test stays RED so A2 can't be silently skipped; the detailed A2
-# cases skip cleanly until then.
-_A2_HOOK = hook  # same-hook integration is the default expectation
-_have_a2 = hasattr(_A2_HOOK, "evaluate_worktree_operation") or hasattr(
-    _A2_HOOK, "_is_foreign_beads_worktree"
-)
-requires_a2 = pytest.mark.skipif(
-    not _have_a2,
-    reason="foreign-worktree-operation guard (A2) not yet implemented",
-)
-
-
-def test_a2_foreign_worktree_guard_exists():
-    """TRIPWIRE: unconditional RED until A2 lands, so the skip-gated A2 cases
-    cannot pass silently as a green suite. The developer turns this green by
-    exposing the foreign-worktree-operation check on the guard (or a sibling)."""
-    assert _have_a2, (
-        "A2 not implemented: expose evaluate_worktree_operation(command, cwd) (or "
-        "_is_foreign_beads_worktree) so a state-changing git command in a foreign "
-        "beads worktree is denied"
-    )
-
-
 def _run_op(command: str, cwd: Path) -> tuple[int, dict, str]:
-    """Drive the worktree-operation guard. Reuses the PreToolUse payload shape;
-    the same hook main() is expected to also evaluate operation commands once A2
-    lands. (If the developer ships a sibling hook, point this at it — the asserted
-    OUTCOME is unchanged.)"""
+    """Drive the registered hook with a state-changing Git command."""
     return _run(command, cwd)
 
 
-@requires_a2
-def test_state_changing_op_in_foreign_beads_worktree_denied(tmp_path):
-    """POSITIVE CONTROL / the incident: `git checkout -b` inside a foreign beads
-    worktree (.git file -> main .beads/, no redirect) must DENY and name the
-    recovery path."""
-    main, wt = _make_foreign_beads_worktree(tmp_path, with_redirect=False)
-    exit_code, parsed, raw = _run_op("git checkout -b feature/x", wt)
-    assert exit_code == 0
-    decision = parsed.get("hookSpecificOutput", {}).get("permissionDecision")
-    assert decision == "deny", (
-        f"A2: state-changing git in a foreign beads worktree must deny; got {raw!r}"
-    )
-    assert "bd worktree create" in raw, "A2 denial must name the recovery path"
-    assert "bd init" in raw.lower(), "A2 denial must warn against bd init in a worktree"
+def test_state_changing_op_in_actual_redirectless_beads_worktree_is_allowed(tmp_path):
+    """A real `git worktree add` layout inherits tracked Beads files and uses
+    Git's common directory; the finishing command must pass unchanged."""
+    main, wt = _make_actual_redirectless_beads_worktree(tmp_path)
+    _, parsed, raw = _run_op(f"git -C {wt} commit -am docs", main)
+    assert parsed == {}, f"linked Beads worktree must allow commit; got {raw!r}"
 
 
-@requires_a2
 @pytest.mark.parametrize("command", [
     "git -C {wt} checkout -b feature/x",
     "git -C {wt} pull origin main",
     "git -C {wt} merge origin/main",
     "git -C {wt} rebase main",
     "git -C {wt} commit -am wip",
+    "git -C {wt} push origin main",
 ])
-def test_state_changing_op_via_dash_C_denied(command, tmp_path):
-    """A2 via `-C <foreign-wt>` from outside the worktree — the exact incident
-    invocation shape."""
-    main, wt = _make_foreign_beads_worktree(tmp_path, with_redirect=False)
+def test_state_changing_op_in_redirectless_beads_worktree_is_allowed(command, tmp_path):
+    """The hook must not block any supported state-changing Git workflow after
+    a linked worktree already exists."""
+    main, wt = _make_redirectless_beads_worktree(tmp_path)
     cmd = command.format(wt=wt)
-    exit_code, parsed, raw = _run_op(cmd, main)
-    assert parsed.get("hookSpecificOutput", {}).get("permissionDecision") == "deny", (
-        f"A2: `-C` into a foreign beads worktree must deny: {cmd!r}; got {raw!r}"
-    )
-
-
-@requires_a2
-@pytest.mark.parametrize("command", [
-    "git -C {wt} log --oneline",
-    "git -C {wt} status",
-    "git -C {wt} diff",
-    "git -C {wt} show HEAD",
-])
-def test_readonly_git_in_foreign_worktree_allowed(command, tmp_path):
-    """OVER-BLOCK NEGATIVE CONTROL: read-only git in a foreign beads worktree must
-    PASS. Defeats 'deny everything in the foreign worktree'."""
-    main, wt = _make_foreign_beads_worktree(tmp_path, with_redirect=False)
-    cmd = command.format(wt=wt)
-    exit_code, parsed, raw = _run_op(cmd, main)
+    _, parsed, raw = _run_op(cmd, main)
     assert parsed == {}, (
-        f"A2: read-only git in a foreign worktree must pass: {cmd!r}; got {raw!r}"
+        f"redirect-less Beads worktree must allow {cmd!r}; got {raw!r}"
     )
 
 
-@requires_a2
 def test_plain_git_worktree_operation_allowed(tmp_path):
     """OVER-BLOCK NEGATIVE CONTROL: a worktree whose MAIN repo has NO .beads/ is a
     plain-git multi-worktree repo; operating there must PASS. Defeats 'worktree =
@@ -570,19 +530,7 @@ def test_plain_git_worktree_operation_allowed(tmp_path):
     main, wt = _make_plain_git_worktree(tmp_path)
     exit_code, parsed, raw = _run_op("git checkout -b feature/x", wt)
     assert parsed == {}, (
-        f"A2: state-changing git in a PLAIN-git worktree must pass; got {raw!r}"
-    )
-
-
-@requires_a2
-def test_bd_created_worktree_operation_allowed(tmp_path):
-    """NEGATIVE CONTROL: a properly bd-created worktree (has .beads/redirect) is
-    NOT broken; operating there must PASS. The guard fires only on the BROKEN
-    layout (no redirect)."""
-    main, wt = _make_foreign_beads_worktree(tmp_path, with_redirect=True)
-    exit_code, parsed, raw = _run_op("git checkout -b feature/x", wt)
-    assert parsed == {}, (
-        f"A2: a bd-created worktree (with redirect) must not be denied; got {raw!r}"
+        f"state-changing git in a plain worktree must pass; got {raw!r}"
     )
 
 

@@ -880,3 +880,68 @@ Run:
 - `python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/escapement`
 
 Then, if filesystem/global config permissions allow, install through the repo marketplace and verify a new Codex thread loads `escapement@escapement-local`; otherwise report the exact install step that remains external.
+
+---
+
+# Test Oracle Brief — Beads 1.0.5 linked-worktree finishing
+
+This section supersedes the earlier A2 foreign-worktree-operation assumptions.
+Beads 1.0.5 resolves linked-worktree tracker state through Git's common
+directory, so a legacy `.beads/redirect` marker is not a correctness boundary.
+
+## Business invariant
+
+New `git worktree add` commands in a Beads project remain denied and redirected
+to `bd worktree create`. Once a linked worktree exists, its normal
+state-changing Git workflow—including checkout, pull, merge, rebase, commit,
+and push—must not be blocked because it lacks `.beads/redirect`.
+
+## Independent source of truth
+
+`bd worktree --help` states that worktrees share the Beads database through Git
+common-directory discovery without manual redirect configuration. A real Git
+linked-worktree fixture verifies that its common directory is the primary
+checkout's `.git` directory and that the hook allows a commit-shaped command.
+
+## Solution constraints
+
+Keep B1's tokenized `git worktree add` creation denial and its location guard.
+Do not add a metadata heuristic, call `bd` as a subprocess from PreToolUse, or
+infer the primary repository from a fixed `.git/worktrees/<name>` path.
+
+## Invalid solution classes
+
+Do not allow new bare `git worktree add` commands, retain a redirect-only
+state-changing-operation denial, special-case a project ID, or globally return
+before B1 and its location guard run.
+
+## Fragile implementation to reject
+
+A tempting partial fix removes the commit block but continues to deny `push`.
+The parameterized linked-worktree control must cover push as well as checkout,
+pull, merge, rebase, and commit.
+
+## Negative control
+
+`git worktree add` in a Beads project must still emit the canonical deny
+decision and name `bd worktree create`; its global-flag and compound-command
+variants must also deny.
+
+## Positive control
+
+A real redirect-less Git worktree with the primary checkout's common directory
+must permit a commit-shaped command. Redirect-less linked layouts must also
+permit checkout, pull, merge, rebase, commit, and push command shapes.
+
+## Missing/unresolved handling
+
+No redirect or metadata lookup is required for an existing linked worktree.
+The creation guard still fails closed when it recognizes `git worktree add` in
+a Beads project; malformed command tokenization continues to fail open rather
+than risk blocking an unrelated command.
+
+## Final outcome verification
+
+Run `python3 -m pytest claude/hooks/tests/test_beads_worktree_guard.py -q`,
+render and check generated surfaces, then commit and push from the
+Beads-created worktree. Confirm the remote branch points to the new commit.
