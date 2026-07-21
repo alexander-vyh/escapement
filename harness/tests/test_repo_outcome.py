@@ -22,6 +22,7 @@ Oracle quality:
 """
 import json
 import pathlib
+import subprocess
 import sys
 
 BIN = pathlib.Path(__file__).resolve().parent.parent / "bin"
@@ -39,6 +40,49 @@ def _write(tmp_path, obj):
     else:
         p.write_text(json.dumps(obj))
     return tmp_path
+
+
+def _git(repo, *args):
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def _init_worktree_repo(tmp_path, main_declaration=None):
+    """Create a real primary/main checkout plus a sibling stale worktree.
+
+    The two checkouts deliberately carry different declarations. This is the
+    real topology that exposed the bug: current-worktree lookup observes the
+    stale branch, while repository policy lives on the primary default branch.
+    """
+    primary = tmp_path / "primary"
+    sibling = tmp_path / "sibling"
+    primary.mkdir()
+    _git(primary, "init", "--initial-branch=main")
+    _git(primary, "config", "user.email", "test@example.com")
+    _git(primary, "config", "user.name", "Test User")
+    (primary / "README.md").write_text("fixture\n", encoding="utf-8")
+    if main_declaration is not None:
+        _write(primary, main_declaration)
+    _git(primary, "add", ".")
+    _git(primary, "commit", "-m", "primary policy")
+    origin = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "--bare", "--initial-branch=main", str(origin)],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    _git(primary, "remote", "add", "origin", str(origin))
+    _git(primary, "push", "-u", "origin", "main")
+    _git(primary, "fetch", "origin")
+    _git(primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    _git(primary, "worktree", "add", "-b", "stale-policy", str(sibling))
+    return primary, sibling
 
 
 # --- POSITIVE CONTROL ------------------------------------------------------
@@ -62,6 +106,35 @@ def test_valid_merged_and_deployed_authorizes(tmp_path):
 def test_valid_merged_level_also_authorizes(tmp_path):
     root = _write(tmp_path, {"intended_outcome": "merged", "auto_merge_on_green": True})
     assert ro.authorizes_auto_merge(ro.resolve(root)) is True
+
+
+def test_primary_default_branch_policy_authorizes_stale_sibling_worktree(tmp_path):
+    _primary, sibling = _init_worktree_repo(
+        tmp_path,
+        {"intended_outcome": "merged", "auto_merge_on_green": True},
+    )
+    _write(sibling, {"intended_outcome": "pr-opened", "auto_merge_on_green": False})
+    _git(sibling, "add", ".escapement/repo.json")
+    _git(sibling, "commit", "-m", "stale worktree policy")
+
+    resolved = ro.resolve(sibling)
+
+    assert resolved.source == "declared-default-branch"
+    assert resolved.intended_outcome == "merged"
+    assert resolved.auto_merge_on_green is True
+    assert ro.authorizes_auto_merge(resolved) is True
+
+
+def test_unconfigured_primary_denies_even_if_sibling_self_authorizes(tmp_path):
+    _primary, sibling = _init_worktree_repo(tmp_path)
+    _write(sibling, {"intended_outcome": "merged", "auto_merge_on_green": True})
+    _git(sibling, "add", ".escapement/repo.json")
+    _git(sibling, "commit", "-m", "unauthorized sibling policy")
+
+    resolved = ro.resolve(sibling)
+
+    assert resolved.source == "default-absent"
+    assert ro.authorizes_auto_merge(resolved) is False
 
 
 # --- NEGATIVE CONTROL: absent (the conservative default = today's behavior) ---
