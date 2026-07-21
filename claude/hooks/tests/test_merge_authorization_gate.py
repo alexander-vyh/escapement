@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +24,27 @@ import pytest
 _HOOK_PATH = Path(__file__).resolve().parents[1] / "merge_authorization_gate.py"
 if not _HOOK_PATH.exists():
     pytest.fail(f"merge_authorization_gate.py not found at {_HOOK_PATH}")
+
+_CODEX_PLUGIN_HOOK_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "plugins"
+    / "escapement"
+    / "claude"
+    / "hooks"
+    / "merge_authorization_gate.py"
+)
+if not _CODEX_PLUGIN_HOOK_PATH.exists():
+    pytest.fail(f"Codex plugin merge_authorization_gate.py not found at {_CODEX_PLUGIN_HOOK_PATH}")
+
+_SHIPPED_HOOK_PATHS = (
+    _HOOK_PATH,
+    Path(__file__).resolve().parents[3]
+    / "plugins"
+    / "escapement-claude"
+    / "hooks"
+    / "merge_authorization_gate.py",
+    _CODEX_PLUGIN_HOOK_PATH,
+)
 
 _spec = importlib.util.spec_from_file_location("merge_authorization_gate", _HOOK_PATH)
 guard = importlib.util.module_from_spec(_spec)
@@ -67,6 +89,78 @@ def _write_declaration(repo: Path, declaration: dict | str) -> None:
     (repo / ".escapement").mkdir(parents=True, exist_ok=True)
     text = declaration if isinstance(declaration, str) else json.dumps(declaration)
     (repo / ".escapement" / "repo.json").write_text(text, encoding="utf-8")
+
+
+def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=check,
+    )
+
+
+def _stale_sibling_worktree(tmp_path: Path, *, primary_declaration: dict | None) -> Path:
+    """Create a real stale worktree below a detached primary checkout.
+
+    The default branch is deliberately named ``trunk`` (not ``main``), and the
+    primary checkout is detached at its old false declaration. A correct guard
+    therefore must read the ``trunk`` Git object, not a hard-coded branch name
+    or any worktree's filesystem copy.
+    """
+    primary = tmp_path / "primary"
+    sibling = tmp_path / "sibling"
+    primary.mkdir()
+    _git(primary, "init", "--initial-branch=trunk")
+    _git(primary, "config", "user.email", "test@example.com")
+    _git(primary, "config", "user.name", "Test User")
+    (primary / "README.md").write_text("fixture\n", encoding="utf-8")
+    _write_declaration(
+        primary,
+        {"intended_outcome": "pr-opened", "auto_merge_on_green": False},
+    )
+    _git(primary, "add", ".")
+    _git(primary, "commit", "-m", "initial conservative policy")
+    old_primary = _git(primary, "rev-parse", "HEAD").stdout.strip()
+    origin = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "--bare", "--initial-branch=trunk", str(origin)],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    _git(primary, "remote", "add", "origin", str(origin))
+    _git(primary, "push", "-u", "origin", "trunk")
+    _git(primary, "fetch", "origin")
+    _git(primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    _git(primary, "worktree", "add", "-b", "stale-policy", str(sibling))
+
+    if primary_declaration is None:
+        (primary / ".escapement" / "repo.json").unlink()
+    else:
+        _write_declaration(primary, primary_declaration)
+    _git(primary, "add", ".escapement/repo.json")
+    _git(primary, "commit", "-m", "default branch policy")
+    _git(primary, "push", "origin", "trunk")
+    _git(primary, "fetch", "origin")
+    _git(primary, "checkout", "--detach", old_primary)
+
+    nested = sibling / "nested" / "directory"
+    nested.mkdir(parents=True)
+    assert _git(primary, "show-ref", "--verify", "--quiet", "refs/heads/main", check=False).returncode != 0
+    return nested
+
+
+def _run_packaged_guard(hook_path: Path, *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-B", str(hook_path)],
+        input=json.dumps(_bash_payload("gh pr merge 262 --squash", cwd=cwd)),
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=cwd,
+    )
 
 
 def test_unconfigured_repo_denies_merge_with_honest_reason(tmp_path: Path) -> None:
@@ -177,6 +271,41 @@ def test_codex_merge_authorization_gate_allows_authorized_repo(tmp_path: Path) -
     code, result, raw = _run_payload(_bash_payload("gh pr merge 262 --squash", cwd=tmp_path))
     assert code == 0
     assert raw == ""
+
+
+@pytest.mark.parametrize("hook_path", _SHIPPED_HOOK_PATHS)
+def test_shipped_guard_uses_trunk_policy_for_a_stale_nested_worktree(
+    tmp_path: Path, hook_path: Path
+) -> None:
+    nested = _stale_sibling_worktree(
+        tmp_path,
+        primary_declaration={"intended_outcome": "merged", "auto_merge_on_green": True},
+    )
+
+    completed = _run_packaged_guard(hook_path, cwd=nested)
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == ""
+
+
+@pytest.mark.parametrize("hook_path", _SHIPPED_HOOK_PATHS)
+def test_shipped_guard_denies_when_trunk_has_no_policy_even_if_stale_branch_is_true(
+    tmp_path: Path, hook_path: Path
+) -> None:
+    nested = _stale_sibling_worktree(tmp_path, primary_declaration=None)
+    stale_root = nested.parents[1]
+    _write_declaration(
+        stale_root, {"intended_outcome": "merged", "auto_merge_on_green": True}
+    )
+    _git(stale_root, "add", ".escapement/repo.json")
+    _git(stale_root, "commit", "-m", "stale self-authorization")
+
+    completed = _run_packaged_guard(hook_path, cwd=nested)
+
+    assert completed.returncode == 0
+    result = json.loads(completed.stdout)
+    assert _decision(result) == "deny"
+    assert ".escapement/repo.json" in _reason(result)
 
 
 # --- compound / prefixed merge commands (escapement-hel4) -------------------------------

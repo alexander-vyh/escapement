@@ -24,6 +24,12 @@ SHARED_HOOK_SUPPORT = {
     "claude/hooks/_local_judge_client.py",
     "claude/hooks/_gh_command.py",
 }
+CODEX_HOOK_SUPPORT = {
+    # merge_authorization_gate.py resolves this sibling via its plugin-relative
+    # path. Without it, an explicitly authorized Codex repository is denied
+    # fail-closed because the policy reader cannot be imported.
+    "harness/bin/repo_outcome.py",
+}
 CLAUDE_EXTRA_HOOK_SUPPORT = {
     "claude/hooks/local_judge_health.py",
     # oracle_downgrade_stop.py imports this differ at runtime; it is a library
@@ -410,6 +416,10 @@ def rendered_targets(root: Path, manifest: dict[str, Any]) -> dict[Path, str]:
     if hook_sources:
         hook_sources.update(SHARED_HOOK_SUPPORT)
     for source in sorted(hook_sources):
+        source_path = root / source
+        if source_path.exists():
+            targets[root / CODEX_PLUGIN_ROOT / source] = source_path.read_text(encoding="utf-8")
+    for source in sorted(CODEX_HOOK_SUPPORT):
         source_path = root / source
         if source_path.exists():
             targets[root / CODEX_PLUGIN_ROOT / source] = source_path.read_text(encoding="utf-8")

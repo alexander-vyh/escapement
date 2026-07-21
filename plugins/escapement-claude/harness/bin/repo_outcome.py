@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import subprocess
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -40,7 +41,8 @@ class RepoOutcome:
     """Resolved per-project outcome authorization.
 
     `source` records provenance so callers can distinguish a real declaration from a
-    fallback: "declared" | "default-absent" | "default-malformed" | "default-invalid".
+    fallback: "declared" | "declared-default-branch" | "default-absent" |
+    "default-malformed" | "default-invalid".
     `warning` is set (non-None) only when we fell back from a present-but-broken file,
     so the caller can surface it instead of silently swallowing a misconfiguration.
     """
@@ -69,15 +71,52 @@ def declaration_path(repo_root) -> pathlib.Path:
     return pathlib.Path(repo_root) / ".escapement" / "repo.json"
 
 
-def resolve(repo_root) -> RepoOutcome:
-    """Resolve the repo's outcome authorization, fail-safe on every error path."""
-    path = declaration_path(repo_root)
-    if not path.exists():
+def _git(repo_root, *args: str) -> Optional[subprocess.CompletedProcess[str]]:
+    """Run a bounded, argument-safe Git read; failure is never authorization."""
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _default_branch_declaration(repo_root) -> tuple[bool, Optional[str]]:
+    """Read the committed policy from the repository's remote default branch.
+
+    A linked worktree's checked-out policy can be intentionally stale while the
+    repository's merged policy has changed. ``origin/HEAD`` is Git's durable
+    default-branch identity and therefore wins over branch-local filesystem
+    copies. ``False`` means no default branch is known locally, preserving the
+    standalone/local-file behavior below. ``True, None`` is a known branch with
+    no readable declaration and must fail closed rather than falling back to a
+    potentially self-authorizing sibling worktree.
+    """
+    default_ref = _git(repo_root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if default_ref is None or default_ref.returncode != 0:
+        return False, None
+
+    ref = default_ref.stdout.strip()
+    if not ref:
+        return False, None
+
+    declaration = _git(repo_root, "show", f"{ref}:.escapement/repo.json")
+    if declaration is None or declaration.returncode != 0:
+        return True, None
+    return True, declaration.stdout
+
+
+def _resolve_text(raw_text: Optional[str], *, declared_source: str) -> RepoOutcome:
+    if raw_text is None:
         return _default("default-absent", None)
 
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        raw = json.loads(raw_text)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         return _default(
             "default-malformed",
             f".escapement/repo.json is unparseable ({exc}); using conservative "
@@ -118,10 +157,31 @@ def resolve(repo_root) -> RepoOutcome:
         auto_merge_on_green=auto_merge,
         deploy=deploy,
         confirm_class=confirm_class,
-        source="declared",
+        source=declared_source,
         warning=None,
         confirm_class_absolute=(len(confirm_class) == 0),
     )
+
+
+def resolve(repo_root) -> RepoOutcome:
+    """Resolve the repo's outcome authorization, fail-safe on every error path."""
+    has_default_branch, default_declaration = _default_branch_declaration(repo_root)
+    if has_default_branch:
+        return _resolve_text(default_declaration, declared_source="declared-default-branch")
+
+    path = declaration_path(repo_root)
+    if not path.exists():
+        return _default("default-absent", None)
+
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return _default(
+            "default-malformed",
+            f".escapement/repo.json is unparseable ({exc}); using conservative "
+            f"default (no auto-merge).",
+        )
+    return _resolve_text(raw_text, declared_source="declared")
 
 
 def _outcome_index(outcome: str) -> int:
