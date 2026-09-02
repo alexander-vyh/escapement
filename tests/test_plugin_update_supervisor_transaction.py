@@ -324,10 +324,13 @@ def test_wrapper_replacement_never_removes_stable_name_mid_cutover(tmp_path):
         fake_bin / "ln",
         "#!/bin/bash\n"
         'dest="${@: -1}"\n'
-        'if [[ "$dest" == "$HOME/.claude/harness/"* && ! -e "$LN_GATE/claimed" ]]; then\n'
+        'if [[ "$dest" == "$HOME/.claude/harness/.escapement-link."*/link '
+        '&& ! -e "$LN_GATE/claimed" ]]; then\n'
+        '  "$SYSTEM_LN" "$@"\n'
         '  : > "$LN_GATE/claimed"\n'
         '  : > "$LN_GATE/entered"\n'
         '  while [[ ! -e "$LN_GATE/release" ]]; do /bin/sleep 0.01; done\n'
+        "  exit 0\n"
         "fi\n"
         'exec "$SYSTEM_LN" "$@"\n',
     )
@@ -344,7 +347,9 @@ def test_wrapper_replacement_never_removes_stable_name_mid_cutover(tmp_path):
         text=True,
     )
     try:
-        deadline = time.monotonic() + 8
+        # This test owns an atomicity oracle, not an updater-speed budget. Full
+        # suites can heavily contend on subprocess startup before the gate.
+        deadline = time.monotonic() + 30
         while (
             not (gate / "entered").exists()
             and process.poll() is None
@@ -358,6 +363,17 @@ def test_wrapper_replacement_never_removes_stable_name_mid_cutover(tmp_path):
         assert wrapper.is_symlink()
         assert os.readlink(wrapper) == old_target
         (gate / "release").touch()
+        observation_deadline = time.monotonic() + 15
+        while process.poll() is None and time.monotonic() < observation_deadline:
+            assert os.path.lexists(wrapper), (
+                "stable wrapper disappeared during atomic replacement"
+            )
+            assert wrapper.is_symlink()
+            assert os.readlink(wrapper) in {
+                old_target,
+                str(new_cache / "harness" / "bin"),
+            }
+            time.sleep(0.001)
         stdout, stderr = process.communicate(timeout=15)
         assert process.returncode == 0, stdout + stderr
     finally:
@@ -494,7 +510,10 @@ def chmod(path, mode, *args, **kwargs):
 def unlink(path, *args, **kwargs):
     if not isinstance(path, (str, bytes, os.PathLike)):
         path = args[0]
-    if str(path).endswith(".plugin-update-transaction.json"):
+    text = str(path)
+    if text.endswith("/harness/bin") or text.endswith("/harness/schemas"):
+        record(["stable-wrapper-unlink", text])
+    if text.endswith(".plugin-update-transaction.json"):
         record(["journal-unlink"])
     return real_unlink(path)
 
@@ -529,6 +548,9 @@ os.unlink = unlink
 
     assert audit.exists(), result.stdout + result.stderr
     events = [json.loads(line) for line in audit.read_text().splitlines()]
+    assert not any(event[0] == "stable-wrapper-unlink" for event in events), (
+        "stable wrapper was unlinked before replacement"
+    )
     launch = next(i for i, event in enumerate(events) if event[0] == "launchctl-start")
     replacements = [
         (i, event)
