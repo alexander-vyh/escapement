@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import inspect
 import stat
 import sys
 import time
@@ -77,6 +78,37 @@ while True:
     assert time.monotonic() - started < 1
     assert list(spool.iterdir()) == []
     assert all(path.stat().st_size <= 131_073 for path in streams[1:])
+
+
+def test_frozen_verifier_inherits_the_declared_file_size_ceiling(
+    tmp_path: Path,
+) -> None:
+    executable = _script(
+        tmp_path / "limit-contract",
+        """import json
+import resource
+import sys
+r = json.load(sys.stdin)
+limit = resource.getrlimit(resource.RLIMIT_FSIZE)
+result = "PASS" if limit == (1_000_001, 1_000_001) and r["candidate_hex"] == "676f6f640a" else "FAIL"
+json.dump({
+    "request_id": r["request_id"],
+    "request_digest": r["request_digest"],
+    "verifier_digest": r["verifier"]["digest"],
+    "results": [{
+        "invariant_id": item["id"],
+        "verifier_id": r["verifier"]["id"],
+        "result": result,
+        "detail": "exact inherited file limit",
+    } for item in r["invariants"]],
+}, sys.stdout)
+""",
+    )
+
+    assert certify_frozen_verifiers(_frozen(executable)) is True
+    assert "preexec_fn=_set_output_file_limit" in inspect.getsource(
+        verifier_protocol._run_snapshot
+    )
 
 
 def test_undeclared_verifier_owned_import_fails_closed(tmp_path: Path) -> None:

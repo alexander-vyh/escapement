@@ -38,3 +38,5 @@ claude/hooks/state/
 # Oracle-strength corpus fixtures: extracted from private session transcripts
 # (proprietary). Local-only; see bead yx3 / 09-test-oracle-brief.md.
 claude/hooks/tests/fixtures/oracle_strength/
+# Bun / Node dependencies
+node_modules/

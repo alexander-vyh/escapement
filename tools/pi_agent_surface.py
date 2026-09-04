@@ -87,6 +87,7 @@ def render_package(identity: dict[str, Any]) -> str:
         "license": "GPL-3.0-or-later",
         "repository": "https://github.com/alexander-vyh/escapement",
         "keywords": ["pi-package", "workflow", "oracle", "tdd", "beads"],
+        "devDependencies": {"@oh-my-pi/pi-coding-agent": "18.1.4"},
         "pi": {
             "extensions": ["./plugins/escapement-pi/extensions/index.ts"],
         },

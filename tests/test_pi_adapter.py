@@ -92,6 +92,9 @@ def test_root_package_exposes_pi_resources_from_the_shared_root() -> None:
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
 
     assert "pi-package" in package["keywords"]
+    assert package["devDependencies"] == {
+        "@oh-my-pi/pi-coding-agent": "18.1.4",
+    }
     assert package["pi"] == {
         "extensions": ["./plugins/escapement-pi/extensions/index.ts"],
     }

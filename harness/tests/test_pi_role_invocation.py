@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import errno
+import hashlib
 import json
 import pathlib
 import sys
@@ -28,7 +30,7 @@ def _jsonl(*events: object) -> str:
     return "\n".join(json.dumps(event) for event in events) + "\n"
 
 
-def _assistant(text="answer", *, stop_reason="stop", content=None):
+def _assistant(text="answer", *, stop_reason="stop", content=None, message_fields=None):
     return {
         "type": "message_end",
         "message": {
@@ -37,6 +39,7 @@ def _assistant(text="answer", *, stop_reason="stop", content=None):
             if content is not None
             else [{"type": "text", "text": text}],
             "stopReason": stop_reason,
+            **(message_fields or {}),
         },
     }
 
@@ -82,12 +85,102 @@ def _id(receipt):
     return receipt.status, receipt.reason, receipt.candidate_generation
 
 
+def _audit_streams(receipt):
+    audit = json.loads(receipt.raw_events)
+    assert audit["format"] == "escapement.subprocess-audit.v1"
+    return (
+        base64.b64decode(audit["stdout_base64"]),
+        base64.b64decode(audit["stderr_base64"]),
+    )
+
+
 def test_parser_accepts_one_complete_assistant_result() -> None:
     receipt = _parse(_jsonl(_assistant("accepted"), {"type": "agent_settled"}))
 
     assert receipt.status == "SETTLED"
     assert receipt.output == "accepted"
     assert receipt.candidate_generation == 3
+
+
+def test_parser_measures_only_final_assistant_message_usage() -> None:
+    final_usage = {
+        "input": 13,
+        "output": 5,
+        "cacheRead": 2,
+        "cacheWrite": 1,
+        "totalTokens": 29,
+        "cost": {
+            "input": 0.001,
+            "output": 0.003,
+            "cacheRead": 0.0001,
+            "cacheWrite": 0.0001,
+            "total": 0.007,
+        },
+    }
+    receipt = parse_pi_result(
+        role="generator",
+        generation=4,
+        stdout=_jsonl(
+            {"type": "message_update", "usage": {"totalTokens": 999}},
+            {"type": "message_update", "usage": {"totalTokens": 1000}},
+            _assistant(
+                "accepted",
+                message_fields={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5",
+                    "responseId": "pi-response",
+                    "usage": final_usage,
+                },
+            ),
+            {"type": "agent_settled"},
+        ),
+        stderr="",
+        returncode=0,
+        requested_provider="anthropic",
+        requested_model="claude-haiku-4-5",
+        duration_ms=12.5,
+    )
+
+    assert receipt.status == "SETTLED"
+    assert len(receipt.model_calls) == 1
+    call = receipt.model_calls[0]
+    assert (
+        call.input_tokens,
+        call.output_tokens,
+        call.cache_read_tokens,
+        call.cache_write_tokens,
+        call.total_tokens,
+        call.cost_usd,
+        call.duration_ms,
+    ) == (13, 5, 2, 1, 29, 0.007, 12.5)
+
+
+def test_parser_keeps_behavior_but_marks_malformed_telemetry_missing() -> None:
+    receipt = parse_pi_result(
+        role="generator",
+        generation=4,
+        stdout=_jsonl(
+            _assistant(
+                "accepted",
+                message_fields={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5",
+                    "usage": {"input": True},
+                },
+            ),
+            {"type": "agent_settled"},
+        ),
+        stderr="",
+        returncode=0,
+        requested_provider="anthropic",
+        requested_model="claude-haiku-4-5",
+        duration_ms=12.5,
+    )
+
+    assert receipt.status == "SETTLED"
+    assert receipt.output == "accepted"
+    assert receipt.model_calls[0].measurement_status == "MISSING"
+    assert receipt.model_calls[0].total_tokens is None
 
 
 @pytest.mark.parametrize("stop_reason", ["length", "toolUse", "error", "cancelled", ""])
@@ -393,6 +486,75 @@ while True:
     )
     assert calls >= 7
     assert list((tmp_path / "configs").iterdir()) == []
+
+
+def test_persistent_eperm_does_not_claim_process_group_is_gone(monkeypatch) -> None:
+    class Process:
+        pid = 12345
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self):
+            return self.returncode
+
+    def always_eperm(_pgid: int, _sig: int) -> None:
+        raise PermissionError(
+            errno.EPERM, "process group still exists but is inaccessible"
+        )
+
+    monkeypatch.setattr(pi_role_invocation.os, "killpg", always_eperm)
+
+    with pytest.raises(PermissionError, match="still exists"):
+        pi_role_invocation._stop_process_group(Process())
+
+
+@pytest.mark.parametrize(
+    "mode, expected_reason",
+    [
+        ("timeout", "pi_process_failure:TimeoutExpired"),
+        ("overflow", "pi_stdout_too_large"),
+        ("nonzero", "pi_exit_7"),
+    ],
+)
+def test_failed_process_preserves_exact_streams_for_audit(
+    tmp_path, mode, expected_reason
+) -> None:
+    ending = {
+        "timeout": "import time; time.sleep(2)",
+        "overflow": "import os; os.write(1, b'x' * 2048)",
+        "nonzero": "raise SystemExit(7)",
+    }[mode]
+    probe = _write_executable(
+        tmp_path / f"partial-{mode}",
+        f"""
+import os
+os.write(1, b"partial-out\\x00")
+os.write(2, b"partial-err\\xff")
+{ending}
+""",
+    )
+
+    receipt = _invoke(
+        tmp_path,
+        probe,
+        request=_request(timeout=0.75 if mode == "timeout" else 5),
+        max_output_bytes=64 if mode == "overflow" else 1024,
+    )
+    stdout, stderr = _audit_streams(receipt)
+
+    assert _id(receipt) == ("UNRESOLVED", expected_reason, 2)
+    assert stdout.startswith(b"partial-out\x00")
+    assert stderr == b"partial-err\xff"
+    assert receipt.stdout_bytes == len(stdout)
+    assert receipt.stderr_bytes == len(stderr)
+    assert receipt.raw_events_digest == hashlib.sha256(
+        receipt.raw_events.encode("utf-8")
+    ).hexdigest()
 
 
 @pytest.mark.parametrize("failure_mode", ["timeout", "overflow"])

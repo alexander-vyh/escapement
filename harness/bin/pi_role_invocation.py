@@ -3,20 +3,27 @@
 
 from __future__ import annotations
 
-import errno
+import hashlib
 import json
 import math
 import os
 import pathlib
 import re
-import resource
 import shutil
-import signal
-import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
-from typing import BinaryIO, Mapping
+from typing import Mapping
+
+from bounded_subprocess import (
+    failure_audit as _failure_audit,
+    output_stream,
+    run_bounded as _run_bounded,
+    stop_process_group,
+    stream_bytes as _stream_bytes,
+    stream_size as _stream_size,
+)
+from model_call_receipts import RoleReceipt, call_from_assistant_message
 
 
 _ROLE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -74,17 +81,9 @@ _ASSISTANT_MESSAGE_KEYS = {
 _USER_MESSAGE_KEYS = {"role", "content", "timestamp"}
 
 
-@dataclass(frozen=True)
-class RoleReceipt:
-    role: str
-    status: str
-    output: str = ""
-    candidate_generation: int | None = None
-    reason: str = ""
-    config_dir: str = ""
-    command: tuple[str, ...] = ()
-    stdout_bytes: int = 0
-    stderr_bytes: int = 0
+def _stop_process_group(process) -> None:
+    """Compatibility seam retained for process-boundary mutation tests."""
+    stop_process_group(process)
 
 
 @dataclass(frozen=True)
@@ -99,12 +98,22 @@ class PiRoleRequest:
     candidate_generation: int | None = None
 
 
-def _unresolved(role: str, generation: int | None, reason: str) -> RoleReceipt:
+def _unresolved(
+    role: str,
+    generation: int | None,
+    reason: str,
+    *,
+    model_calls=(),
+    output: str = "",
+) -> RoleReceipt:
     return RoleReceipt(
         role=role,
         status="UNRESOLVED",
         candidate_generation=generation,
         reason=reason,
+        output=output,
+        model_calls=tuple(model_calls),
+        topology_status="INELIGIBLE",
     )
 
 
@@ -176,28 +185,21 @@ def parse_pi_result(
     stderr: str,
     returncode: int,
     max_output_bytes: int = 1_000_000,
+    requested_provider: str | None = None,
+    requested_model: str | None = None,
+    duration_ms: float | None = None,
 ) -> RoleReceipt:
     """Parse Pi JSONL fail closed, requiring one assistant result then settlement."""
-    if returncode != 0:
-        return _unresolved(role, generation, f"pi_exit_{returncode}")
-    if len(stdout.encode("utf-8")) > max_output_bytes:
-        return _unresolved(role, generation, "pi_stdout_too_large")
-    if len(stderr.encode("utf-8")) > max_output_bytes:
-        return _unresolved(role, generation, "pi_stderr_too_large")
-    try:
-        events = [
-            json.loads(line, object_pairs_hook=_reject_duplicate_keys)
-            for line in stdout.splitlines()
-            if line.strip()
-        ]
-    except (TypeError, ValueError):
-        return _unresolved(role, generation, "pi_output_malformed")
-    if any(_contains_tool_activity(event) for event in events):
-        return _unresolved(role, generation, "pi_tool_activity_forbidden")
-    if not all(_event_schema_valid(event) for event in events):
-        return _unresolved(role, generation, "pi_protocol_invalid")
-    if not events or events[-1] != {"type": "agent_settled"}:
-        return _unresolved(role, generation, "pi_not_settled")
+    events: list[object] = []
+    malformed = False
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line, object_pairs_hook=_reject_duplicate_keys))
+        except (TypeError, ValueError):
+            malformed = True
+            break
     assistant_messages = [
         event.get("message")
         for event in events
@@ -205,22 +207,98 @@ def parse_pi_result(
         and event.get("type") == "message_end"
         and isinstance(event.get("message"), dict)
         and event["message"].get("role") == "assistant"
+        and _event_schema_valid(event)
     ]
+    calls = tuple(
+        call_from_assistant_message(
+            message,
+            runtime="pi",
+            role=role,
+            generation=generation,
+            requested_provider=requested_provider,
+            requested_model=requested_model,
+            duration_ms=duration_ms if len(assistant_messages) == 1 else None,
+        )
+        for message in assistant_messages
+    )
+    assistant_result = (
+        _assistant_text(assistant_messages[0]) if len(assistant_messages) == 1 else None
+    )
+    observed_output = assistant_result or ""
+    if returncode != 0:
+        return _unresolved(
+            role,
+            generation,
+            f"pi_exit_{returncode}",
+            model_calls=calls,
+            output=observed_output,
+        )
+    if len(stdout.encode("utf-8", errors="surrogateescape")) > max_output_bytes:
+        return _unresolved(
+            role,
+            generation,
+            "pi_stdout_too_large",
+            model_calls=calls,
+            output=observed_output,
+        )
+    if len(stderr.encode("utf-8", errors="surrogateescape")) > max_output_bytes:
+        return _unresolved(
+            role,
+            generation,
+            "pi_stderr_too_large",
+            model_calls=calls,
+            output=observed_output,
+        )
+    if malformed:
+        return _unresolved(
+            role,
+            generation,
+            "pi_output_malformed",
+            model_calls=calls,
+            output=observed_output,
+        )
+    if any(_contains_tool_activity(event) for event in events):
+        return _unresolved(
+            role,
+            generation,
+            "pi_tool_activity_forbidden",
+            model_calls=calls,
+            output=observed_output,
+        )
+    if not all(_event_schema_valid(event) for event in events):
+        return _unresolved(
+            role,
+            generation,
+            "pi_protocol_invalid",
+            model_calls=calls,
+            output=observed_output,
+        )
+    if not events or events[-1] != {"type": "agent_settled"}:
+        return _unresolved(
+            role,
+            generation,
+            "pi_not_settled",
+            model_calls=calls,
+            output=observed_output,
+        )
     if len(assistant_messages) != 1:
-        return _unresolved(role, generation, "pi_result_ambiguous")
+        return _unresolved(role, generation, "pi_result_ambiguous", model_calls=calls)
     message = assistant_messages[0]
     if message.get("stopReason") != "stop" or message.get("errorMessage"):
-        return _unresolved(role, generation, "pi_model_not_stopped")
-    assistant_result = _assistant_text(message)
+        return _unresolved(role, generation, "pi_model_not_stopped", model_calls=calls)
     if assistant_result is None:
-        return _unresolved(role, generation, "pi_result_malformed")
+        return _unresolved(role, generation, "pi_result_malformed", model_calls=calls)
     if not assistant_result.strip():
-        return _unresolved(role, generation, "pi_result_empty")
+        return _unresolved(role, generation, "pi_result_empty", model_calls=calls)
     return RoleReceipt(
         role=role,
         status="SETTLED",
         output=assistant_result,
         candidate_generation=generation,
+        model_calls=calls,
+        topology_status="ELIGIBLE",
+        raw_events_digest=hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
+        raw_events=stdout,
     )
 
 
@@ -267,100 +345,6 @@ def _command(request: PiRoleRequest, pi_runtime: os.PathLike[str] | str) -> list
     return command
 
 
-def _stream_size(stream: BinaryIO) -> int:
-    stream.flush()
-    return os.fstat(stream.fileno()).st_size
-
-
-def _set_output_file_limit(limit: int) -> None:
-    resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
-
-
-def _reap_process_leader(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is None:
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-    process.wait()
-
-
-def _is_finished_group_race(exc: OSError) -> bool:
-    return exc.errno in {errno.EPERM, errno.ESRCH}
-
-
-def _stop_process_group(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except OSError as exc:
-        if not _is_finished_group_race(exc):
-            raise
-        _reap_process_leader(process)
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except OSError as retry_exc:
-            if not _is_finished_group_race(retry_exc):
-                raise
-        return
-    _reap_process_leader(process)
-
-
-def _run_bounded(
-    command: list[str],
-    *,
-    cwd: os.PathLike[str] | str,
-    env: Mapping[str, str],
-    timeout: float,
-    max_output_bytes: int,
-    stdout_file: BinaryIO,
-    stderr_file: BinaryIO,
-) -> tuple[int, str, str, str, int, int]:
-    """Run with file-backed streams and terminate as soon as either bound is crossed."""
-    process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        env=env,
-        stdout=stdout_file,
-        stderr=stderr_file,
-        start_new_session=True,
-        preexec_fn=lambda: _set_output_file_limit(max_output_bytes + 1),
-    )
-    deadline = time.monotonic() + timeout
-    reason = ""
-    while process.poll() is None:
-        if _stream_size(stdout_file) > max_output_bytes:
-            reason = "pi_stdout_too_large"
-            break
-        if _stream_size(stderr_file) > max_output_bytes:
-            reason = "pi_stderr_too_large"
-            break
-        if time.monotonic() >= deadline:
-            reason = "pi_process_failure:TimeoutExpired"
-            break
-        time.sleep(0.01)
-    if reason:
-        _stop_process_group(process)
-        stdout_size = _stream_size(stdout_file)
-        stderr_size = _stream_size(stderr_file)
-        return process.returncode, "", "", reason, stdout_size, stderr_size
-    returncode = process.wait()
-    _stop_process_group(process)
-    stdout_size = _stream_size(stdout_file)
-    stderr_size = _stream_size(stderr_file)
-    if stdout_size > max_output_bytes:
-        return returncode, "", "", "pi_stdout_too_large", stdout_size, stderr_size
-    if stderr_size > max_output_bytes:
-        return returncode, "", "", "pi_stderr_too_large", stdout_size, stderr_size
-    stdout_file.seek(0)
-    stderr_file.seek(0)
-    try:
-        stdout = stdout_file.read().decode("utf-8")
-        stderr = stderr_file.read().decode("utf-8")
-    except UnicodeDecodeError:
-        return returncode, "", "", "pi_output_malformed", stdout_size, stderr_size
-    return returncode, stdout, stderr, "", stdout_size, stderr_size
-
-
 def invoke_pi_role(
     request: PiRoleRequest,
     *,
@@ -369,6 +353,7 @@ def invoke_pi_role(
     cwd: os.PathLike[str] | str,
     auth_env: Mapping[str, str] | None = None,
     max_output_bytes: int = 1_000_000,
+    evidence_prefix: os.PathLike[str] | str | None = None,
 ) -> RoleReceipt:
     """Invoke one fresh, tool-less Pi process with ambient resources disabled."""
     if not _ROLE_PATTERN.fullmatch(request.role):
@@ -386,10 +371,18 @@ def invoke_pi_role(
     spool_dir.chmod(0o700)
     command = _command(request, pi_runtime)
     env.update({"PI_CODING_AGENT_DIR": str(config_dir), "PI_OFFLINE": "1"})
+    prefix = pathlib.Path(evidence_prefix) if evidence_prefix is not None else None
     try:
-        with tempfile.TemporaryFile(mode="w+b", dir=spool_dir) as stdout_file:
-            with tempfile.TemporaryFile(mode="w+b", dir=spool_dir) as stderr_file:
+        with output_stream(
+            pathlib.Path(f"{prefix}.stdout") if prefix else None,
+            temporary_dir=spool_dir,
+        ) as stdout_file:
+            with output_stream(
+                pathlib.Path(f"{prefix}.stderr") if prefix else None,
+                temporary_dir=spool_dir,
+            ) as stderr_file:
                 try:
+                    started = time.monotonic()
                     returncode, stdout, stderr, failure, stdout_bytes, stderr_bytes = (
                         _run_bounded(
                             command,
@@ -401,30 +394,46 @@ def invoke_pi_role(
                             stderr_file=stderr_file,
                         )
                     )
+                    duration_ms = (time.monotonic() - started) * 1000
                 except OSError as exc:
+                    duration_ms = (time.monotonic() - started) * 1000
                     failure = f"pi_process_failure:{type(exc).__name__}"
-                    returncode, stdout, stderr = 1, "", ""
+                    returncode = 1
                     stdout_bytes = _stream_size(stdout_file)
                     stderr_bytes = _stream_size(stderr_file)
-                if failure:
-                    return RoleReceipt(
-                        request.role,
-                        "UNRESOLVED",
-                        candidate_generation=request.candidate_generation,
-                        reason=failure,
-                        config_dir=str(config_dir),
-                        command=tuple(command),
-                        stdout_bytes=stdout_bytes,
-                        stderr_bytes=stderr_bytes,
-                    )
+                captured_stdout = _stream_bytes(stdout_file)
+                captured_stderr = _stream_bytes(stderr_file)
+                failure_audit = _failure_audit(captured_stdout, captured_stderr)
+                stdout = captured_stdout.decode("utf-8", errors="surrogateescape")
+                stderr = captured_stderr.decode("utf-8", errors="surrogateescape")
                 parsed = parse_pi_result(
                     role=request.role,
                     generation=request.candidate_generation,
                     stdout=stdout,
                     stderr=stderr,
-                    returncode=returncode,
+                    returncode=0 if failure else returncode,
                     max_output_bytes=max_output_bytes,
+                    requested_provider=request.provider,
+                    requested_model=request.model,
+                    duration_ms=duration_ms,
                 )
+                if failure:
+                    parsed = RoleReceipt(
+                        role=parsed.role,
+                        status="UNRESOLVED",
+                        output=parsed.output,
+                        candidate_generation=parsed.candidate_generation,
+                        reason=failure,
+                        model_calls=parsed.model_calls,
+                        topology_status="INELIGIBLE",
+                    )
+                raw_events = parsed.raw_events
+                raw_events_digest = parsed.raw_events_digest
+                if parsed.status != "SETTLED":
+                    raw_events = failure_audit
+                    raw_events_digest = hashlib.sha256(
+                        failure_audit.encode("utf-8")
+                    ).hexdigest()
                 return RoleReceipt(
                     role=parsed.role,
                     status=parsed.status,
@@ -435,6 +444,11 @@ def invoke_pi_role(
                     command=tuple(command),
                     stdout_bytes=stdout_bytes,
                     stderr_bytes=stderr_bytes,
+                    model_calls=parsed.model_calls,
+                    topology_status=parsed.topology_status,
+                    runtime_version=parsed.runtime_version,
+                    raw_events_digest=raw_events_digest,
+                    raw_events=raw_events,
                 )
     finally:
         shutil.rmtree(config_dir, ignore_errors=True)
