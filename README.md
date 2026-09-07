@@ -115,8 +115,8 @@ confirm-class-enforcement=reserved
 confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
 deploy-execution=informational
 deploy-execution-reason=Repository deploy metadata is surfaced as outcome context and does not execute or independently authorize a deployment command.
-codex-final-response-interception=guidance-only
-codex-final-response-interception-reason=The installed Codex adapter exposes no Stop or final-response hook; durable work state and SessionStart guidance support continuation without native interception.
+codex-scheduled-continuation=unsupported
+codex-scheduled-continuation-reason=Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live.
 -->
 <!-- escapement:support-claims:end -->
 
@@ -125,7 +125,7 @@ Capabilities are enabled only where the adapter and a fixture prove the current 
 - merge authorization resolves repository policy; it does not itself observe whether a pull request is green;
 - `confirm_class` is reserved configuration and is not currently enforced by the merge gate;
 - deployment metadata is informational to the outcome resolver and does not itself execute or authorize a deployment command; and
-- Codex exposes supported startup and tool-use lifecycle events, but no Stop/final-response hook. Its final-response continuation discipline is guidance-only and relies on explicit durable work state.
+- Codex exposes startup, tool-use, `UserPromptSubmit`, and `Stop` lifecycle events, each fixture-backed; scheduled wakeups, task-mode repository binding, and the local judge rung remain Claude-only, so continuation there still relies on explicit durable work state.
 
 Support in one host is never inferred from another host's lifecycle model.
 

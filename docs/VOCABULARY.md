@@ -270,8 +270,8 @@ confirm-class-enforcement=reserved
 confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
 deploy-execution=informational
 deploy-execution-reason=Repository deploy metadata is surfaced as outcome context and does not execute or independently authorize a deployment command.
-codex-final-response-interception=guidance-only
-codex-final-response-interception-reason=The installed Codex adapter exposes no Stop or final-response hook; durable work state and SessionStart guidance support continuation without native interception.
+codex-scheduled-continuation=unsupported
+codex-scheduled-continuation-reason=Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live.
 -->
 <!-- escapement:support-claims:end -->
 
@@ -300,10 +300,11 @@ not assumed to be symmetrical.
 - **Final-response gate** — An adapter-specific hook that can reject a final response
   when the client exposes and fixtures prove the relevant lifecycle event. The current
   Claude Code adapter can use the continuation harness at this point of effect. Codex
-  exposes no Stop/final-response hook, so its equivalent discipline is guidance-only and
-  cannot mechanically prevent the turn from ending.
-  *In repo:* `harness/bin/stop_hook.py`, `would_block_stop.py`, and the host capability
-  manifest.
+  reaches the same point of effect through `harness/bin/codex_stop_hook.py`, which
+  reuses that decision core; scheduled wakeups and the local judge rung remain
+  Claude-only.
+  *In repo:* `harness/bin/stop_hook.py`, `codex_stop_hook.py`, `would_block_stop.py`,
+  and the host capability manifest.
 
 - **Scheduled wakeup** — Registering a future check-in when work genuinely waits on an
   external event (CI, a merge, a DAG run) and the current adapter exposes a supported

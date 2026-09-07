@@ -124,6 +124,12 @@ CODEX_HOOK_SUPPORT = {
     # path. Without it, an explicitly authorized Codex repository is denied
     # fail-closed because the policy reader cannot be imported.
     "harness/bin/repo_outcome.py",
+    # codex_stop_hook.py imports its decision core rather than reimplementing it;
+    # verify_integrity.py is would_block_stop's own transitive sibling. Without
+    # both, the Stop hook raises ImportError, fails open, and the Codex adapter
+    # is inert in exactly the wind-down it was added to catch.
+    "harness/bin/would_block_stop.py",
+    "harness/bin/verify_integrity.py",
     "harness/bin/schedule_store.py",
     "harness/bin/session_observer.py",
     "harness/bin/continuation_watchdog.py",

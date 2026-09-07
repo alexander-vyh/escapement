@@ -828,11 +828,27 @@ def test_codex_repo_hook_surface_does_not_fake_a_stop_hook():
     assert hooks == {}
 
 
-def test_codex_plugin_hooks_include_final_response_gap_warning():
-    """The installable Codex wrapper must carry the same startup warning."""
+def test_codex_plugin_hooks_ship_the_stop_gate_and_gap_warning():
+    """The installable Codex wrapper must carry both the gate and the warning.
+
+    The Stop registration is what makes the adapter reachable at all; the
+    SessionStart advisory now names the gaps that remain (wakeup, task mode,
+    judge) rather than denying that a Stop hook exists.
+    """
     hooks = json.loads((CODEX_WRAPPER / "hooks" / "hooks.json").read_text())["hooks"]
 
-    assert "Stop" not in hooks, "Codex plugin must not ship unsupported Stop hooks"
+    stop_commands = [
+        hook.get("command", "")
+        for item in hooks.get("Stop", [])
+        for hook in item.get("hooks", [])
+    ]
+    assert any("codex_stop_hook.py" in command for command in stop_commands), (
+        f"Codex plugin must register the Stop gate, got {stop_commands}"
+    )
+    for rel in ("harness/bin/codex_stop_hook.py", "harness/bin/would_block_stop.py"):
+        assert (CODEX_WRAPPER / rel).is_file(), (
+            f"Stop gate is registered but {rel} is not vendored; it would fail open"
+        )
     session_start_commands = [
         hook["command"]
         for item in hooks.get("SessionStart", [])

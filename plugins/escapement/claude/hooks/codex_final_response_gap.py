@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionStart advisory for Codex's missing final-response Stop hook."""
+"""SessionStart advisory for the continuation gaps Codex still has."""
 
 from __future__ import annotations
 
@@ -7,17 +7,18 @@ import json
 import sys
 
 _SYSTEM_MESSAGE = (
-    "Escapement Codex: no Stop/final-response hook is available here; final-answer "
-    "wind-down cannot be mechanically blocked the way Claude Stop hooks can."
+    "Escapement Codex: final-answer wind-down over reversible work is gated here, but "
+    "wakeup scheduling, task-mode binding, and the local judge are not available."
 )
 
 _ADDITIONAL_CONTEXT = (
-    "Escapement Codex adapter notice: Codex currently exposes no Stop/final-response "
-    "hook. Escapement can gate supported lifecycle events such as SessionStart, "
-    "PreCompact, and PreToolUse, but it cannot mechanically intercept a final answer "
-    "that offers to stop while reversible work remains. Continue from explicit bd, "
-    "git, OpenSpec, and outcome-verification state before final responses; do not "
-    "treat a summary of follow-ups as completion."
+    "Escapement Codex adapter notice: the Stop adapter holds a final answer that winds "
+    "down while reversible work remains, so treat a block as the shared decision core "
+    "speaking, not a transient error. What Codex still lacks: scheduled wakeups, "
+    "task-mode repository binding, and the local judge rung, so nothing here re-enters "
+    "a session once it truly ends. Continue from explicit bd, git, OpenSpec, and "
+    "outcome-verification state before final responses; do not treat a summary of "
+    "follow-ups as completion."
 )
 
 
