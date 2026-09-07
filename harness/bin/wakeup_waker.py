@@ -238,11 +238,16 @@ def main(argv=None) -> int:
         return exit_code
 
     fire = args.fire or args.legacy_fire
+    # Two locks, deliberately: the schedule pass is milliseconds and must run on
+    # every launchd tick, while worktree reconciliation walks a retained registry
+    # and takes 10-15 minutes. Sharing one lock meant a newly-armed wakeup was not
+    # even enumerated until the in-flight reconciliation finished — measured at
+    # 15m06s from arming to firing on the live daemon (escapement-4qta).
     legacy_lock = None
     if args.legacy_fire:
         legacy_lock = schedule_store.try_lock(root.parent / "legacy-fire.json")
         if legacy_lock is None:
-            print("legacy reconciliation already running")
+            print("scheduled work already running")
             return 0
     for sched in iter_schedule_paths(root):
         # Trust boundary: a check entry's `command` is shell-executed by the
@@ -343,12 +348,33 @@ def main(argv=None) -> int:
         finally:
             if lock_file is not None:
                 lock_file.close()
+    # Schedules are done; release their lock before the slow phase so the next
+    # tick can fire a wakeup armed while this reconciliation is still walking.
+    if legacy_lock is not None:
+        legacy_lock.close()
+        legacy_lock = None
+
     if fire:
+        reconcile_lock = None
+        skip_reconcile = False
+        if args.legacy_fire:
+            reconcile_lock = schedule_store.try_lock(
+                root.parent / "worktree-reconcile.json"
+            )
+            if reconcile_lock is None:
+                # Skipping is safe: the next tick retries. Starving it is not —
+                # reconciliation silently stopped for 17 days once before.
+                skip_reconcile = True
+                print("worktree reconciliation already running")
         try:
-            wls.reconcile(root.parent)
+            if not skip_reconcile:
+                wls.reconcile(root.parent)
         except (OSError, RuntimeError, ValueError) as exc:
             exit_code = 1
             print(f"worktree reconciliation incomplete: {exc}", file=sys.stderr)
+        finally:
+            if reconcile_lock is not None:
+                reconcile_lock.close()
         # A schedule we could not inspect is reported, not swallowed. It no
         # longer disables anything else: gating the whole pass on one untrusted
         # schedule is what silently stopped reconciliation for 17 days.
