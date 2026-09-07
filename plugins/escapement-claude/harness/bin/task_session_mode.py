@@ -178,28 +178,54 @@ def transcript_has_successful_exact_claim(
     return bool(claim_ids & successful_results)
 
 
-def session_repo_cwd(thread_dir: pathlib.Path, session_id: str) -> pathlib.Path | None:
-    """Resolve the existing task-mode repository binding for daemon Beads calls.
-
-    Moved here from execution_supervisor when the delegated-execution ledger was
-    removed: reading session_mode.json is this module's contract, and the waker
-    still needs the binding to run Beads in the right repository.
-    """
-    mode_path = pathlib.Path(thread_dir) / "session_mode.json"
-    if mode_path.is_symlink() or not is_trusted_file(mode_path):
+def _trusted_json(path: pathlib.Path) -> dict | None:
+    """Load a thread-state JSON file, refusing symlinked or untrusted sources."""
+    if path.is_symlink() or not is_trusted_file(path):
         return None
     try:
-        mode = json.loads(mode_path.read_text())
+        loaded = json.loads(path.read_text())
     except (OSError, UnicodeError, json.JSONDecodeError):
         return None
-    if not isinstance(mode, dict) or mode.get("mode") != "task":
-        return None
-    if mode.get("session_id") != session_id:
-        return None
-    raw_cwd = mode.get("repo_cwd")
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _validated_repo(raw_cwd: object) -> pathlib.Path | None:
+    """A binding is usable only if it names an existing absolute directory."""
     if not isinstance(raw_cwd, str) or not raw_cwd:
         return None
     repo_cwd = pathlib.Path(raw_cwd)
     if not repo_cwd.is_absolute() or not repo_cwd.is_dir():
         return None
     return repo_cwd.resolve()
+
+
+def session_repo_cwd(thread_dir: pathlib.Path, session_id: str) -> pathlib.Path | None:
+    """Resolve the repository binding for daemon Beads calls and scheduled spawns.
+
+    Two state files can carry the binding, and both are needed: task-mode
+    sessions write session_mode.json, ordinary interactive sessions write
+    checkout.json. Reading only the former made every interactive wakeup
+    unfireable (escapement-bu6a) - wakeup_waker refuses to spawn without a
+    repository, so 24,501 consecutive spawns were dropped.
+
+    Task mode wins where both exist: it is the narrower, explicitly delegated
+    binding. Absence of any trusted binding still returns None; the waker's
+    refusal is correct when the repository is genuinely unknown.
+    """
+    thread_dir = pathlib.Path(thread_dir)
+
+    mode = _trusted_json(thread_dir / "session_mode.json")
+    if (
+        mode is not None
+        and mode.get("mode") == "task"
+        and mode.get("session_id") == session_id
+    ):
+        # A declared task binding is authoritative even when broken: falling
+        # through would widen delegated work into the interactive repository.
+        return _validated_repo(mode.get("repo_cwd"))
+
+    checkout = _trusted_json(thread_dir / "checkout.json")
+    if checkout is not None and checkout.get("session_id") == session_id:
+        return _validated_repo(checkout.get("worktree_root"))
+
+    return None
