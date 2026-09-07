@@ -35,11 +35,21 @@ import subprocess
 import sys
 import time
 
-from would_block_stop import (
-    load_thread_state,
-    thread_dir_for_session,
-    would_block_stop,
-)
+# The decision core is a vendored sibling, so its absence is a packaging
+# failure, not a logic one -- and it must land on the SAME fail-open path as
+# every other error. Left as a bare module-level import it raised before main()
+# could catch anything: exit 1, no incident record, no trace that the gate had
+# failed at all. That is the one failure mode this gate exists to make visible.
+try:
+    from would_block_stop import (
+        load_thread_state,
+        thread_dir_for_session,
+        would_block_stop,
+    )
+except ImportError as exc:  # pragma: no cover - exercised via subprocess
+    _CORE_IMPORT_ERROR: str | None = str(exc)
+else:
+    _CORE_IMPORT_ERROR = None
 
 # Completion-claim / wind-down shape. Deliberately a small, legible class of
 # phrasings, not a golden string; tuned via the incident log the gate emits
@@ -116,9 +126,22 @@ def git_work_remains(cwd) -> bool:
 
 
 def _harness_root() -> pathlib.Path:
-    from would_block_stop import DEFAULT_HARNESS_ROOT  # single source of truth
-
-    return pathlib.Path(os.environ.get("HARNESS_ROOT", DEFAULT_HARNESS_ROOT))
+    override = os.environ.get("HARNESS_ROOT")
+    if override:
+        return pathlib.Path(override)
+    try:
+        from would_block_stop import DEFAULT_HARNESS_ROOT  # single source of truth
+    except ImportError:
+        # Reached only when the core is unreachable -- which is exactly when the
+        # incident record matters most. Mirrors would_block_stop's own default
+        # so the record lands where the harness already looks for it.
+        return pathlib.Path(
+            os.environ.get(
+                "CONTINUATION_HARNESS_HOME",
+                pathlib.Path.home() / ".claude" / "harness",
+            )
+        )
+    return pathlib.Path(DEFAULT_HARNESS_ROOT)
 
 
 def _log_incident(record: dict) -> None:
@@ -145,6 +168,13 @@ def _read_recorded_user_message(thread_dir: pathlib.Path):
 
 
 def main() -> int:
+    if _CORE_IMPORT_ERROR is not None:
+        # Allow the stop, but say so. A gate that cannot decide must not look
+        # like a gate that decided "allow".
+        _log_incident({"decision": "allow", "reason": "core_import_failed",
+                       "error": _CORE_IMPORT_ERROR[:200]})
+        return 0
+
     try:
         payload = json.loads(sys.stdin.read())
         if not isinstance(payload, dict):
