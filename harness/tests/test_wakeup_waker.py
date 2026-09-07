@@ -9,7 +9,6 @@ import datetime as dt
 import fcntl
 import importlib.util
 import json
-import os
 import pathlib
 import shlex
 import sys
@@ -427,3 +426,84 @@ def test_thread_without_any_repo_binding_is_still_refused(tmp_path, monkeypatch,
     assert "lacks trusted repository context" in capsys.readouterr().err
     assert spawned == []  # nothing launched
     assert json.loads(schedule.read_text()) == [entry]  # entry preserved, not lost
+
+
+# --- escapement-4qta: schedule work must not queue behind reconciliation ----
+
+
+def _due_resume(thread_dir: pathlib.Path, session_id: str) -> pathlib.Path:
+    """A thread with an interactive binding and one due resume."""
+    thread_dir.mkdir(parents=True, exist_ok=True)
+    (thread_dir / "checkout.json").write_text(
+        json.dumps({"session_id": session_id, "worktree_root": str(thread_dir)})
+    )
+    schedule = thread_dir / "scheduled.json"
+    schedule.write_text(
+        json.dumps(
+            [_entry(kind="resume", wake_at=CLI_PAST, prompt="go", thread_id=session_id)]
+        )
+    )
+    return schedule
+
+
+def test_schedules_run_while_a_reconciliation_is_in_flight(tmp_path, monkeypatch, capsys):
+    """escapement-4qta: measured 15m06s from arming to firing on the live daemon.
+
+    Reconciliation walks a retained worktree registry and takes 10-15 minutes.
+    While it held the single legacy-fire lock, a newly-armed wakeup was not even
+    enumerated, so launchd's 60s cadence bought nothing.
+    """
+    root = tmp_path / "threads"
+    schedule = _due_resume(root / "thread-1", "thread-1")
+
+    # A reconciliation from an earlier pass is still running.
+    held = ww.schedule_store.try_lock(tmp_path / "worktree-reconcile.json")
+    assert held is not None, "test could not take the reconcile lock"
+    try:
+        spawned = []
+        monkeypatch.setattr(ww.subprocess, "Popen", lambda argv, cwd: spawned.append(argv))
+        monkeypatch.setattr(
+            ww.wls, "reconcile",
+            lambda _root: (_ for _ in ()).throw(AssertionError("must not reconcile")),
+        )
+
+        assert ww.main(["--threads-root", str(root), "--legacy-fire"]) == 0
+
+        assert len(spawned) == 1, "the due wakeup must fire despite reconciliation"
+        assert json.loads(schedule.read_text()) == []  # one-shot pruned
+        assert "reconciliation already running" in capsys.readouterr().out
+    finally:
+        held.close()
+
+
+def test_reconciliation_still_runs_when_its_lock_is_free(tmp_path, monkeypatch):
+    """Negative control: reconciliation must not be starved.
+
+    It silently stopped for 17 days once (see the comment at the reconcile call);
+    detaching the locks must not reintroduce that.
+    """
+    root = tmp_path / "threads"
+    (root / "thread-1").mkdir(parents=True)
+    (root / "thread-1" / "scheduled.json").write_text("[]")
+    reconciled = []
+    monkeypatch.setattr(ww.wls, "reconcile", lambda value: reconciled.append(value))
+
+    assert ww.main(["--threads-root", str(root), "--legacy-fire"]) == 0
+    assert reconciled == [tmp_path]
+
+
+def test_a_second_schedule_pass_is_still_excluded(tmp_path, monkeypatch, capsys):
+    """Negative control: two passes must not process the same schedule at once."""
+    root = tmp_path / "threads"
+    _due_resume(root / "thread-1", "thread-1")
+
+    held = ww.schedule_store.try_lock(tmp_path / "legacy-fire.json")
+    assert held is not None
+    try:
+        spawned = []
+        monkeypatch.setattr(ww.subprocess, "Popen", lambda argv, cwd: spawned.append(argv))
+        assert ww.main(["--threads-root", str(root), "--legacy-fire"]) == 0
+        assert spawned == [], "a concurrent schedule pass must not double-fire"
+        assert "already running" in capsys.readouterr().out
+    finally:
+        held.close()
