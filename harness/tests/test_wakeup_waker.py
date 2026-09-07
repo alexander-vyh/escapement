@@ -364,3 +364,66 @@ def test_fire_skips_locked_schedule_to_avoid_duplicate_wakers(
 
 
 # --- public --fire supervisor boundary -----------------------------------
+
+
+def _write_interactive_checkout(thread_dir: pathlib.Path, session_id: str) -> None:
+    """What an ordinary (non-task-mode) session actually writes."""
+    (thread_dir / "checkout.json").write_text(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "worktree_root": str(thread_dir),
+                "git_common_dir": str(thread_dir / ".git"),
+                "is_linked_worktree": False,
+            }
+        )
+    )
+
+
+def test_interactive_session_wakeup_is_not_refused(tmp_path, monkeypatch, capsys):
+    """escapement-bu6a: a wakeup armed outside task mode must actually spawn.
+
+    Before the checkout.json fallback this printed "scheduled spawn lacks
+    trusted repository context" and dropped the spawn - 24,501 times in one week,
+    stranding real wakeups from 2026-09-02, -03 and -05.
+    """
+    root = tmp_path / "threads"
+    thread_dir = root / "thread-1"
+    thread_dir.mkdir(parents=True)
+    schedule = thread_dir / "scheduled.json"
+    entry = _entry(kind="resume", wake_at=CLI_PAST, prompt="continue", thread_id="thread-1")
+    schedule.write_text(json.dumps([entry]))
+    _write_interactive_checkout(thread_dir, "thread-1")
+
+    spawned = []
+
+    def capture(argv, cwd):
+        spawned.append((argv, cwd))
+
+    monkeypatch.setattr(ww.subprocess, "Popen", capture)
+
+    assert ww.main(["--threads-root", str(root), "--fire"]) == 0
+
+    captured = capsys.readouterr()
+    assert "lacks trusted repository context" not in captured.err
+    assert len(spawned) == 1  # the wakeup actually fired
+    assert spawned[0][1] == thread_dir.resolve()  # in the repo checkout.json named
+    assert json.loads(schedule.read_text()) == []  # one-shot pruned, no re-fire storm
+
+
+def test_thread_without_any_repo_binding_is_still_refused(tmp_path, monkeypatch, capsys):
+    """Negative control: no trusted binding must still refuse to spawn."""
+    root = tmp_path / "threads"
+    thread_dir = root / "thread-1"
+    thread_dir.mkdir(parents=True)
+    entry = _entry(kind="resume", wake_at=CLI_PAST, prompt="continue", thread_id="thread-1")
+    schedule = thread_dir / "scheduled.json"
+    schedule.write_text(json.dumps([entry]))
+
+    spawned = []
+    monkeypatch.setattr(ww.subprocess, "Popen", lambda argv, cwd: spawned.append(argv))
+
+    assert ww.main(["--threads-root", str(root), "--fire"]) == 1
+    assert "lacks trusted repository context" in capsys.readouterr().err
+    assert spawned == []  # nothing launched
+    assert json.loads(schedule.read_text()) == [entry]  # entry preserved, not lost
