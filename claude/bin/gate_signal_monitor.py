@@ -70,6 +70,46 @@ _DEFAULT_KNOWN_GATES = [
 ]
 
 
+# The winddown rung records a fail-open ALLOW under this reason when the local
+# semantic judge is unreachable. It is the only signal that the continuation
+# gate has silently degraded to a no-op (escapement-lf8l).
+JUDGE_UNAVAILABLE_REASON = "winddown_judge_unavailable"
+JUDGE_GATE = "continuation-harness"
+# Below this share of winddown allows, treat failures as transient blips rather
+# than an outage: a warning that fires on noise gets ignored like the 3,165
+# records that preceded this check.
+JUDGE_OUTAGE_RATE = 0.05
+
+
+def summarize_judge_availability(
+    entries_by_repo: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Count winddown fail-opens against all winddown allows, per repo.
+
+    The denominator is the winddown rung's own allows, not every gate event —
+    an unrelated deny elsewhere says nothing about judge health.
+    """
+    unavailable = 0
+    stop_events = 0
+    by_repo: Counter[str] = Counter()
+    for repo, entries in entries_by_repo.items():
+        for e in entries:
+            if e.get("gate") != JUDGE_GATE or e.get("decision") != "allow":
+                continue
+            stop_events += 1
+            if e.get("reason") == JUDGE_UNAVAILABLE_REASON:
+                unavailable += 1
+                by_repo[repo] += 1
+    rate = round(unavailable / stop_events, 2) if stop_events else 0.0
+    return {
+        "unavailable": unavailable,
+        "stop_events": stop_events,
+        "rate": rate,
+        "by_repo": dict(by_repo),
+        "is_outage": rate >= JUDGE_OUTAGE_RATE and unavailable > 0,
+    }
+
+
 def _parse_since(token: str) -> timedelta:
     suffix_map = {"d": "days", "h": "hours", "m": "minutes"}
     suffix = token[-1].lower()
@@ -215,6 +255,7 @@ def analyze(
         "by_repo": dict(by_repo),
         "by_gate_decision": {g: dict(d) for g, d in by_gate_decision.items()},
         "by_gate_repo": {g: dict(r) for g, r in by_gate_repo.items()},
+        "judge_availability": summarize_judge_availability(entries_by_repo),
         "silent_known_gates": silent,
         "mock_bureaucracy_risk": sorted(mock_risk, key=lambda x: -x["ratio"]),
         "shirking_categories": dict(shirking_categories),
@@ -295,6 +336,48 @@ def file_concerning_patterns(
     existing_titles = {b.get("title", "") for b in existing}
 
     actions: list[dict[str, Any]] = []
+
+    # Judge outage — the continuation gate silently degraded to a no-op
+    judge = summary.get("judge_availability") or {}
+    if judge.get("is_outage"):
+        title = f"{_BEAD_TITLE_PREFIX} judge outage: continuation gate failing open"
+        if title in existing_titles:
+            actions.append({"title": title, "action": "deduped"})
+        else:
+            per_repo = "\n".join(
+                f"- {repo}: {n}"
+                for repo, n in sorted(
+                    judge.get("by_repo", {}).items(), key=lambda x: -x[1]
+                )
+            )
+            description = (
+                f"The local semantic judge was unreachable for "
+                f"{judge['unavailable']} of {judge['stop_events']} winddown "
+                f"allows ({judge['rate']:.0%}) in the last {window_text}.\n\n"
+                f"{per_repo}\n\n"
+                f"A `{JUDGE_UNAVAILABLE_REASON}` allow is a stop that nothing "
+                f"checked: the Stop hook's judge call fails open by design so a "
+                f"judge problem can never block or crash the hook. That is "
+                f"correct behaviour and it is also invisible — the gate stays "
+                f"wired, reports nothing, and enforces nothing.\n\n"
+                f"## What to check\n\n"
+                f"1. Probe the endpoint (000 means down):\n"
+                f"   `curl -s -o /dev/null -w '%{{http_code}}\\n' "
+                f"http://localhost:8000/v1/models`\n"
+                f"2. Confirm the LaunchAgent is loaded (KeepAlive cannot restart "
+                f"a job that is not registered):\n"
+                f"   `launchctl list | grep rapid-mlx`\n"
+                f"   Reload with: `launchctl bootstrap gui/$UID "
+                f"~/Library/LaunchAgents/com.user.rapid-mlx.plist`\n"
+                f"3. Confirm auth resolves — the client reads "
+                f"`~/.claude/harness/local-judge-api-key` (mode 0600) unless "
+                f"`ESCAPEMENT_LOCAL_JUDGE_API_KEY[_FILE]` overrides it. A 401 "
+                f"fails open exactly like an outage.\n\n"
+                f"Filed automatically by the weekly gate-signal monitor; "
+                f"subsequent weeks dedup against this open issue."
+            )
+            new_id = _file_bead(repo, title, description, priority=1)
+            actions.append({"title": title, "action": "filed", "id": new_id})
 
     # Mock-bureaucracy risk per gate
     for m in summary.get("mock_bureaucracy_risk", []):
@@ -392,6 +475,25 @@ def render_human(summary: dict[str, Any], since_text: str) -> str:
     lines.append("By repo:")
     for repo, count in sorted(summary["by_repo"].items(), key=lambda x: -x[1]):
         lines.append(f"  {repo}: {count}")
+
+    judge = summary.get("judge_availability") or {}
+    if judge.get("is_outage"):
+        lines.append("")
+        lines.append(
+            "🚨 JUDGE OUTAGE — the continuation gate has been failing open:"
+        )
+        lines.append(
+            f"  {judge['unavailable']} of {judge['stop_events']} winddown allows "
+            f"({judge['rate']:.0%}) had no judge verdict."
+        )
+        for repo, n in sorted(judge.get("by_repo", {}).items(), key=lambda x: -x[1]):
+            lines.append(f"    {repo}: {n}")
+        lines.append(
+            "  A fail-open allow is a stop nobody checked. Probe it: "
+            "curl -s -o /dev/null -w '%{http_code}\\n' "
+            "http://localhost:8000/v1/models  (000 = down), then "
+            "launchctl list | grep rapid-mlx"
+        )
 
     if summary["mock_bureaucracy_risk"]:
         lines.append("")
