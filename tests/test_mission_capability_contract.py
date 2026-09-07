@@ -108,7 +108,7 @@ EXPECTED_SUPPORT_CLAIMS = {
     "merge-green-status": "unsupported",
     "confirm-class-enforcement": "reserved",
     "deploy-execution": "informational",
-    "codex-final-response-interception": "guidance-only",
+    "codex-scheduled-continuation": "unsupported",
 }
 EXPECTED_SUPPORT_REASONS = {
     "merge-green-status": (
@@ -123,9 +123,10 @@ EXPECTED_SUPPORT_REASONS = {
         "Repository deploy metadata is surfaced as outcome context and does not execute "
         "or independently authorize a deployment command."
     ),
-    "codex-final-response-interception": (
-        "The installed Codex adapter exposes no Stop or final-response hook; durable work "
-        "state and SessionStart guidance support continuation without native interception."
+    "codex-scheduled-continuation": (
+        "Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, "
+        "so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses "
+        "the shared decision core only while the session is live."
     ),
 }
 EXPECTED_ADAPTER_MAPPING = {
@@ -682,9 +683,18 @@ def test_support_claims_match_executed_point_of_effect_controls(tmp_path: Path):
         check=False,
     )
     assert probe.returncode == 0
-    assert "no Stop/final-response hook" in probe.stdout
+    # The claim flipped, so its control flips with it: the advisory must no
+    # longer deny the capability, and the registration must actually be there.
+    # Asserting only the prose would let a true sentence ship with no hook.
+    assert "no Stop/final-response hook" not in probe.stdout
+    assert "wakeup" in probe.stdout
     codex_hooks = json.loads((ROOT / "plugins/escapement/hooks/hooks.json").read_text())["hooks"]
-    assert "Stop" not in codex_hooks
+    stop_commands = [
+        hook.get("command", "")
+        for group in codex_hooks.get("Stop", [])
+        for hook in group.get("hooks", [])
+    ]
+    assert any("codex_stop_hook.py" in command for command in stop_commands), stop_commands
 
     sys.path.insert(0, str(ROOT / "harness/bin"))
     import repo_outcome  # type: ignore

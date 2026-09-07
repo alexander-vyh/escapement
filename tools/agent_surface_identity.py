@@ -94,7 +94,7 @@ EXPECTED_SUPPORT_CLAIMS = {
     "merge-green-status": "unsupported",
     "confirm-class-enforcement": "reserved",
     "deploy-execution": "informational",
-    "codex-final-response-interception": "guidance-only",
+    "codex-scheduled-continuation": "unsupported",
 }
 EXPECTED_SUPPORT_REASONS = {
     "merge-green-status": (
@@ -109,9 +109,10 @@ EXPECTED_SUPPORT_REASONS = {
         "Repository deploy metadata is surfaced as outcome context and does not execute "
         "or independently authorize a deployment command."
     ),
-    "codex-final-response-interception": (
-        "The installed Codex adapter exposes no Stop or final-response hook; durable work "
-        "state and SessionStart guidance support continuation without native interception."
+    "codex-scheduled-continuation": (
+        "Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, "
+        "so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses "
+        "the shared decision core only while the session is live."
     ),
 }
 SUPPORT_CLAIM_SURFACES = (

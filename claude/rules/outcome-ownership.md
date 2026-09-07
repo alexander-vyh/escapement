@@ -74,8 +74,8 @@ confirm-class-enforcement=reserved
 confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
 deploy-execution=informational
 deploy-execution-reason=Repository deploy metadata is surfaced as outcome context and does not execute or independently authorize a deployment command.
-codex-final-response-interception=guidance-only
-codex-final-response-interception-reason=The installed Codex adapter exposes no Stop or final-response hook; durable work state and SessionStart guidance support continuation without native interception.
+codex-scheduled-continuation=unsupported
+codex-scheduled-continuation-reason=Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live.
 -->
 <!-- escapement:support-claims:end -->
 → Read the repo's `.escapement/repo.json` (via `harness/bin/repo_outcome.py`). If it

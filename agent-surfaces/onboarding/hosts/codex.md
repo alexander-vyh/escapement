@@ -11,10 +11,12 @@ fixture proves the current Codex payload shape exercises the intended behavior.
 Unsupported Claude-only behavior stays explicit rather than being copied into a
 Codex surface as prose.
 
-The installed Codex adapter currently exposes no Stop or final-response hook.
-SessionStart can remind the agent to resume from durable work, Git, OpenSpec, and
-verification state, but that behavior is guidance-only: it cannot mechanically
-intercept a final answer or persist an action-local wait. Mark stronger behavior
+The installed Codex adapter registers `Stop` and `UserPromptSubmit` alongside the
+startup and tool-use events; `harness/bin/codex_stop_hook.py` and
+`harness/bin/codex_prompt_recorder.py` carry their fixtures. Scheduled wakeups,
+task-mode repository binding, and the local judge rung remain Claude-only, so
+SessionStart still reminds the agent to resume from durable work, Git, OpenSpec,
+and verification state rather than from a persisted wait. Mark stronger behavior
 ready only after the installed Codex version exposes the lifecycle primitive and
 a fixture proves the payload and point-of-effect behavior.
 

@@ -490,21 +490,21 @@
   <h2>Capability truth outranks symmetry</h2>
   <p>One client's hook model is not evidence for another client.</p>
   <!-- escapement:support-claims:start
-  merge-green-status=unsupported
-  merge-green-status-reason=The merge authorization hook resolves repository-declared merge authority but does not observe pull-request check or green status.
-  confirm-class-enforcement=reserved
-  confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
-  deploy-execution=informational
-  deploy-execution-reason=Repository deploy metadata is surfaced as outcome context and does not execute or independently authorize a deployment command.
-  codex-final-response-interception=guidance-only
-  codex-final-response-interception-reason=The installed Codex adapter exposes no Stop or final-response hook; durable work state and SessionStart guidance support continuation without native interception.
-  -->
-  <!-- escapement:support-claims:end -->
+merge-green-status=unsupported
+merge-green-status-reason=The merge authorization hook resolves repository-declared merge authority but does not observe pull-request check or green status.
+confirm-class-enforcement=reserved
+confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
+deploy-execution=informational
+deploy-execution-reason=Repository deploy metadata is surfaced as outcome context and does not execute or independently authorize a deployment command.
+codex-scheduled-continuation=unsupported
+codex-scheduled-continuation-reason=Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live.
+-->
+<!-- escapement:support-claims:end -->
   <ul class="item-list">
     <li><strong>Merge authorization</strong> — <span class="desc">resolves repository authorization; it does not itself observe green status.</span></li>
     <li><strong><code>confirm_class</code></strong> — <span class="desc">reserved configuration; not currently enforced by the merge gate.</span></li>
     <li><strong>Deployment metadata</strong> — <span class="desc">informational to the outcome resolver; it does not execute or authorize a deployment command.</span></li>
-    <li><strong>Codex continuation</strong> — <span class="desc">supported startup and tool-use events are fixture-backed, but there is no Stop/final-response hook. Final-response discipline is guidance-only.</span></li>
+    <li><strong>Codex continuation</strong> — <span class="desc">startup, tool-use, prompt, and Stop events are fixture-backed; scheduled wakeups, task-mode binding, and the local judge rung remain Claude-only.</span></li>
     <li><strong>Claude Code continuation</strong> — <span class="desc">uses its own supported lifecycle hooks; support remains version- and fixture-specific.</span></li>
   </ul>
 </section>

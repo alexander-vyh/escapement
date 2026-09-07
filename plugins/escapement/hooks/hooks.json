@@ -93,6 +93,30 @@
         ],
         "matcher": ""
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/harness/bin/codex_stop_hook.py\"",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/harness/bin/codex_prompt_recorder.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
     ]
   }
 }
