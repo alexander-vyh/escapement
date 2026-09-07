@@ -1,4 +1,9 @@
-"""Codex SessionStart warning for the unsupported final-response Stop gap."""
+"""Codex SessionStart warning for the continuation gaps that remain.
+
+The Stop gate now exists (harness/bin/codex_stop_hook.py), so this advisory
+no longer denies it. What it must still name: no scheduled wakeup, no
+task-mode repository binding, no local judge rung.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ def _run(payload: dict | None = None) -> tuple[int, dict | None, str]:
     return result.returncode, parsed, result.stderr
 
 
-def test_codex_session_start_names_final_response_gap():
+def test_codex_session_start_names_the_remaining_continuation_gaps():
     """Positive control: SessionStart emits user-visible context.
 
     This fails a manifest-only or no-op-hook implementation because the public
@@ -42,7 +47,12 @@ def test_codex_session_start_names_final_response_gap():
     assert output["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "Codex" in combined
     assert "Stop" in combined
-    assert "final-response" in combined
+    # The advisory must not re-assert the retired premise. A Codex session told
+    # no Stop hook exists will wind down straight through the gate that does.
+    assert "no Stop" not in combined
+    assert "wakeup" in combined.lower()
+    assert "task-mode" in combined.lower()
+    assert "judge" in combined.lower()
     assert "continue" in combined.lower()
     assert "outcome" in combined.lower()
 
@@ -53,7 +63,7 @@ def test_codex_gap_hook_treats_empty_payload_as_startup():
 
     assert code == 0, stderr
     assert output is not None
-    assert "final-response" in output["systemMessage"]
+    assert "wakeup" in output["systemMessage"].lower()
 
 
 def test_codex_gap_hook_silent_for_non_session_start():
