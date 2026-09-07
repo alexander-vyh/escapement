@@ -194,4 +194,11 @@ for event in ("SessionStart", "PreCompact"):
         )
 PY
 
+# An installed hook Codex has not been trusted with is skipped silently, so a
+# clean install above says nothing about whether the hooks actually run.
+python3 "$REPO_DIR/scripts/codex_hook_trust.py" \
+  --plugin-id "$PLUGIN_ID" \
+  --hooks-json "$plugin_root/hooks/hooks.json" \
+  --config-toml "$CODEX_STATE_HOME/config.toml"
+
 echo "==> OK: Codex plugin refreshed and effective Beads routing skill verified."
