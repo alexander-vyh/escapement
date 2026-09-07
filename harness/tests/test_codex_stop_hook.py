@@ -504,5 +504,54 @@ def test_codex_plugin_recorder_persists_the_release(tmp_path, env_dirs):
     assert recorded["text"] == "stop"
 
 
+# ---------------------------------------------------------------------------
+# The documented fail-open must cover a missing decision core
+#
+# "Fail-open: any internal error allows the stop AND appends an incident
+# record" is the hook's own contract. A bare module-level import of the core
+# broke it in the one case that matters: the sibling missing from the shipped
+# package raised before main() could catch anything -- exit 1, no record, no
+# trace that the gate had failed rather than decided.
+# ---------------------------------------------------------------------------
+
+def _run_without_core(tmp_path, harness_root):
+    """Run the hook from a directory holding it and nothing else."""
+    isolated = tmp_path / "no-core"
+    isolated.mkdir()
+    script = isolated / "codex_stop_hook.py"
+    script.write_bytes((BIN / "codex_stop_hook.py").read_bytes())
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    return subprocess.run(
+        [sys.executable, "-B", str(script)],
+        input=json.dumps(_payload(cwd=str(tmp_path))),
+        capture_output=True,
+        text=True,
+        env={**env, "HARNESS_ROOT": str(harness_root)},
+    )
+
+
+def test_missing_core_allows_the_stop(tmp_path, env_dirs):
+    _thread_dir, harness_root = env_dirs
+    proc = _run_without_core(tmp_path, harness_root)
+    assert proc.returncode == 0, (
+        f"a missing core crashed instead of failing open: {proc.stderr}"
+    )
+    assert _decision(proc) is None, "a hook that cannot decide must not block"
+
+
+def test_missing_core_leaves_an_incident_record(tmp_path, env_dirs):
+    """The half that makes the failure visible rather than merely harmless."""
+    _thread_dir, harness_root = env_dirs
+    _run_without_core(tmp_path, harness_root)
+    incidents = harness_root / "incidents.jsonl"
+    assert incidents.is_file(), (
+        "the gate failed open silently; nothing distinguishes it from a gate "
+        "that ran and allowed"
+    )
+    records = [json.loads(line) for line in incidents.read_text().splitlines() if line]
+    reasons = [r.get("reason") for r in records]
+    assert "core_import_failed" in reasons, records
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
