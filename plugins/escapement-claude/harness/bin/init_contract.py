@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import sys
 import uuid
 
@@ -77,6 +78,49 @@ def is_trivial_oracle(command: str) -> "str | None":
     return None
 
 
+# Filesystem roots whose contents are routinely swept. A command that depends on
+# one of these is making a claim nobody can re-check later.
+_EPHEMERAL_ROOTS = ("/tmp/", "/private/tmp/", "/var/tmp/", "$TMPDIR", "${TMPDIR}")
+
+
+def is_evaporating_oracle(command: str) -> "str | None":
+    """Return a reason if `command` depends on a file under an ephemeral temp root.
+
+    Complements `is_trivial_oracle` (escapement-v3mj). A trivial oracle proves
+    nothing because it always exits 0; an *evaporating* one proves nothing because
+    the thing it ran is gone. Both leave a green exit code standing for an outcome
+    that cannot be re-checked, and the second is the more common failure in
+    practice: of the 190 live contracts, 32 point at a /tmp script and 30 of those
+    scripts no longer exist.
+
+    Deliberately narrow. It matches only tokens that START at a known ephemeral
+    root, so an in-repo path, a repo-relative script, `/usr/bin/env`, and a
+    filename that merely contains "tmp" are all still accepted. A screen that
+    rejected those would push authors toward a weaker oracle, which is worse than
+    no screen at all.
+    """
+    raw = (command or "").strip()
+    if not raw:
+        return None  # emptiness is is_trivial_oracle's business, not ours
+    try:
+        tokens = shlex.split(raw)
+    except ValueError:
+        tokens = raw.split()
+    for token in tokens:
+        stripped = token.strip("'\"")
+        for root in _EPHEMERAL_ROOTS:
+            if stripped.startswith(root):
+                return (
+                    f"evaporating oracle {command!r}: it depends on {stripped!r}, under a "
+                    "temporary directory that gets swept. A contract is the durable record "
+                    "of what 'done' meant, so its command must still run later — today 30 "
+                    "of the 32 contracts pointing at a /tmp script reference a file that no "
+                    "longer exists. Fix it by inlining the check into --verify, or by moving "
+                    "the script to a tracked path inside the repository and naming that."
+                )
+    return None
+
+
 def build_contract(
     goal: str,
     verify: str,
@@ -121,6 +165,11 @@ def main(argv: list[str]) -> int:
     trivial_reason = is_trivial_oracle(args.verify)
     if trivial_reason is not None:
         print(f"refusing to write contract: {trivial_reason}", file=sys.stderr)
+        return 2
+
+    evaporating_reason = is_evaporating_oracle(args.verify)
+    if evaporating_reason is not None:
+        print(f"refusing to write contract: {evaporating_reason}", file=sys.stderr)
         return 2
 
     harness_root = harness_home()
