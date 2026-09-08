@@ -92,3 +92,36 @@ def test_claim_fails_open_on_missing_evidence(tmp_path):
     assert code_touch.touched_code(str(tmp_path / "absent.jsonl"), cwd=str(repo)) is False
     # No cwd = no repo to judge against.
     assert code_touch.touched_code(_transcript(tmp_path, "sed -i '' s/x/y/ a.py"), cwd="") is False
+
+
+def test_codex_claim_the_gate_is_inert_when_no_transcript_is_supplied(tmp_path):
+    """Point-of-effect control for `codex-code-touch-detection=unsupported`.
+
+    The Codex Stop adapter calls `load_thread_state(thread_dir, recent_user_message=...)`
+    with no transcript path and no cwd (harness/bin/codex_stop_hook.py), because Codex
+    transcripts are not parsed. This reproduces that exact call and asserts the
+    consequence the claim states: touched_code is false, so a Codex session that
+    changed code still stops as conversational.
+
+    If someone later teaches the Codex adapter to supply a transcript, this control
+    fails and forces the claim to be re-stated rather than quietly going stale.
+    """
+    sys.path.insert(0, str(ROOT / "harness" / "bin"))
+    from would_block_stop import load_thread_state, would_block_stop  # noqa: E402
+
+    thread_dir = tmp_path / "thread"
+    thread_dir.mkdir()
+    state = load_thread_state(thread_dir, recent_user_message=None)
+
+    assert state["touched_code"] is False
+    assert would_block_stop(state) == ("allow", "conversational")
+
+
+def test_codex_stop_adapter_still_passes_no_transcript():
+    """The claim's premise, asserted against the adapter itself rather than prose."""
+    source = (ROOT / "harness" / "bin" / "codex_stop_hook.py").read_text(encoding="utf-8")
+    call = source.split("load_thread_state(", 1)[1].split(")", 1)[0]
+    assert "transcript_path" not in call, (
+        "the Codex adapter now supplies a transcript — code-touch detection may work "
+        "there, so codex-code-touch-detection=unsupported must be revisited"
+    )

@@ -109,9 +109,18 @@ EXPECTED_SUPPORT_CLAIMS = {
     "confirm-class-enforcement": "reserved",
     "deploy-execution": "informational",
     "code-touch-detection": "partial",
+    "codex-code-touch-detection": "unsupported",
     "codex-scheduled-continuation": "unsupported",
 }
 EXPECTED_SUPPORT_REASONS = {
+    "codex-code-touch-detection": (
+        "The no_declaration gate derives whether a session changed code from that "
+        "session's transcript. The Codex Stop adapter loads thread state without a "
+        "transcript path or cwd, because Codex transcripts are not parsed (nullable "
+        "path, undocumented format), so touched_code is always false there and a Codex "
+        "session that changed code still stops as conversational. The requirement is "
+        "enforced on Claude only."
+    ),
     "code-touch-detection": (
         "The no_declaration gate derives whether a session changed code from that "
         "session's transcript. Write, Edit, MultiEdit and NotebookEdit calls carry an "
