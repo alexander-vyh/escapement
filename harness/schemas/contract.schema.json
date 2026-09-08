@@ -34,6 +34,20 @@
       "type": "string",
       "format": "date-time"
     },
+    "runs": {
+      "type": "array",
+      "description": "Append-only record of verify runs, oldest first, capped at the 50 most recent. last_run is always the final entry. Exists so the contract can answer whether the oracle ever failed — without it a fail->fix->pass cycle erases the failure.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["exit_code", "timestamp"],
+        "properties": {
+          "exit_code": { "type": "integer" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "output_excerpt": { "type": "string", "maxLength": 4096 }
+        }
+      }
+    },
     "last_run": {
       "type": ["object", "null"],
       "additionalProperties": false,
