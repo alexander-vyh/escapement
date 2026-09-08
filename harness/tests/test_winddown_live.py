@@ -189,7 +189,10 @@ def test_fail_open_emits_judge_unavailable_signal(tmp_path, monkeypatch):
     This is RED until the production fail-open path emits the signal; the current
     code allows silently."""
     incidents = tmp_path / "incidents.jsonl"
-    monkeypatch.setattr(sh, "INCIDENTS_LOG", incidents)
+    # Redirect via the environment, which is what the hook actually reads
+    # (escapement-jjz8). Patching a module constant used to be necessary because
+    # the log path was frozen at import; it no longer is, and the constant is gone.
+    monkeypatch.setenv("HARNESS_ROOT", str(tmp_path))
     # Avoid touching the real .beads/.gate-signal store from the bridge.
     monkeypatch.setenv("GATE_SIGNAL_FALLBACK_DIR", str(tmp_path / "sig"))
 

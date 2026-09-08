@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1215 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1238 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -53,7 +53,19 @@ from execution_stop_adapter import decide_task_mode  # noqa: E402
 # to where this code is installed — so dev-copy and installed-copy share state
 # and nothing is written into a repo working tree.
 HARNESS_ROOT = harness_home()
-INCIDENTS_LOG = HARNESS_ROOT / "incidents.jsonl"
+
+
+def incidents_log() -> pathlib.Path:
+    """The incidents log, resolved PER CALL against the current harness root.
+
+    Deliberately not a module-level constant (escapement-jjz8). A constant is
+    bound when the module is first imported, so any later change to HARNESS_ROOT
+    — which is exactly how the test suite redirects state — was ignored, and the
+    hook kept appending to the operator's real `~/.claude/harness/incidents.jsonl`.
+    That is how 34% of the log's rows became test fixtures (`x`, `session`, ``,
+    `no-beads`, `empty`), which makes every metric computed over the log unsound.
+    """
+    return harness_home() / "incidents.jsonl"
 
 RESUMPTION_PROMPT = (
     "continuation-harness: {reason}. You are NOT done and you are NOT stopping. "
@@ -921,8 +933,9 @@ def _record_gate_signal(decision: str, reason: str, session_id: str, notes: str 
 
 def _log_incident(record: dict) -> None:
     try:
-        INCIDENTS_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with INCIDENTS_LOG.open("a") as f:
+        log = incidents_log()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a") as f:
             f.write(json.dumps(record) + "\n")
     except OSError:
         pass  # Don't fail the hook on logging error.
@@ -1100,9 +1113,19 @@ def main() -> int:
         if decision == "block":
             display = _TASK_MODE_DISPLAY.get(reason) or RESUMPTION_PROMPT.format(reason=reason)
             print(json.dumps({"decision": "block", "reason": display}))
-        return 0
+            return 0
+        # A drained queue is TASK STATE, not completion proof (escapement-b81u).
+        # This used to `return 0` unconditionally, so a scoped task-mode session
+        # stopped the moment its beads closed and the contract gate below was never
+        # consulted — a session could declare an outcome, never verify it, close its
+        # beads and stop clean. `_task_mode_in_effect`'s own docstring already claims
+        # a session "falls through to the normal contract gate, which still blocks a
+        # red contract"; that was true only for scopeless records. Fall through now,
+        # so the outcome check applies to the sessions that actually do the work.
+        # Blast radius is bounded by would_block_stop: with no contract it still
+        # returns ("allow", "conversational").
 
-    # No task mode: contract gate.
+    # Contract gate.
     # Per continuation-harness spec, the three Stop-permission paths are universal:
     # verification_passed, wakeup_registered, user_released. Sessions that never
     # declared a contract reach those checks via would_block_stop and fall through

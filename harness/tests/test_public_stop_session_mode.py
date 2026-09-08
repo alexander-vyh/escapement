@@ -106,7 +106,9 @@ def _public_stop_with_session_mode(
     fakebin = _write_fake_bd(tmp_path, "closed")
     monkeypatch.setenv("PATH", f"{fakebin}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setattr(stop_hook, "HARNESS_ROOT", root)
-    monkeypatch.setattr(stop_hook, "INCIDENTS_LOG", root / "incidents.jsonl")
+    # The incidents log resolves per call from the environment (escapement-jjz8),
+    # so redirecting the env is what keeps this test out of the operator's log.
+    monkeypatch.setenv("HARNESS_ROOT", str(root))
     monkeypatch.setattr(stop_hook.session_isolation, "write_checkout", lambda *a: None)
 
     transcript_path = ""
