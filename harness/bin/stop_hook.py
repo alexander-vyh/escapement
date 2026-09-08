@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1238 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1246 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -641,6 +641,7 @@ def _winddown_override(
     *,
     work_check=None,
     judge=None,
+    session_id: str = "",
 ) -> Optional[str]:
     """If a `conversational` stop is really a wind-down offer with reversible work
     remaining, return the recovery display to BLOCK with; else None.
@@ -691,7 +692,11 @@ def _winddown_override(
         # signal so the outage is visible in the half-life review corpus, never silent).
         _log_incident({
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "session_id": "",
+            # Was hardcoded "" (escapement-jjz8). A fail-open that cannot be
+            # attributed to a session is unauditable: 4,822 of these rows exist and
+            # NONE can be traced, so a real judge outage in production is
+            # indistinguishable from a test run. Fail open, but say who.
+            "session_id": session_id,
             "decision": "allow",
             "reason": "winddown_judge_unavailable",
             "was_correct": None,
@@ -1175,7 +1180,8 @@ def main() -> int:
             # wind-down-shaped final message with a clean bd queue but reversible git
             # work. Run the judge on the wakeup path too — same as conversational.
             winddown_display = _winddown_override(
-                "wakeup_registered", transcript_path, cwd_wk, thread_dir
+                "wakeup_registered", transcript_path, cwd_wk, thread_dir,
+                session_id=session_id,
             )
             if winddown_display:
                 decision, reason = "block", "winddown_offer_work_remains"
@@ -1188,7 +1194,9 @@ def main() -> int:
             cwd_now = os.getcwd()
         except OSError:
             cwd_now = ""
-        winddown_display = _winddown_override(reason, transcript_path, cwd_now, thread_dir)
+        winddown_display = _winddown_override(
+            reason, transcript_path, cwd_now, thread_dir, session_id=session_id
+        )
         if winddown_display:
             decision, reason = "block", "winddown_offer_work_remains"
 

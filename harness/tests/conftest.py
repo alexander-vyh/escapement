@@ -17,7 +17,9 @@ fixture and therefore wins.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 
 import pytest
 
@@ -37,28 +39,58 @@ def _isolated_harness_root(tmp_path_factory, monkeypatch):
     yield root
 
 
-@pytest.fixture(autouse=True)
-def _fail_if_operator_log_written():
-    """Independent guard: assert the real incidents log did not grow during the test.
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 
-    Deliberately does NOT trust the redirection above — it measures the operator's
-    actual file, so a future change that reintroduces a hardcoded path or a new
-    unredirected subprocess fails here loudly instead of silently polluting the log
-    for months. This is the negative control the previous instrument never had.
+
+@pytest.fixture(autouse=True)
+def _fail_if_operator_log_gets_fixture_rows():
+    """Independent guard: no FIXTURE-shaped row may reach the operator's real log.
+
+    Deliberately does not trust the redirection above — it reads the operator's
+    actual file, so a change that reintroduces a hardcoded path or adds a new
+    unredirected subprocess fails loudly here instead of polluting the log for
+    months (which is exactly what happened: 34% of its rows).
+
+    It attributes rows rather than comparing sizes. Other live agent sessions on
+    this machine write real decisions to the same log while the suite runs, so a
+    byte-delta check reports those as leaks — a false positive that would train
+    everyone to ignore this guard. A row whose session_id is a UUID came from a
+    real session and is none of our business; a non-UUID one (``x``, ``session``,
+    ``""``) came from a test.
+
+    Known limit, named rather than hidden: a test that leaks while passing a
+    UUID-shaped session id is invisible here. Nothing in the suite does that today.
     """
     real = os.path.expanduser("~/.claude/harness/incidents.jsonl")
 
-    def size() -> int:
+    def line_count() -> int:
         try:
-            return os.path.getsize(real)
+            with open(real, "rb") as handle:
+                return sum(1 for _ in handle)
         except OSError:
-            return -1
+            return 0
 
-    before = size()
+    before = line_count()
     yield
-    after = size()
-    assert after == before, (
-        f"this test wrote to the operator's real incidents log ({real}): "
-        f"{before} -> {after} bytes. Redirect HARNESS_ROOT for whatever spawns the "
-        "hook; production metrics are computed over that file."
+    try:
+        with open(real, encoding="utf-8", errors="replace") as handle:
+            appended = handle.readlines()[before:]
+    except OSError:
+        return
+
+    leaked = []
+    for line in appended:
+        try:
+            row = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not _UUID_RE.match(str(row.get("session_id") or "")):
+            leaked.append(row)
+
+    assert not leaked, (
+        f"this test wrote {len(leaked)} fixture-shaped row(s) into the operator's real "
+        f"incidents log ({real}): {leaked[:3]}. Redirect HARNESS_ROOT for whatever "
+        "spawns the hook — production metrics are computed over that file."
     )
