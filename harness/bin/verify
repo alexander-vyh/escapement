@@ -45,15 +45,41 @@ import json
 import sys
 
 path, exit_code, timestamp, out_path = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+
+# Keep the tail of the history bounded: a long-lived contract must not grow
+# without limit, and the recent runs are the ones that answer "is this oracle
+# still biting?".
+MAX_RUNS = 50
+
 with open(out_path) as f:
     excerpt = f.read(4096)
 with open(path) as f:
     c = json.load(f)
-c["last_run"] = {
+
+run = {
     "exit_code": exit_code,
     "timestamp": timestamp,
     "output_excerpt": excerpt,
 }
+
+# `last_run` stays the MOST RECENT run, because the Stop gate reads it
+# (would_block_stop._verification_passed_this_turn). History is measurement,
+# never policy — adding it must not move what the gate sees.
+c["last_run"] = run
+
+# `runs` is the append-only record (escapement-5xlj). Without it a fail -> fix ->
+# pass cycle erases the failure, so the contract file cannot answer whether an
+# oracle ever actually failed — which makes the green rate across contracts a
+# tautology and leaves escapement-v3mj's red-rate trigger unmeasurable.
+# Contracts written before this change have no `runs` key; 191 such contracts
+# exist, so treat a missing or malformed value as an empty history rather than
+# failing the verify.
+history = c.get("runs")
+if not isinstance(history, list):
+    history = []
+history.append(run)
+c["runs"] = history[-MAX_RUNS:]
+
 with open(path, "w") as f:
     json.dump(c, f, indent=2)
 PY
