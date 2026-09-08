@@ -219,12 +219,18 @@ def would_block_stop(thread_state: dict) -> Tuple[str, str]:
         # generic "unverified" message (move 1b, escapement-e9v.2).
         return ("block", "verification_suppressed")
     if contract is None:
-        # No contract = no committed task in flight = conversational. Stopping is
-        # free (no magic word needed). This deliberately relaxes the old "no
-        # contract → block" rule, which nagged every conversational turn. Teeth
-        # remain: a DECLARED-but-unverified contract still blocks below, ready bd
-        # work still blocks in task mode, and (move 1b) a suppressed-green
-        # contract blocks above with a distinct reason.
+        if thread_state.get("touched_code"):
+            # This session CHANGED CODE and never declared what the change was for
+            # (escapement-pip5). The requirement is derived from the session's own
+            # transcript, never asserted by the agent — see the derive-not-assert
+            # law above. The old self-declared exemption was measured: verified
+            # stops fell from 20.5% of real decisions in May 2026 to 0% in August.
+            return ("block", "no_declaration")
+        # Touched no code = nothing shipped = conversational. Stopping is free (no
+        # magic word needed), and this population is the one the reconciler labels
+        # 5,528 correct against 4 wrong — it must pay no tax at all. Teeth remain:
+        # a DECLARED-but-unverified contract still blocks below, ready bd work
+        # still blocks in task mode, and a suppressed-green contract blocks above.
         return ("allow", "conversational")
     # Contract PRESENT but not verified: either a declared dict that didn't pass,
     # OR a malformed/unreadable contract.json surfaced as a non-dict marker by
@@ -260,21 +266,38 @@ def thread_dir_for_session(
 def load_thread_state(
     thread_dir: pathlib.Path,
     recent_user_message: Optional[str] = None,
+    transcript_path: Optional[str] = None,
+    cwd: Optional[str] = None,
 ) -> dict:
     """Load thread state from filesystem. Convenience for Stop-hook adapter.
 
     A contract.json that EXISTS but is unparseable is surfaced as a non-dict
     marker (not None) so the gate fails SAFE (blocks) on a corrupt contract,
     rather than treating it as 'no contract' and allowing a conversational stop.
+
+    `touched_code` is DERIVED from the session's own transcript (escapement-pip5),
+    never asserted. It is False whenever the transcript or cwd is unavailable, so
+    missing evidence can never manufacture a block.
     """
     contract_path = thread_dir / "contract.json"
     contract = _load_json(contract_path)
     if contract is None and contract_path.exists():
         contract = "__unreadable_contract__"  # present-but-corrupt → fail safe (block)
+    touched = False
+    if contract is None and transcript_path and cwd:
+        # Only worth computing when there is no contract — that is the only branch
+        # whose decision depends on it, and the scan costs a transcript read.
+        try:
+            import code_touch  # local import: keeps the pure gate import-light
+
+            touched = code_touch.touched_code(transcript_path, cwd)
+        except Exception:  # noqa: BLE001 — fail OPEN, never crash the Stop gate
+            touched = False
     return {
         "contract": contract,
         "scheduled": _load_json(thread_dir / "scheduled.json"),
         "recent_user_message": recent_user_message,
+        "touched_code": touched,
     }
 
 

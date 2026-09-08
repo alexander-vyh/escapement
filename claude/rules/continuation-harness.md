@@ -10,6 +10,13 @@ You may Stop iff one of these is true:
 2. **Wakeup registered.** You called `ScheduleWakeup` for a future-dated check-in. The wakeup entry exists in your session's thread dir (`~/.claude/harness/threads/{session_id}/scheduled.json`, keyed by `CLAUDE_CODE_SESSION_ID`).
 3. **User released.** The user typed `stop`, `end here`, `done for now`, `that's enough`, `we're done`, `halt`, etc.
 
+**A session that changed code must have declared an outcome.** If you edited a tracked,
+non-gitignored file inside a git tree and no contract exists, Stop is blocked with
+`no_declaration`. The requirement is *derived* from your own transcript, never asked for
+up front and never self-declared — so a conversation, a read-only investigation, or a
+session that only wrote to `/tmp` or a scratchpad is never gated. Declare the outcome
+(`derive_contract.py --bead <id>`, else `init_contract.py`), or revert the edits.
+
 If none of these holds, Stop is blocked with a constructive resumption prompt. This is
 a real control transition: the attempted turn ends and the agent must resume through a
 new turn. It can therefore consume time, tokens, and user attention; do not describe it
@@ -172,6 +179,8 @@ confirm-class-enforcement=reserved
 confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
 deploy-execution=informational
 deploy-execution-reason=Repository deploy metadata is surfaced as outcome context and does not execute or independently authorize a deployment command.
+code-touch-detection=partial
+code-touch-detection-reason=The no_declaration gate derives whether a session changed code from that session's transcript. Write, Edit, MultiEdit and NotebookEdit calls carry an explicit path and are detected exactly; Bash-mediated writes (sed -i, redirects, heredocs, tee, cp/mv, patch, git apply) are recognised by pattern and are high-recall but not exhaustive, so a sufficiently indirect write can evade detection. A missing transcript, missing cwd, or unavailable git all resolve to did-not-touch-code, so the gate fails open by design.
 codex-scheduled-continuation=unsupported
 codex-scheduled-continuation-reason=Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live.
 -->

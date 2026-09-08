@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1246 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1272 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -135,6 +135,21 @@ _TASK_MODE_DISPLAY: dict[str, str] = {
 }
 
 
+
+_NO_DECLARATION_DISPLAY = (
+    "continuation-harness: no_declaration. This session CHANGED CODE in the repository "
+    "but never declared what the change was for, so there is nothing to check the code "
+    "against and no way to tell whether it worked. A goal is required once you edit "
+    "tracked files — it is derived from what you actually did, not asked for up front, "
+    "so conversations and read-only investigation are never gated. Escape paths: "
+    "(1) if a bead covers this work, declare its oracle once in the bead's acceptance "
+    "criteria as a fenced ```verify block and run "
+    "`python3 ~/.claude/harness/bin/derive_contract.py --bead <id>`; "
+    "(2) otherwise run `python3 ~/.claude/harness/bin/init_contract.py --goal "
+    "\"<what a user can observe>\" --verify \"<command whose exit 0 proves it>\"`, then "
+    "`~/.claude/harness/bin/verify`; (3) if the edits were a mistake, revert them and "
+    "stop; (4) the user can always release you by saying 'stop'."
+)
 
 _VERIFICATION_SUPPRESSED_DISPLAY = (
     "continuation-harness: verification_suppressed. Your contract's verify command reached "
@@ -1138,7 +1153,16 @@ def main() -> int:
     # (no contract.json → silent allow) was an unspec'd inversion of that invariant
     # and made the gate's coverage proportional to whether the agent remembered to
     # call init_contract.py — a presence-only check the gate-design rule forbids.
-    state = load_thread_state(thread_dir, recent_user_message=recent_user_message)
+    try:
+        _cwd_for_touch = os.getcwd()
+    except OSError:
+        _cwd_for_touch = ""
+    state = load_thread_state(
+        thread_dir,
+        recent_user_message=recent_user_message,
+        transcript_path=transcript_path,
+        cwd=_cwd_for_touch,
+    )
     decision, reason = would_block_stop(state)
 
     # B3 fix + Fix 1: after verification_passed, check for remaining work in cwd —
@@ -1220,6 +1244,8 @@ def main() -> int:
             display = _IMPLICIT_QUEUE_DISPLAY
         elif reason == "verification_suppressed":
             display = _VERIFICATION_SUPPRESSED_DISPLAY
+        elif reason == "no_declaration":
+            display = _NO_DECLARATION_DISPLAY
         else:
             display = RESUMPTION_PROMPT.format(reason=reason)
         # bead e9v.4: if this red boundary is shared with a live concurrent session,

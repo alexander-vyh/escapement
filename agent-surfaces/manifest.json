@@ -66,6 +66,11 @@
       "reason": "Repository deploy metadata is surfaced as outcome context and does not execute or independently authorize a deployment command."
     },
     {
+      "id": "code-touch-detection",
+      "status": "partial",
+      "reason": "The no_declaration gate derives whether a session changed code from that session's transcript. Write, Edit, MultiEdit and NotebookEdit calls carry an explicit path and are detected exactly; Bash-mediated writes (sed -i, redirects, heredocs, tee, cp/mv, patch, git apply) are recognised by pattern and are high-recall but not exhaustive, so a sufficiently indirect write can evade detection. A missing transcript, missing cwd, or unavailable git all resolve to did-not-touch-code, so the gate fails open by design."
+    },
+    {
       "id": "codex-scheduled-continuation",
       "status": "unsupported",
       "reason": "Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live."

@@ -108,9 +108,19 @@ EXPECTED_SUPPORT_CLAIMS = {
     "merge-green-status": "unsupported",
     "confirm-class-enforcement": "reserved",
     "deploy-execution": "informational",
+    "code-touch-detection": "partial",
     "codex-scheduled-continuation": "unsupported",
 }
 EXPECTED_SUPPORT_REASONS = {
+    "code-touch-detection": (
+        "The no_declaration gate derives whether a session changed code from that "
+        "session's transcript. Write, Edit, MultiEdit and NotebookEdit calls carry an "
+        "explicit path and are detected exactly; Bash-mediated writes (sed -i, "
+        "redirects, heredocs, tee, cp/mv, patch, git apply) are recognised by pattern "
+        "and are high-recall but not exhaustive, so a sufficiently indirect write can "
+        "evade detection. A missing transcript, missing cwd, or unavailable git all "
+        "resolve to did-not-touch-code, so the gate fails open by design."
+    ),
     "merge-green-status": (
         "The merge authorization hook resolves repository-declared merge authority but "
         "does not observe pull-request check or green status."

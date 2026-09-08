@@ -43,7 +43,11 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from init_contract import build_contract, is_trivial_oracle  # noqa: E402
+from init_contract import (  # noqa: E402
+    build_contract,
+    is_evaporating_oracle,
+    is_trivial_oracle,
+)
 from would_block_stop import InvalidActorIdentity, harness_home, thread_dir_for_session  # noqa: E402
 
 # A fenced block whose info string is exactly `verify` (optionally surrounded by
@@ -93,6 +97,14 @@ def derive_contract(bead: dict, *, session_id: "str | None" = None) -> dict:
         raise OracleNotDeclared(
             f"bead {bead.get('id', '<unknown>')!r} ```verify oracle is not a real oracle: "
             f"{trivial_reason}"
+        )
+    # Same screen as the hand-authored path (escapement-v3mj), so "a real oracle"
+    # has ONE definition regardless of which path wrote the contract.
+    evaporating_reason = is_evaporating_oracle(oracle)
+    if evaporating_reason is not None:
+        raise OracleNotDeclared(
+            f"bead {bead.get('id', '<unknown>')!r} ```verify oracle will not survive: "
+            f"{evaporating_reason}"
         )
 
     goal = (bead.get("title") or "").strip()
