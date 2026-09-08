@@ -74,6 +74,8 @@ confirm-class-enforcement=reserved
 confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
 deploy-execution=informational
 deploy-execution-reason=Repository deploy metadata is surfaced as outcome context and does not execute or independently authorize a deployment command.
+code-touch-detection=partial
+code-touch-detection-reason=The no_declaration gate derives whether a session changed code from that session's transcript. Write, Edit, MultiEdit and NotebookEdit calls carry an explicit path and are detected exactly; Bash-mediated writes (sed -i, redirects, heredocs, tee, cp/mv, patch, git apply) are recognised by pattern and are high-recall but not exhaustive, so a sufficiently indirect write can evade detection. A missing transcript, missing cwd, or unavailable git all resolve to did-not-touch-code, so the gate fails open by design.
 codex-scheduled-continuation=unsupported
 codex-scheduled-continuation-reason=Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live.
 -->
