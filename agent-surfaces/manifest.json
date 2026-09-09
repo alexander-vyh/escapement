@@ -194,7 +194,7 @@
       "hosts": {
         "codex": {
           "status": "unsupported",
-          "unsupported_reason": "Claude-payload-shaped (transcript layout, ScheduleWakeup, task-mode rungs). Codex HAS a GA Stop event (docs, published schema stop.command, and a captured payload in harness/tests/fixtures/codex_stop_payload.json); Codex Stop gating is served by harness/bin/codex_stop_hook.py via the user-layer ~/.codex/hooks.json. Parity port tracked as escapement-vjv2."
+          "unsupported_reason": "Claude-payload-shaped (transcript layout, ScheduleWakeup, task-mode rungs). Codex HAS a GA Stop event (docs, published schema stop.command, and a captured payload in harness/tests/fixtures/codex_stop_payload.json); the plugin-owned harness/bin/codex_stop_hook.py serves Codex Stop gating through the shared decision core. The Claude-specific scheduling, task-mode, and judge rungs remain unsupported."
         },
         "claude": {
           "status": "ready",
@@ -403,7 +403,7 @@
     },
     {
       "id": "codex_final_response_gap",
-      "description": "Codex SessionStart advisory for the missing final-response Stop hook.",
+      "description": "Codex SessionStart advisory for the remaining continuation gaps after the in-session Stop gate.",
       "source": "claude/hooks/codex_final_response_gap.py",
       "hosts": {
         "codex": {

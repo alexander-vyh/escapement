@@ -390,6 +390,7 @@ def _render_codex_plugin_hooks(manifest: dict[str, Any]) -> str:
 
 def _render_codex_plugin_manifest(identity: dict[str, Any]) -> str:
     mission = identity["mission"]
+    product = identity["product_interface"]
     payload = {
         "name": "escapement",
         "version": "1.0.0",
@@ -401,14 +402,7 @@ def _render_codex_plugin_manifest(identity: dict[str, Any]) -> str:
         "homepage": "https://github.com/alexander-vyh/escapement",
         "repository": "https://github.com/alexander-vyh/escapement",
         "license": "GPL-3.0-or-later",
-        "keywords": [
-            "workflow",
-            "oracle",
-            "tdd",
-            "beads",
-            "gates",
-            "agentic",
-        ],
+        "keywords": product["keywords"],
         "skills": "./skills/",
         # Declare hooks explicitly rather than rely on Codex's undocumented default
         # discovery of hooks/hooks.json (escapement-z506). Verified accepted by
@@ -419,26 +413,12 @@ def _render_codex_plugin_manifest(identity: dict[str, Any]) -> str:
         "interface": {
             "displayName": "Escapement",
             "shortDescription": identity["short_description"],
-            "longDescription": (
-                f"{mission} Oracle-discipline gates block implementation-echo "
-                "tests and oracle downgrades. TDD enforcement requires a Test "
-                "Oracle Brief before writing code. Beads provides durable issue "
-                "tracking. Works alongside your existing workflow."
-            ),
+            "longDescription": f"{mission} {product['long_description']}",
             "developerName": "alexander-vyh",
             "category": "Developer Tools",
-            "capabilities": [
-                "Workflow gates",
-                "TDD enforcement",
-                "Issue tracking",
-                "Oracle discipline",
-            ],
+            "capabilities": identity["capabilities"],
             "websiteURL": "https://github.com/alexander-vyh/escapement",
-            "defaultPrompt": [
-                "Show me what work is ready in this repo.",
-                "Check if I have a Test Oracle Brief before writing code.",
-                "What Escapement gates are active in this session?",
-            ],
+            "defaultPrompt": product["starter_prompts"],
             "brandColor": "#2D6A4F",
         },
     }
@@ -540,10 +520,11 @@ def _render_claude_plugin_hooks(manifest: dict[str, Any]) -> str:
 
 
 def _render_claude_plugin_manifest(identity: dict[str, Any]) -> str:
+    product = identity["product_interface"]
     payload = {
         "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
         "name": "escapement",
-        "description": identity["mission"],
+        "description": f"{identity['short_description']} {identity['mission']}",
         # NO `version` field — deliberate (escapement-9mki). Claude Code resolves an
         # unversioned plugin's version from the git commit SHA of the git-subdir
         # source, so every commit to main is a new version and `claude plugin update`
@@ -556,13 +537,7 @@ def _render_claude_plugin_manifest(identity: dict[str, Any]) -> str:
         "repository": "https://github.com/alexander-vyh/escapement",
         "homepage": "https://github.com/alexander-vyh/escapement",
         "license": "GPL-3.0-or-later",
-        "keywords": [
-            "workflow",
-            "beads",
-            "openspec",
-            "tdd",
-            "continuation-harness",
-        ],
+        "keywords": product["keywords"],
     }
     return json.dumps(payload, indent=2) + "\n"
 
@@ -571,13 +546,14 @@ def _render_claude_marketplace(identity: dict[str, Any]) -> str:
     payload = {
         "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
         "name": "escapement",
-        "description": identity["mission"],
+        "description": f"{identity['short_description']} {identity['mission']}",
         "owner": {"name": "alexander-vyh"},
         "plugins": [
             {
                 "name": "escapement",
                 "description": (
-                    f"{identity['mission']} Always-on rules are injected via a "
+                    f"{identity['short_description']} {identity['mission']} "
+                    "Always-on rules are injected via a "
                     "SessionStart hook. Unversioned, so `claude "
                     "plugin update escapement@escapement` tracks main automatically; "
                     "scripts/plugin-update.sh forces a refresh and also preserves "
