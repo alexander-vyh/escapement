@@ -82,6 +82,10 @@ CAPABILITY_SURFACES = (
     Path("README.md"),
     Path("docs/deck.html"),
 )
+PRODUCT_NARRATIVE_SURFACES = (
+    Path("docs/PRODUCT_TOUR.md"),
+    Path("docs/EVIDENCE.md"),
+)
 PUBLIC_IDENTITY_SURFACES = (
     Path("README.md"),
     Path("docs/VOCABULARY.md"),
@@ -153,6 +157,7 @@ SUPPORT_CLAIM_SURFACES = (
 SUPPORT_NARRATIVE_SURFACES = (
     *SUPPORT_CLAIM_SURFACES,
     Path("agent-surfaces/onboarding/hosts/codex.md"),
+    *PRODUCT_NARRATIVE_SURFACES,
 )
 ADAPTER_MAPPING_START = "<!-- escapement:adapter-mapping:start -->"
 ADAPTER_MAPPING_END = "<!-- escapement:adapter-mapping:end -->"
@@ -295,6 +300,9 @@ def _false_support_claim(sentence: str) -> bool:
         for evidence in (
             "required check",
             "check successful",
+            "successful check",
+            "healthy",
+            "unhealthy",
             "pr status",
             "pull request status",
         )
@@ -314,6 +322,9 @@ def _false_support_claim(sentence: str) -> bool:
             "verify",
             "check",
             "report",
+            "guarantee",
+            "stop",
+            "reach main",
         )
     )
     merge_is_explicit_limitation = any(
@@ -340,19 +351,24 @@ def _false_support_claim(sentence: str) -> bool:
 
     confirm_topic = any(
         topic in normalized
-        for topic in ("confirm_class", "confirmation class", "confirmation category")
+        for topic in (
+            "confirm_class",
+            "confirmation class",
+            "confirmation category",
+            "confirmation tier",
+        )
     )
     confirm_scope = "confirm_class" in normalized or bool(
         re.search(
             r"\b(?:every|configured|stored|repository|non-empty)\s+"
-            r"(?:\w+\s+){0,2}confirmation (?:class|category)\b",
+            r"(?:\w+\s+){0,2}confirmation (?:class|category|tier)\b",
             normalized,
         )
     )
     confirm_effect_text = normalized.replace("confirm_class", "")
     confirm_effect = bool(
         re.search(
-            r"\b(?:demand|honor|ask|confirm|required|enforce|block|prevent)\w*\b",
+            r"\b(?:demand|honor|ask|confirm|required|enforce|block|prevent|pause|approval)\w*\b",
             confirm_effect_text,
         )
     ) or "before merge" in confirm_effect_text
@@ -380,6 +396,8 @@ def _false_support_claim(sentence: str) -> bool:
             "deployment configuration",
             "repository policy",
             "repository declaration",
+            "repository configuration",
+            "repository settings",
         )
     )
     deploy_effect = any(
@@ -393,7 +411,7 @@ def _false_support_claim(sentence: str) -> bool:
             "trigger",
             "automatically",
         )
-    )
+    ) or bool(re.search(r"\bdeploy(?:s|ed|ing)?\b", normalized))
     deploy_is_explicit_limitation = any(
         limitation in normalized
         for limitation in (
@@ -421,6 +439,8 @@ def _false_support_claim(sentence: str) -> bool:
             "concludes",
             "end the session",
             "stop",
+            "thread",
+            "finished session",
         )
     )
     codex_effect = any(
@@ -434,6 +454,8 @@ def _false_support_claim(sentence: str) -> bool:
             "reject",
             "resume",
             "reopen",
+            "re-enter",
+            "revive",
         )
     )
     codex_is_explicit_limitation = any(
@@ -627,6 +649,23 @@ def validate_renderable_identity(identity: dict[str, Any]) -> list[str]:
         ):
             errors.append(f"{identity_path}: {field} must be a non-empty string list")
 
+    product = identity.get("product_interface")
+    if not isinstance(product, dict):
+        errors.append(f"{identity_path}: product_interface must be an object")
+        product = {}
+    if not isinstance(product.get("long_description"), str) or not product.get(
+        "long_description", ""
+    ).strip():
+        errors.append(f"{identity_path}: product_interface.long_description must be non-empty")
+    for field in ("keywords", "starter_prompts"):
+        value = product.get(field)
+        if not isinstance(value, list) or not value or not all(
+            isinstance(item, str) and item.strip() for item in value
+        ):
+            errors.append(
+                f"{identity_path}: product_interface.{field} must be a non-empty string list"
+            )
+
     adapters = identity.get("current_adapters")
     if not isinstance(adapters, dict) or not adapters:
         errors.append(f"{identity_path}: current_adapters must be a non-empty object")
@@ -644,6 +683,7 @@ def validate_renderable_identity(identity: dict[str, Any]) -> list[str]:
         _flatten_core_field(identity.get(field))
         for field in ("mission", "short_description", "operating_model", "principles")
     )
+    core = f"{core}\n{_flatten_core_field(product.get('long_description'))}"
     for token in FORBIDDEN_CORE_TOKENS:
         if _adapter_token_pattern(token).search(core):
             errors.append(f"{identity_path}: core identity names replaceable adapter {token}")
@@ -765,7 +805,7 @@ def validate_identity_surfaces(
                     f"{relative.as_posix()}: core identity names replaceable adapter {token}"
                 )
 
-    for relative in PUBLIC_IDENTITY_SURFACES:
+    for relative in (*PUBLIC_IDENTITY_SURFACES, *PRODUCT_NARRATIVE_SURFACES):
         text = read_surface(relative)
         if text is None:
             errors.append(f"{relative.as_posix()}: public identity surface is missing")

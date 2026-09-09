@@ -10,10 +10,10 @@
   "repository": "https://github.com/alexander-vyh/escapement",
   "license": "GPL-3.0-or-later",
   "keywords": [
+    "agentic-delivery",
+    "outcome-verification",
     "workflow",
     "oracle",
-    "tdd",
-    "beads",
     "gates",
     "agentic"
   ],
@@ -21,21 +21,26 @@
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Escapement",
-    "shortDescription": "A client-neutral control layer for directing agent capacity within delegated authority, verifying outcomes independently, and completing authorized delivery.",
-    "longDescription": "Escapement converts available agent capacity plus delegated authority into verified, delivered outcomes while reserving human attention for consequential choices. Oracle-discipline gates block implementation-echo tests and oracle downgrades. TDD enforcement requires a Test Oracle Brief before writing code. Beads provides durable issue tracking. Works alongside your existing workflow.",
+    "shortDescription": "The control system for agentic delivery. Delegate outcomes. Get verified delivery.",
+    "longDescription": "Escapement converts available agent capacity plus delegated authority into verified, delivered outcomes while reserving human attention for consequential choices. Delegate a bounded outcome. Escapement structures the work, allocates isolated execution, challenges the oracle, keeps reversible work moving, and follows the repository's authorized delivery path. Current host limitations stay explicit.",
     "developerName": "alexander-vyh",
     "category": "Developer Tools",
     "capabilities": [
-      "Workflow gates",
-      "TDD enforcement",
-      "Issue tracking",
-      "Oracle discipline"
+      "Intent and authority",
+      "Design and specification",
+      "Executable dependency-aware work breakdown",
+      "Capacity allocation",
+      "Isolated execution",
+      "Action-local continuation and repair",
+      "Independent outcome verification",
+      "Authorized landing and delivery",
+      "Learning and feedback"
     ],
     "websiteURL": "https://github.com/alexander-vyh/escapement",
     "defaultPrompt": [
+      "Help me turn this bounded outcome into verified delivery.",
       "Show me what work is ready in this repo.",
-      "Check if I have a Test Oracle Brief before writing code.",
-      "What Escapement gates are active in this session?"
+      "Which Escapement capabilities and limits are active in this session?"
     ],
     "brandColor": "#2D6A4F"
   }

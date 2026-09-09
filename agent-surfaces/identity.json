@@ -1,7 +1,23 @@
 {
   "version": 1,
   "mission": "Escapement converts available agent capacity plus delegated authority into verified, delivered outcomes while reserving human attention for consequential choices.",
-  "short_description": "A client-neutral control layer for directing agent capacity within delegated authority, verifying outcomes independently, and completing authorized delivery.",
+  "short_description": "The control system for agentic delivery. Delegate outcomes. Get verified delivery.",
+  "product_interface": {
+    "long_description": "Delegate a bounded outcome. Escapement structures the work, allocates isolated execution, challenges the oracle, keeps reversible work moving, and follows the repository's authorized delivery path. Current host limitations stay explicit.",
+    "keywords": [
+      "agentic-delivery",
+      "outcome-verification",
+      "workflow",
+      "oracle",
+      "gates",
+      "agentic"
+    ],
+    "starter_prompts": [
+      "Help me turn this bounded outcome into verified delivery.",
+      "Show me what work is ready in this repo.",
+      "Which Escapement capabilities and limits are active in this session?"
+    ]
+  },
   "operating_model": [
     "Intent and delegated authority",
     "Design",
