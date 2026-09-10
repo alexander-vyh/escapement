@@ -18,12 +18,13 @@ both advertised by `origin/HEAD` and fetched from its advertised branch.
 ### Requirement: Eligible primary checkout fast-forwards safely
 
 Escapement SHALL update an eligible primary checkout through a normal fast-forward
-of its checked-out default branch and SHALL verify the resulting branch, commit,
+of its checked-out default branch or a local branch whose upstream is exactly the
+resolved remote default. It SHALL verify the resulting branch identity, commit,
 worktree cleanliness, and file state.
 
 #### Scenario: Clean default branch is behind
 
-- **WHEN** the primary checkout is clean, on the advertised default branch, and its HEAD is an ancestor of the exact remote default SHA
+- **WHEN** the primary checkout is clean, on the advertised default branch or a branch tracking that exact remote default, and its HEAD is an ancestor of the exact remote default SHA
 - **THEN** its branch, HEAD, index, and files advance to that exact SHA
 
 #### Scenario: Clean default branch is current
@@ -46,9 +47,9 @@ update a checked-out branch ref behind its worktree.
 - **WHEN** primary HEAD is not an ancestor of the exact remote default SHA
 - **THEN** synchronization reports `ineligible` and preserves the local commit and files
 
-#### Scenario: Primary checkout is not on the remote default
+#### Scenario: Primary checkout is not a remote-default mirror
 
-- **WHEN** primary HEAD is detached or names a different branch
+- **WHEN** primary HEAD is detached or its branch neither names nor tracks the resolved remote default
 - **THEN** synchronization reports `ineligible` without switching branches
 
 #### Scenario: Repository is bare or linked-only

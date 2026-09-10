@@ -74,7 +74,13 @@ def synchronize_resolved_default(
     if symbolic.returncode:
         raise WorktreeError("primary checkout branch cannot be inspected")
     branch = symbolic.stdout.strip()
-    if branch != default_branch:
+    upstream = git(
+        ctx,
+        "for-each-ref",
+        "--format=%(upstream)",
+        f"refs/heads/{branch}",
+    ).stdout.strip()
+    if branch != default_branch and upstream != source.display_ref:
         return _ineligible(
             ctx, source, previous_sha, branch, "primary-not-default"
         )
@@ -111,7 +117,7 @@ def synchronize_resolved_default(
         ctx, "status", "--porcelain=v1", "--untracked-files=all"
     ).stdout
     if (
-        observed_branch != default_branch
+        observed_branch != branch
         or observed_sha != source.sha
         or observed_status
     ):
