@@ -17,8 +17,8 @@ creation depend on an unsafe root repair would violate that boundary.
 
 - Diagnose primary-checkout eligibility using actual Git topology and worktree
   state.
-- Fast-forward an eligible checked-out default branch to the exact SHA
-  advertised by the remote default branch.
+- Fast-forward an eligible checked-out default branch or exact default-tracking
+  primary mirror to the SHA advertised by the remote default branch.
 - Reuse the existing per-common-directory transaction lock.
 - Attempt synchronization during default-source worktree creation and after a
   completed finish without blocking those lifecycle outcomes when the root is
@@ -39,12 +39,13 @@ creation depend on an unsafe root repair would violate that boundary.
 ### Synchronize through the checked-out worktree
 
 Escapement will run `git merge --ff-only <advertised-sha>` in the primary
-checkout after proving that HEAD is symbolic on the advertised default branch,
+checkout after proving that HEAD is symbolic on either the advertised default
+branch or a local branch whose upstream is exactly that resolved remote default,
 the worktree is clean, and HEAD is an ancestor of the advertised SHA. It will
-then verify branch, HEAD, and cleanliness again. This updates the branch, index,
-and files as one normal Git worktree operation. Direct `update-ref`, hard reset,
-and branch switching are rejected because they can desynchronize or destroy the
-checked-out state.
+then verify the original branch identity, HEAD, and cleanliness again. This
+updates the branch, index, and files as one normal Git worktree operation. Direct
+`update-ref`, hard reset, and branch switching are rejected because they can
+desynchronize or destroy the checked-out state.
 
 ### Separate remote resolution from root eligibility
 

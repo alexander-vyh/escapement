@@ -75,6 +75,46 @@ def test_sync_root_reports_current_exact_remote_head_without_mutation(
     assert snapshot_primary(scenario.primary) == before
 
 
+def test_sync_root_fast_forwards_primary_alias_tracking_remote_default(
+    tmp_path: Path,
+) -> None:
+    scenario = make_remote_scenario(tmp_path)
+    alias = "control-plane"
+    git(scenario.primary, "branch", "-m", alias)
+    git(
+        scenario.primary,
+        "update-ref",
+        "refs/remotes/origin/maintenance",
+        scenario.stale_primary_sha,
+    )
+    git(scenario.primary, "branch", "--set-upstream-to", "origin/maintenance", alias)
+    before = snapshot_primary(scenario.primary)
+
+    refused = run_cli(scenario.primary, "sync-root", "--repo", str(scenario.primary))
+
+    assert refused.returncode != 0
+    refused_output = _result_json(refused)
+    assert refused_output["status"] == "ineligible"
+    assert refused_output["reason"] == "primary-not-default"
+    assert snapshot_primary(scenario.primary) == before
+
+    git(scenario.primary, "branch", "--set-upstream-to", "origin/trunk", alias)
+    result = run_cli(scenario.primary, "sync-root", "--repo", str(scenario.primary))
+
+    assert result.returncode == 0, result.stderr
+    output = _result_json(result)
+    assert output["branch"] == alias
+    assert output["status"] == "synchronized"
+    assert output["previous_sha"] == scenario.stale_primary_sha
+    assert output["target_sha"] == scenario.remote_head_sha
+    assert rev(scenario.primary) == scenario.remote_head_sha
+    assert (
+        git(scenario.primary, "symbolic-ref", "--short", "HEAD").stdout.strip() == alias
+    )
+    assert git(scenario.primary, "status", "--porcelain").stdout == ""
+    assert (scenario.primary / "oracle.txt").read_text() == "remote-default\n"
+
+
 @pytest.mark.parametrize("dirty_kind", ["tracked", "untracked"])
 def test_sync_root_preserves_dirty_primary_exactly(
     tmp_path: Path, dirty_kind: str
