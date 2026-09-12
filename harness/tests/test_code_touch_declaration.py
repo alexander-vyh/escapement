@@ -147,6 +147,67 @@ def test_bash_read_only_commands_do_not_count(tmp_path):
     assert code_touch.touched_code(t, cwd=str(repo)) is False
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The reported case: a Python comparison read as a shell redirect.
+        "python3 - <<'EOF'\nif len(v) > 2000:\n    print(1)\nEOF",
+        # `>=` is the same shape.
+        "python3 - <<'EOF'\nif count >= 5:\n    print(1)\nEOF",
+        # Unquoted delimiter, and a tab-stripping heredoc.
+        "python3 - <<EOF\nrows = [r for r in rs if r > limit]\nEOF",
+        "python3 - <<-EOF\n\tif a > b:\n\t\tpass\nEOF",
+        # Other interpreters agents pipe through heredocs.
+        "jq -r <<'EOF'\nmap(select(.n > threshold))\nEOF",
+        "awk -f - data.txt <<'EOF'\n$1 > cutoff { print }\nEOF",
+    ],
+)
+def test_heredoc_body_text_is_not_a_shell_redirect(tmp_path, command):
+    """THE FALSE POSITIVE THAT TRAINS FAKE CONTRACTS.
+
+    Auto mode tells agents to extract data with heredoc'd Python/jq/awk, so
+    comparison operators inside heredoc bodies are routine. Scanning that body as
+    if it were shell reads `len(v) > 2000:` as a redirect to a file named
+    `2000:`, and a read-only session gets told it changed code.
+
+    That is the exact harm `bash_write_targets` is written to avoid: the module
+    docstring refuses to count scratch writes because demanding an oracle for one
+    "would just train agents to declare a fake contract to clear a gate". A
+    phantom target does the same thing, with no file anywhere on disk.
+    """
+    repo = _git_repo(tmp_path)
+    t = _transcript(tmp_path, [{"name": "Bash", "input": {"command": command}}])
+    assert code_touch.touched_code(t, cwd=str(repo)) is False, (
+        f"heredoc body text misread as a write: {command!r}"
+    )
+
+
+def test_redirect_on_the_heredoc_opening_line_still_counts(tmp_path):
+    """RECALL GUARD: the body is inert, the opening line is not.
+
+    A heredoc only writes a file via a redirect on its opening line, which sits
+    outside the body. Stripping bodies must not blind the detector to that.
+    """
+    repo = _git_repo(tmp_path)
+    target = repo / "src" / "app.py"
+    t = _transcript(
+        tmp_path,
+        [{"name": "Bash", "input": {"command": f"cat > {target} <<'EOF'\nx = 2\nEOF"}}],
+    )
+    assert code_touch.touched_code(t, cwd=str(repo)) is True
+
+
+def test_shell_interpreted_heredoc_body_still_counts(tmp_path):
+    """RECALL GUARD: a body fed to a shell IS shell, so it must still be scanned."""
+    repo = _git_repo(tmp_path)
+    target = repo / "src" / "app.py"
+    t = _transcript(
+        tmp_path,
+        [{"name": "Bash", "input": {"command": f"bash <<'EOF'\necho hi > {target}\nEOF"}}],
+    )
+    assert code_touch.touched_code(t, cwd=str(repo)) is True
+
+
 def test_scratchpad_writes_do_not_count(tmp_path):
     """CONTROL: a scratch analysis script ships nothing, so there is no outcome."""
     repo = _git_repo(tmp_path)

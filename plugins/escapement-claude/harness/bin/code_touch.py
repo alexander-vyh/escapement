@@ -58,6 +58,14 @@ _WHOLESALE_RE = re.compile(
     r"\b(?:patch|git\s+apply|git\s+restore|git\s+checkout\s+--|git\s+revert|git\s+stash\s+pop)\b"
 )
 
+# Heredoc openers: `<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`.
+_HEREDOC_OPEN_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# A heredoc fed to a shell IS shell, so that body must still be scanned. Written
+# to require a command position so `ssh` and `pushd` do not read as shells.
+_SHELL_CMD_RE = re.compile(
+    r"(?:^|[\s|;&(])(?:[\w./-]*/)?(?:sh|bash|zsh|ksh|dash|ash)(?=\s|$)"
+)
+
 _SCRATCH_PARTS = frozenset({"scratchpad", ".worktrees-scratch"})
 
 
@@ -103,6 +111,45 @@ def _tool_uses(rows: Iterable[dict]) -> Iterable[tuple[str, dict]]:
                 yield name, payload
 
 
+def _strip_heredoc_bodies(command: str) -> str:
+    """Drop heredoc body lines, keeping the opening line that carries the redirect.
+
+    A heredoc writes a file only through a redirect on its OPENING line
+    (`cat > f <<EOF`), which sits outside the body. The body is data for some
+    other interpreter -- routinely Python, jq or awk, which host auto mode
+    actively steers agents toward -- where `>` is a comparison operator. Scanning
+    it as shell invents write targets for files that never exist: `len(v) > 2000:`
+    reads as a redirect to a file named `2000:`.
+
+    That phantom is not a harmless over-count. It blocks a session that changed
+    nothing, and the pressure it creates is the one this module's docstring
+    already refuses elsewhere -- it "would just train agents to declare a fake
+    contract to clear a gate".
+
+    Exception, kept deliberately: a body piped to a shell IS shell, so it stays.
+    """
+    lines = command.split("\n")
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        kept.append(line)
+        index += 1
+        opener = _HEREDOC_OPEN_RE.search(line)
+        if not opener:
+            continue
+        delimiter = opener.group(2)
+        shell_body = bool(_SHELL_CMD_RE.search(line))
+        while index < len(lines) and lines[index].strip() != delimiter:
+            if shell_body:
+                kept.append(lines[index])
+            index += 1
+        if index < len(lines):  # the delimiter line itself
+            kept.append(lines[index])
+            index += 1
+    return "\n".join(kept)
+
+
 def bash_write_targets(command: str) -> list[str]:
     """Paths a Bash command appears to write, plus a sentinel for wholesale rewrites.
 
@@ -114,10 +161,17 @@ def bash_write_targets(command: str) -> list[str]:
     high-recall heuristic layered under the exact edit-tool detection, NOT an
     airtight oracle, and must not be described as one.
 
+    Second named limit: heredoc BODIES are not scanned unless the heredoc is fed
+    to a shell (see `_strip_heredoc_bodies`). A redirect written inside a body
+    that some non-shell interpreter then executes on the agent's behalf is missed.
+    That is the deliberate price of not misreading every `>` in heredoc'd Python,
+    jq and awk as a write, which is the far commoner case.
+
     Returns "." for a wholesale rewrite, meaning "something in the tree changed".
     """
     if not isinstance(command, str) or not command.strip():
         return []
+    command = _strip_heredoc_bodies(command)
     targets: list[str] = []
 
     for match in _SED_INPLACE_RE.finditer(command):
