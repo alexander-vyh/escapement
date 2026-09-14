@@ -22,6 +22,8 @@ Produce a Test Oracle Brief:
 
 ## Review Rule
 
+Trace every claimed acceptance outcome from its literal fixture or input through the public entry point to the final observable assertion. If that path cannot be constructed, reject the test plan.
+
 Reject the test plan if the named fragile implementation would pass every relevant behavioral, fixture, contract, architecture, and static check.
 
 ## Common Oracle Smells

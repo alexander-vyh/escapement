@@ -186,7 +186,7 @@ def _remove(entry: LifecycleEntry, decision: dict[str, Any]) -> dict[str, str]:
     return _resume_after_removal(ctx, entry, approved_sha)
 
 
-def finish_lifecycle(lifecycle_id: str) -> dict[str, str]:
+def finish_lifecycle(lifecycle_id: str) -> dict[str, Any]:
     observed = load_lifecycle(lifecycle_id)
     with lifecycle_lock(lifecycle_id):
         try:
@@ -219,7 +219,7 @@ def finish_lifecycle(lifecycle_id: str) -> dict[str, str]:
         )
         result = with_safe_removal(entry.lifecycle_id, lambda decision: _remove(entry, decision))
         if isinstance(result, dict) and result.get("disposition") == "preserve":
-            return _pending(entry, str(result["reason"]))
+            return {**result, **_pending(entry, str(result["reason"]))}
         if not isinstance(result, dict) or result.get("status") not in {"pending", "completed"}:
             raise WorktreeError("finish transaction returned an invalid result")
         return result
