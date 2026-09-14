@@ -10,4 +10,4 @@
 
 ## 3. Verification
 
-- [ ] 3.1 Run focused tests, generated/package parity checks, the full relevant suite, and an independent outcome verification
+- [x] 3.1 Run focused tests, generated/package parity checks, the full relevant suite, and an independent outcome verification
