@@ -170,3 +170,38 @@ def test_finish_rejects_trusted_replacement_receipt_installed_while_waiting(
         finish_module.finish_lifecycle("race-7")
 
     assert receipt.read_bytes() == replacement_raw
+
+
+def test_finish_returns_the_safe_removal_preserve_decision_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = tmp_path / "harness"
+    receipt = _write_receipt(harness, lifecycle_id="passthrough-19")
+    monkeypatch.setenv("CONTINUATION_HARNESS_HOME", str(harness))
+    decision = {
+        "branch_ref": "refs/heads/feature/passthrough-19",
+        "candidate_sha": "2" * 40,
+        "common_directory": "/fixture/repository/.git",
+        "disposition": "preserve",
+        "health": "degraded",
+        "lifecycle_id": "passthrough-19",
+        "oracle_sentinel": "safe-removal-owned-evidence",
+        "reason": "activity-inspection-failed",
+        "repository": "acme/widget",
+        "worktree": "/fixture/repository/.worktrees/passthrough-19",
+    }
+
+    monkeypatch.setattr(
+        finish_module,
+        "with_safe_removal",
+        lambda lifecycle_id, _continuation: (
+            decision if lifecycle_id == "passthrough-19" else None
+        ),
+    )
+
+    result = finish_module.finish_lifecycle("passthrough-19")
+
+    assert result == {**decision, "status": "pending"}
+    persisted = json.loads(receipt.read_text(encoding="utf-8"))
+    assert persisted["last_reason"] == "activity-inspection-failed"
+    assert persisted["phase"] == "requested"

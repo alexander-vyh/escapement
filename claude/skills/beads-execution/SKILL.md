@@ -365,6 +365,9 @@ metadata sufficiency.
 
 ### 2e. Spec Compliance Review
 
+Resolve the completed implementer's exact worktree path and task diff revisions
+from Git before dispatching review.
+
 Dispatch a spec reviewer subagent:
 
 ```
@@ -376,12 +379,22 @@ Agent tool (general-purpose):
     ## What Was Requested
     <task description from beads>
 
-    ## What Implementer Claims They Built
-    <from implementer's report>
+    ## Implementation Under Review
+    Worktree: <absolute implementer worktree path>
+    Base SHA: <commit before this task>
+    Head SHA: <implementer commit>
 
-    ## CRITICAL: Do Not Trust the Report
-    The implementer's report may be incomplete or optimistic. Verify
-    everything independently by reading the actual code.
+    Inspect this worktree and diff. Do not fall back to the coordinator's
+    working directory.
+
+    ## Form the initial verdict from references
+    Record an initial verdict from what was requested and repository evidence
+    before any author claims are supplied. Identify which requirement or prior
+    behavior, if any, has supplied provenance showing it was authored outside
+    the implementing context. Do not infer independence from a separate file,
+    repository evidence, or an isolated reviewer. Without that provenance,
+    state that no independently authored reference exists; this review must not
+    claim independent verification.
 
     Before reviewing any file path, verify it exists with Glob or Read.
     Never assume a path exists based on convention — check first.
@@ -425,6 +438,13 @@ Agent tool (general-purpose):
     - [bad_spec] — Spec says "notify user" but doesn't specify channel (email? toast? both?)
     - [defer] src/db.js:88 — Query could be optimized with an index, but perf isn't in scope
 ```
+
+### 2e-i. Post-verdict claims comparison
+
+After the initial verdict is recorded, resume the same reviewer and provide the
+implementer's report. Ask for discrepancies between those claims and the
+recorded verdict or repository evidence. This comparison must not replace the
+initial verdict; it may add discrepancies or evidence to it.
 
 **Triage routing rules (applied by the coordinator, not the reviewer):**
 

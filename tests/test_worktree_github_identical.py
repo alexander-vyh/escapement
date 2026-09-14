@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from test_worktree_lifecycle import _finish, _land, _scenario
+from test_worktree_lifecycle import (
+    _assert_pending_preserved,
+    _finish,
+    _land,
+    _scenario,
+)
 from worktree_fixtures import git, rev, snapshot_primary
 
 
@@ -49,11 +54,7 @@ def _finish_expect_preserved(scenario, reason: str) -> None:
     result = _finish(scenario)
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {
-        "lifecycle_id": "life-1",
-        "reason": reason,
-        "status": "pending",
-    }
+    _assert_pending_preserved(scenario, result, reason)
     assert scenario.worktree.exists()
     assert scenario.receipt.exists()
     assert snapshot_primary(scenario.primary) == primary_before

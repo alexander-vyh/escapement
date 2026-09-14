@@ -321,13 +321,32 @@ def _set_cwd_scan(
 
 
 def _assert_pending_preserved(
-    scenario: LifecycleScenario, result, reason: str
+    scenario: LifecycleScenario,
+    result,
+    reason: str,
+    *,
+    expected_health: str | None = None,
 ) -> None:
-    assert json.loads(result.stdout) == {
-        "lifecycle_id": "life-1",
-        "reason": reason,
-        "status": "pending",
-    }
+    if expected_health is None:
+        expected_health = (
+            "degraded" if reason == "github-inspection-failed" else "healthy"
+        )
+    output = json.loads(result.stdout)
+    assert output["lifecycle_id"] == "life-1"
+    assert output["reason"] == reason
+    assert output["status"] == "pending"
+    assert output["repository"] == "acme/widget"
+    assert output["worktree"] == str(scenario.worktree.resolve())
+    assert output["branch_ref"] == f"refs/heads/{scenario.branch}"
+    assert output["candidate_sha"] == rev(scenario.worktree)
+    assert output["common_directory"] == git(
+        scenario.primary,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ).stdout.strip()
+    assert output["disposition"] == "preserve"
+    assert output["health"] == expected_health
     assert scenario.worktree.exists()
     assert scenario.receipt.exists()
 
@@ -613,7 +632,12 @@ def test_finish_fails_closed_when_default_moves_during_both_attempts(
 
     result = _finish(scenario)
 
-    _assert_pending_preserved(scenario, result, "github-inspection-failed")
+    _assert_pending_preserved(
+        scenario,
+        result,
+        "github-inspection-failed",
+        expected_health="degraded",
+    )
     assert _github_facts(scenario)["repository_read_count"] == 3
 
 
@@ -683,7 +707,12 @@ def test_finish_fails_closed_when_global_cwd_enumeration_is_incomplete(
 
     result = _finish(scenario)
 
-    _assert_pending_preserved(scenario, result, "activity-inspection-failed")
+    _assert_pending_preserved(
+        scenario,
+        result,
+        "activity-inspection-failed",
+        expected_health="degraded",
+    )
 
 
 def test_finish_fails_closed_when_one_cwd_record_is_incomplete(tmp_path: Path) -> None:
@@ -695,7 +724,12 @@ def test_finish_fails_closed_when_one_cwd_record_is_incomplete(tmp_path: Path) -
 
     result = _finish(scenario)
 
-    _assert_pending_preserved(scenario, result, "activity-inspection-failed")
+    _assert_pending_preserved(
+        scenario,
+        result,
+        "activity-inspection-failed",
+        expected_health="degraded",
+    )
 
 
 @pytest.mark.parametrize("failure_at", [2, 3])
@@ -708,7 +742,21 @@ def test_finish_reports_late_cwd_enumeration_failure_consistently(
 
     result = _finish(scenario)
 
-    _assert_pending_preserved(scenario, result, "activity-inspection-failed")
+    if failure_at == 2:
+        _assert_pending_preserved(
+            scenario,
+            result,
+            "activity-inspection-failed",
+            expected_health="degraded",
+        )
+    else:
+        assert json.loads(result.stdout) == {
+            "lifecycle_id": "life-1",
+            "reason": "activity-inspection-failed",
+            "status": "pending",
+        }
+        assert scenario.worktree.exists()
+        assert scenario.receipt.exists()
 
 
 def test_completed_finish_survives_unavailable_root_remote(tmp_path: Path) -> None:
@@ -737,11 +785,7 @@ def test_ignored_content_is_preserved(tmp_path: Path) -> None:
     result = _finish(scenario)
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {
-        "lifecycle_id": "life-1",
-        "reason": "ignored-content",
-        "status": "pending",
-    }
+    _assert_pending_preserved(scenario, result, "ignored-content")
     assert valuable.read_text(encoding="utf-8") == "keep\n"
     assert scenario.receipt.exists()
 
@@ -769,10 +813,12 @@ def test_missing_github_preserves_candidate(tmp_path: Path) -> None:
 
     result = _finish(scenario)
 
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["status"] == "pending"
-    assert scenario.worktree.exists()
-    assert scenario.receipt.exists()
+    _assert_pending_preserved(
+        scenario,
+        result,
+        "github-inspection-failed",
+        expected_health="degraded",
+    )
 
 
 def test_clean_unmerged_head_is_not_authorized_by_receipt_source(tmp_path: Path) -> None:

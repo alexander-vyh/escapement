@@ -29,6 +29,50 @@ HISTORICAL_LF_SHA256 = (
 
 _REPLACEMENTS = (
     (
+        """Resolve the completed implementer's exact worktree path and task diff revisions
+from Git before dispatching review.
+
+""",
+        "",
+    ),
+    (
+        """    ## Implementation Under Review
+    Worktree: <absolute implementer worktree path>
+    Base SHA: <commit before this task>
+    Head SHA: <implementer commit>
+
+    Inspect this worktree and diff. Do not fall back to the coordinator's
+    working directory.
+
+    ## Form the initial verdict from references
+    Record an initial verdict from what was requested and repository evidence
+    before any author claims are supplied. Identify which requirement or prior
+    behavior, if any, has supplied provenance showing it was authored outside
+    the implementing context. Do not infer independence from a separate file,
+    repository evidence, or an isolated reviewer. Without that provenance,
+    state that no independently authored reference exists; this review must not
+    claim independent verification.
+""",
+        """    ## What Implementer Claims They Built
+    <from implementer's report>
+
+    ## CRITICAL: Do Not Trust the Report
+    The implementer's report may be incomplete or optimistic. Verify
+    everything independently by reading the actual code.
+""",
+    ),
+    (
+        """### 2e-i. Post-verdict claims comparison
+
+After the initial verdict is recorded, resume the same reviewer and provide the
+implementer's report. Ask for discrepancies between those claims and the
+recorded verdict or repository evidence. This comparison must not replace the
+initial verdict; it may add discrepancies or evidence to it.
+
+""",
+        "",
+    ),
+    (
         """**If a specific task ID is provided as an argument**, skip `bd ready` and go
 directly to that task. Claim it, execute it, and carry that task through the
 repository-declared landing and verification outcome. Do not expand a bounded
