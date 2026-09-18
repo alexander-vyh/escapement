@@ -869,6 +869,10 @@ def validate_manifest(root: Path, manifest: dict[str, Any]) -> list[str]:
             _validate_host_entry("hook", item_id, host, hosts[host], errors)
             for fixture in hosts[host].get("fixtures", []):
                 _validate_fixture(root, "hook", item_id, host, fixture, errors)
+        if "pi" in hosts:
+            _validate_host_entry("hook", item_id, "pi", hosts["pi"], errors)
+            for fixture in hosts["pi"].get("fixtures", []):
+                _validate_fixture(root, "hook", item_id, "pi", fixture, errors)
         codex = hosts.get("codex", {})
         if codex.get("status") == "ready":
             source = hook.get("source")

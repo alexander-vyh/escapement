@@ -38,19 +38,46 @@ def ready_bash_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def ready_file_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    """Gates that judge a file write, taken from the Codex apply_patch entry.
+    """Gates that judge a file write.
 
     Pi has no apply_patch. It has `write` and `edit`, and the extension maps
     them onto the payload these gates already read, so a gate needs no
-    knowledge of Pi. Reusing the Codex entry keeps one answer to "does this
-    gate apply to writing a file" instead of a second per-host list to drift.
+    knowledge of Pi. Default source is the Codex apply_patch entry, keeping
+    one answer to "does this gate apply to writing a file" instead of a
+    second per-host list to drift for the common case.
+
+    A hook may instead declare its own ready `pi` host block. That escape
+    exists for gates whose Codex block is `partial` for a reason specific to
+    Codex's payload shape (e.g. apply_patch omits cwd) that does not hold for
+    Pi's `write`/`edit` events, which the extension always attaches a real
+    `cwd` to -- deriving Pi's readiness from Codex's in that case would drop
+    a gate Pi can safely run. An explicit `pi` block always wins over the
+    Codex-derived default for that hook.
     """
     adapter = manifest["adapters"]["pi"]
     matcher = adapter.get("file_source_matcher")
-    if not matcher:
-        return []
+    file_targets = adapter.get("file_target_matchers", [])
     gates: list[dict[str, Any]] = []
     for hook in manifest.get("hooks", []):
+        pi_host = hook.get("hosts", {}).get("pi")
+        if pi_host and pi_host.get("status") == "ready":
+            pi_events = [
+                event
+                for event in pi_host.get("events", [])
+                if event.get("event") == adapter["source_event"]
+                and event.get("matcher") in file_targets
+            ]
+            if pi_events:
+                gates.append(
+                    {
+                        "id": hook["id"],
+                        "source": hook["source"],
+                        "timeout_seconds": pi_events[0]["timeout_seconds"],
+                    }
+                )
+            continue
+        if not matcher:
+            continue
         host = hook.get("hosts", {}).get(adapter["gate_source_host"], {})
         if host.get("status") != "ready":
             continue

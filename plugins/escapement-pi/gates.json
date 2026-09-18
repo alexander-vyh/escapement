@@ -75,6 +75,11 @@
   ],
   "file_gates": [
     {
+      "id": "root_checkout_guard",
+      "source": "claude/hooks/root_checkout_guard.py",
+      "timeout_seconds": 10
+    },
+    {
       "id": "gate_design_nudge",
       "source": "claude/hooks/gate_design_nudge.py",
       "timeout_seconds": 10

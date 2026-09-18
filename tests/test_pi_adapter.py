@@ -48,8 +48,26 @@ def _pi_ready_bash_gates(manifest: dict) -> list[dict]:
 def _pi_ready_file_gates(manifest: dict) -> list[dict]:
     """Recompute the file-gate selection independently of the renderer."""
     adapter = manifest["adapters"]["pi"]
+    file_targets = adapter.get("file_target_matchers", [])
     gates = []
     for hook in manifest["hooks"]:
+        pi_host = hook.get("hosts", {}).get("pi")
+        if pi_host and pi_host.get("status") == "ready":
+            pi_events = [
+                event
+                for event in pi_host.get("events", [])
+                if event.get("event") == adapter["source_event"]
+                and event.get("matcher") in file_targets
+            ]
+            if pi_events:
+                gates.append(
+                    {
+                        "id": hook["id"],
+                        "source": hook["source"],
+                        "timeout_seconds": pi_events[0]["timeout_seconds"],
+                    }
+                )
+            continue
         host = hook.get("hosts", {}).get(adapter["gate_source_host"], {})
         if host.get("status") != "ready":
             continue
