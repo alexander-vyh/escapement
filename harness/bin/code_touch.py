@@ -66,6 +66,23 @@ _SHELL_CMD_RE = re.compile(
     r"(?:^|[\s|;&(])(?:[\w./-]*/)?(?:sh|bash|zsh|ksh|dash|ash)(?=\s|$)"
 )
 
+# Inline interpreters whose QUOTED argument is a program, not shell text. In
+# that program `>` compares, so parsing it as a redirect invents write targets
+# the way heredoc bodies do. Command-position match, like _SHELL_CMD_RE, so
+# `env python3`, `/usr/bin/python3` and `$(node -e ...)` all read as invocations.
+_INTERPRETER_CMD_RE = re.compile(
+    r"(?:^|[\s|;&(])(?:[\w./-]*/)?"
+    r"(?P<name>python[23]?(?:\.\d+)?|node|ruby|perl|php|gawk|mawk|awk|jq)(?=\s|$)"
+)
+# Flags whose following argument is the program itself (python* takes `-c`).
+_CODE_FLAG_ARGS: dict[str, frozenset[str]] = {
+    "node": frozenset({"-e", "-p", "--eval", "--print"}),
+    "ruby": frozenset({"-e"}),
+    "perl": frozenset({"-e"}),
+    "php": frozenset({"-r"}),
+}
+_PYTHON_CODE_FLAGS = frozenset({"-c"})
+
 _SCRATCH_PARTS = frozenset({"scratchpad", ".worktrees-scratch"})
 
 
@@ -109,6 +126,96 @@ def _tool_uses(rows: Iterable[dict]) -> Iterable[tuple[str, dict]]:
             payload = block.get("input")
             if isinstance(name, str) and isinstance(payload, dict):
                 yield name, payload
+
+
+def _skip_quoted(command: str, index: int) -> int:
+    """Index just past the quoted span opening at `index`; past the end if unterminated."""
+    quote = command[index]
+    i = index + 1
+    while i < len(command):
+        if quote == '"' and command[i] == "\\":
+            i += 2
+            continue
+        if command[i] == quote:
+            return i + 1
+        i += 1
+    return i
+
+
+def _skip_ws(command: str, index: int) -> int:
+    while index < len(command) and command[index].isspace():
+        index += 1
+    return index
+
+
+def _inline_program_span(command: str, match: re.Match) -> "tuple[int, int] | None":
+    """Span of the interpreter invocation's quoted program, or None.
+
+    Flagged forms (`python3 -c '...'`, `node -e '...'`) take the program as the
+    argument after the code flag. awk and jq take it POSITIONALLY, as the first
+    quoted token after their flags. Anything else — an unquoted token, a flag
+    that takes a separate value — ends the scan with no span.
+    """
+    name = match.group("name")
+    flags = (
+        _PYTHON_CODE_FLAGS
+        if name.startswith("python")
+        else _CODE_FLAG_ARGS.get(name)
+    )
+    i = _skip_ws(command, match.end())
+    if flags is None:  # positional program: first quoted token after the flags
+        while i < len(command):
+            if command[i] in "'\"":
+                return i, _skip_quoted(command, i)
+            if command[i] != "-":
+                return None
+            while i < len(command) and not command[i].isspace():
+                i += 1
+            i = _skip_ws(command, i)
+        return None
+    while i < len(command) and command[i] == "-":
+        j = i
+        while j < len(command) and not command[j].isspace():
+            j += 1
+        if command[i:j] in flags:
+            p = _skip_ws(command, j)
+            if p < len(command) and command[p] in "'\"":
+                return p, _skip_quoted(command, p)
+            return None
+        i = _skip_ws(command, j)
+    return None
+
+
+def _strip_inline_program_bodies(command: str) -> str:
+    """Drop the quoted program of an inline interpreter invocation, keeping the rest.
+
+    The inline sibling of the heredoc case below: auto mode steers agents toward
+    short scripts, and `python3 -c`, `node -e`, `ruby -e`, `perl -e`, `php -r`
+    carry their program as a quoted argument while awk and jq carry it as their
+    first quoted one. In that text `>` is a comparison operator, so scanning it
+    as shell invents the same phantom targets for a session that wrote nothing:
+    `len(v) > 2000:` reads as a redirect to a file named `2000:`.
+
+    Same accepted price as heredoc bodies: a redirect the OTHER interpreter
+    executes (`awk '{print > "out"}' f`, `python3 -c 'open("f", "w")'`) is not
+    seen. Partial by design, and only in the over-detecting direction: a
+    QUOTED program is dropped, flags that take a separate value
+    (`python3 -W ignore -c`, `jq --arg k v`) end the scan, and the shell quote
+    idiom `'\\''` ends a single-quoted span early -- each miss leaves the text
+    scanned as shell, never hiding a shell redirect.
+    """
+    parts: list[str] = []
+    stripped_to = 0
+    for match in _INTERPRETER_CMD_RE.finditer(command):
+        if match.start() < stripped_to:
+            continue  # inside a program already dropped
+        span = _inline_program_span(command, match)
+        if span is None:
+            continue
+        parts.append(command[stripped_to:span[0]])
+        stripped_to = span[1]
+    parts.append(command[stripped_to:])
+    return "".join(parts)
 
 
 def _strip_heredoc_bodies(command: str) -> str:
@@ -161,17 +268,19 @@ def bash_write_targets(command: str) -> list[str]:
     high-recall heuristic layered under the exact edit-tool detection, NOT an
     airtight oracle, and must not be described as one.
 
-    Second named limit: heredoc BODIES are not scanned unless the heredoc is fed
-    to a shell (see `_strip_heredoc_bodies`). A redirect written inside a body
-    that some non-shell interpreter then executes on the agent's behalf is missed.
-    That is the deliberate price of not misreading every `>` in heredoc'd Python,
-    jq and awk as a write, which is the far commoner case.
+    Second named limit: heredoc BODIES and quoted inline programs are not
+    scanned unless the heredoc is fed to a shell (see `_strip_heredoc_bodies`
+    and `_strip_inline_program_bodies`). A redirect written inside text that
+    some non-shell interpreter then executes on the agent's behalf is missed.
+    That is the deliberate price of not misreading every `>` in Python, jq and
+    awk — heredoc'd or passed inline to `python3 -c` / `node -e` / `awk` /
+    `jq` — as a write, which is the far commoner case.
 
     Returns "." for a wholesale rewrite, meaning "something in the tree changed".
     """
     if not isinstance(command, str) or not command.strip():
         return []
-    command = _strip_heredoc_bodies(command)
+    command = _strip_heredoc_bodies(_strip_inline_program_bodies(command))
     targets: list[str] = []
 
     for match in _SED_INPLACE_RE.finditer(command):
