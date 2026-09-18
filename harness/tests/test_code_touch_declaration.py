@@ -275,6 +275,55 @@ def test_redirect_after_a_positional_jq_filter_still_counts(tmp_path):
     assert code_touch.touched_code(t, cwd=str(repo)) is True
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo 'a > b'",
+        'echo "use >> to append"',
+        "printf '%s > %s\\n' a b",
+        "echo x | grep 'err > 0'",
+        "export PROMPT='dir > branch'",
+        # Quoted text inside a shell-run heredoc body is data, not redirect.
+        "bash <<EOF\necho 'inner > quoted'\nEOF",
+    ],
+)
+def test_quoted_text_is_not_a_shell_redirect(tmp_path, command):
+    """THE FALSE POSITIVE CLASS THE MASKER CLOSES (see PR #240's residue note).
+
+    Any quoted span that is not itself a redirect target is DATA: a `>` inside
+    it is a character being echoed, matched, or assigned, yet the bare regex
+    read `echo 'a > b'` as a redirect to a file named `b` -- same phantom
+    target, same fake-contract pressure, as the heredoc and inline cases.
+    """
+    repo = _git_repo(tmp_path)
+    t = _transcript(tmp_path, [{"name": "Bash", "input": {"command": command}}])
+    assert code_touch.touched_code(t, cwd=str(repo)) is False, (
+        f"quoted text misread as a write: {command!r}"
+    )
+
+
+def test_redirect_to_a_quoted_target_still_counts(tmp_path):
+    """RECALL GUARD: the span AFTER the `>` operator is the target, kept verbatim."""
+    repo = _git_repo(tmp_path)
+    target = repo / "my notes.txt"
+    t = _transcript(
+        tmp_path,
+        [{"name": "Bash", "input": {"command": f"echo hi > '{target}'"}}],
+    )
+    assert code_touch.touched_code(t, cwd=str(repo)) is True
+
+
+def test_redirect_after_quoted_data_still_counts(tmp_path):
+    """RECALL GUARD: masking interiors must not eat real redirects beside them."""
+    repo = _git_repo(tmp_path)
+    target = repo / "src" / "out.data"
+    t = _transcript(
+        tmp_path,
+        [{"name": "Bash", "input": {"command": f"echo 'a > b' > {target}"}}],
+    )
+    assert code_touch.touched_code(t, cwd=str(repo)) is True
+
+
 def test_scratchpad_writes_do_not_count(tmp_path):
     """CONTROL: a scratch analysis script ships nothing, so there is no outcome."""
     repo = _git_repo(tmp_path)
