@@ -131,6 +131,7 @@ def _tool_uses(rows: Iterable[dict]) -> Iterable[tuple[str, dict]]:
 def _skip_quoted(command: str, index: int) -> int:
     """Index just past the quoted span opening at `index`; past the end if unterminated."""
     quote = command[index]
+
     i = index + 1
     while i < len(command):
         if quote == '"' and command[i] == "\\":
@@ -140,6 +141,37 @@ def _skip_quoted(command: str, index: int) -> int:
             return i + 1
         i += 1
     return i
+
+
+def _mask_quoted_data(command: str) -> str:
+    """Blank the interiors of quoted spans that are not redirect targets.
+
+    Quoted text is DATA: `>` inside `echo 'a > b'` is a character being
+    printed, not a redirect, and scanning it as shell invents a target for a
+    file that never exists. A quoted span that FOLLOWS a `>` operator is the
+    redirect's own target (`> 'my file'`), so it is kept verbatim for target
+    extraction. Only the redirect pass runs on the masked copy; every other
+    pattern scans the original text unchanged.
+    """
+    out = list(command)
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch in "'\"":
+            end = _skip_quoted(command, i)
+            j = i - 1
+            while j >= 0 and command[j].isspace():
+                j -= 1
+            if j < 0 or command[j] != ">":
+                for k in range(i + 1, end - 1):
+                    out[k] = " "
+            i = end
+            continue
+        i += 1
+    return "".join(out)
 
 
 def _skip_ws(command: str, index: int) -> int:
@@ -268,13 +300,13 @@ def bash_write_targets(command: str) -> list[str]:
     high-recall heuristic layered under the exact edit-tool detection, NOT an
     airtight oracle, and must not be described as one.
 
-    Second named limit: heredoc BODIES and quoted inline programs are not
-    scanned unless the heredoc is fed to a shell (see `_strip_heredoc_bodies`
-    and `_strip_inline_program_bodies`). A redirect written inside text that
-    some non-shell interpreter then executes on the agent's behalf is missed.
-    That is the deliberate price of not misreading every `>` in Python, jq and
-    awk — heredoc'd or passed inline to `python3 -c` / `node -e` / `awk` /
-    `jq` — as a write, which is the far commoner case.
+    Second named limit: heredoc BODIES, quoted inline programs, and other
+    QUOTED DATA are not scanned for redirects (see `_strip_heredoc_bodies`,
+    `_strip_inline_program_bodies` and `_mask_quoted_data`). A redirect
+    written inside text some non-shell interpreter then executes on the
+    agent's behalf is missed. That is the deliberate price of not misreading
+    every `>` in Python, jq and awk — heredoc'd, inline, or merely echoed —
+    as a write, which is the far commoner case.
 
     Returns "." for a wholesale rewrite, meaning "something in the tree changed".
     """
@@ -287,7 +319,7 @@ def bash_write_targets(command: str) -> list[str]:
         targets.append(match.group(1))
     for match in _TEE_RE.finditer(command):
         targets.append(match.group(1))
-    for match in _REDIRECT_RE.finditer(command):
+    for match in _REDIRECT_RE.finditer(_mask_quoted_data(command)):
         candidate = match.group(1)
         # `2>&1` and friends are not files.
         if candidate.startswith("&"):
