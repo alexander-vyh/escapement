@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -20,6 +21,14 @@ type Runtime = { dispatcherPath: string; gates: Gate[]; fileGates: Gate[]; instr
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_OUTPUT_BYTES = 1_048_576;
+
+// Pi supplies no conversation identifier, and event.toolCallId is unique per
+// call — keying ask-once gate dedup on it made every prompt fire forever
+// (escapement-kdrc). A per-load id is stable for this extension instance,
+// which is the lifetime those gates dedup over. If one process hosts several
+// conversations, they share the id: the worst case suppresses a repeat NUDGE
+// across conversations, never a deny, and the inline waiver remains.
+const SESSION_ID = randomUUID();
 
 function fail(message: string): never {
   throw new Error(message);
@@ -260,7 +269,7 @@ export default function escapementPi(pi: PiAPI): void {
           runtime,
           runtime.fileGates,
           {
-            session_id: event.toolCallId,
+            session_id: SESSION_ID,
             cwd: context.cwd,
             hook_event_name: "PreToolUse",
             ...mapped,
@@ -294,7 +303,7 @@ export default function escapementPi(pi: PiAPI): void {
         runtime,
         runtime.gates,
         {
-          session_id: event.toolCallId,
+          session_id: SESSION_ID,
           cwd: context.cwd,
           hook_event_name: "PreToolUse",
           tool_name: "Bash",
