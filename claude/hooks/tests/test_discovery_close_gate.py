@@ -16,6 +16,7 @@ Run from anywhere with:
 import importlib
 import io
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -138,8 +139,32 @@ def _make_legacy_doc(tmpdir, name="2026-05-14-thing-design.md", content=""):
     return str(tmpdir)
 
 
+def _install_fake_bd(root, bead_links):
+    """Put a `bd` on PATH whose `show <id> --json` carries that bead's link.
+
+    The gate resolves a design from the bead's own record, so a test that wants
+    questions has to say which design the closing bead belongs to. That is the
+    contract: a bead with no link has no design to be verified against.
+    """
+    bin_dir = Path(root) / "fake-bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / "bd"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        f"LINKS = json.loads({json.dumps(bead_links)!r})\n"
+        "args = sys.argv[1:]\n"
+        "if len(args) >= 2 and args[0] == 'show' and args[1] in LINKS:\n"
+        "    print(json.dumps([{'id': args[1], 'description': LINKS[args[1]]}]))\n"
+        "    sys.exit(0)\n"
+        "sys.exit(1)\n"
+    )
+    script.chmod(0o755)
+    return str(bin_dir)
+
+
 def _run_hook(hook_event="PreToolUse", tool_name="Bash", command="bd close my-1",
-              cwd="", raw_stdin=None, session_id=None):
+              cwd="", raw_stdin=None, session_id=None, bead_links=None):
     """Run the hook's main() and return (exit_code, stdout)."""
     mod = _import_hook()
     if raw_stdin is None:
@@ -153,9 +178,15 @@ def _run_hook(hook_event="PreToolUse", tool_name="Bash", command="bd close my-1"
     else:
         stdin_data = raw_stdin
 
+    env = {}
+    if bead_links:
+        bin_dir = _install_fake_bd(cwd or ".", bead_links)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+
     out = io.StringIO()
     try:
-        with patch("sys.stdin", io.StringIO(stdin_data)), patch("sys.stdout", out):
+        with patch.dict(os.environ, env), patch("sys.stdin", io.StringIO(stdin_data)), \
+                patch("sys.stdout", out):
             mod.main()
         return 0, out.getvalue()
     except SystemExit as exc:
@@ -199,35 +230,40 @@ class TestCountListItems:
 
 
 # ===========================================================================
-# Pure function: find_recent_openspec_changes
+# Pure function: designs_in_blob (which design a bead's record points at)
 # ===========================================================================
 
-class TestFindRecentOpenspecChanges:
-    def test_finds_change_dirs(self):
+class TestDesignsInBlob:
+    def test_resolves_an_openspec_reference(self):
         mod = _import_hook()
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, name="feat-a", design=DESIGN_CLEAN)
-            found = mod.find_recent_openspec_changes(
-                Path(root) / "openspec" / "changes")
-        assert len(found) == 1
-        assert found[0].name == "feat-a"
+            found = mod.designs_in_blob(
+                '{"description": "see openspec/changes/feat-a/design.md"}', Path(root))
+        assert [p.parent.name for p in found] == ["feat-a"]
 
-    def test_excludes_archive_dir(self):
+    def test_resolves_a_legacy_plans_reference(self):
+        mod = _import_hook()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_legacy_doc(tmp, name="old-design.md", content=DESIGN_FULL)
+            found = mod.designs_in_blob(
+                '{"notes": "docs/plans/old-design.md"}', Path(root))
+        assert [p.name for p in found] == ["old-design.md"]
+
+    def test_ignores_the_archive_and_unresolvable_references(self):
         mod = _import_hook()
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, name="feat-a", design=DESIGN_CLEAN)
             (Path(root) / "openspec" / "changes" / "archive").mkdir()
-            found = mod.find_recent_openspec_changes(
-                Path(root) / "openspec" / "changes")
-        names = {p.name for p in found}
-        assert "archive" not in names
-        assert "feat-a" in names
+            blob = ('{"description": "openspec/changes/archive/old-thing/design.md '
+                    'and openspec/changes/never-existed/design.md"}')
+            assert mod.designs_in_blob(blob, Path(root)) == []
 
-    def test_missing_dir_returns_empty(self):
+    def test_a_record_naming_no_design_resolves_nothing(self):
         mod = _import_hook()
         with tempfile.TemporaryDirectory() as tmp:
-            found = mod.find_recent_openspec_changes(Path(tmp) / "nope")
-        assert found == []
+            root = _make_openspec_change(tmp, name="feat-a", design=DESIGN_CLEAN)
+            assert mod.designs_in_blob('{"title": "bump a pin"}', Path(root)) == []
 
 
 # ===========================================================================
@@ -296,9 +332,30 @@ class TestFastPathAllows:
         code, out = _run_hook(command="bd list")
         assert code == 0 and out == ""
 
+    def test_the_phrase_inside_quoted_prose_is_not_a_close(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
+            code, out = _run_hook(
+                command="bd note my-1 \"blocked because bd close my-1 is gated\"",
+                cwd=root,
+                bead_links={"my-1": "openspec/changes/my-feature/design.md"},
+            )
+        assert code == 0 and out == ""
+
     def test_bd_close_no_design_anywhere_allows_silently(self):
         with tempfile.TemporaryDirectory() as tmp:
             code, out = _run_hook(command="bd close x-1", cwd=tmp)
+        assert code == 0 and out == ""
+
+    def test_a_bead_linking_no_design_allows_even_when_designs_exist(self):
+        """The defect: the gate used to ask about the newest change dir instead."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
+            code, out = _run_hook(
+                command="bd close pins-1",
+                cwd=root,
+                bead_links={"pins-1": "re-enable the AIR3xx lints"},
+            )
         assert code == 0 and out == ""
 
     def test_invalid_json_allows(self):
@@ -314,7 +371,9 @@ class TestOpenspecChange:
     def test_proof_and_anti_metrics_surface(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
-            code, out = _run_hook(command="bd close my-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close my-1", cwd=root,
+                bead_links={"my-1": "openspec/changes/my-feature/design.md"})
         assert code == 0
         assert _decision(out) == "ask"
         reason = _reason(out)
@@ -326,7 +385,9 @@ class TestOpenspecChange:
             root = _make_openspec_change(tmp, name="big-feature",
                                          design=DESIGN_OVERSIZED_SKELETON,
                                          tasks=TASKS_OVERSIZED)
-            code, out = _run_hook(command="bd close big-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close big-1", cwd=root,
+                bead_links={"big-1": "openspec/changes/big-feature/design.md"})
         assert code == 0
         assert _decision(out) == "ask"
         reason = _reason(out)
@@ -335,7 +396,9 @@ class TestOpenspecChange:
     def test_well_sized_skeleton_does_not_flag_size(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
-            code, out = _run_hook(command="bd close my-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close my-1", cwd=root,
+                bead_links={"my-1": "openspec/changes/my-feature/design.md"})
         # proof + anti-metrics still surface, but not a skeleton-size complaint
         reason = _reason(out) if out.strip() else ""
         assert "the rule is 1-3" not in reason
@@ -344,7 +407,9 @@ class TestOpenspecChange:
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, name="blocked-feature",
                                          design=DESIGN_BLOCKING_OQ)
-            code, out = _run_hook(command="bd close blk-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close blk-1", cwd=root,
+                bead_links={"blk-1": "openspec/changes/blocked-feature/design.md"})
         assert code == 0
         assert _decision(out) == "ask"
         reason = _reason(out)
@@ -354,7 +419,9 @@ class TestOpenspecChange:
     def test_deferrable_oq_does_not_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
-            code, out = _run_hook(command="bd close my-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close my-1", cwd=root,
+                bead_links={"my-1": "openspec/changes/my-feature/design.md"})
         reason = _reason(out) if out.strip() else ""
         assert "SKELETON-BLOCKING" not in reason
 
@@ -363,7 +430,9 @@ class TestOpenspecChange:
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, name="tidy-feature",
                                          design=DESIGN_CLEAN, tasks=TASKS_OK)
-            code, out = _run_hook(command="bd close tidy-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close tidy-1", cwd=root,
+                bead_links={"tidy-1": "openspec/changes/tidy-feature/design.md"})
         assert code == 0
         assert out == ""
 
@@ -372,7 +441,9 @@ class TestOpenspecChange:
             root = _make_openspec_change(tmp, name="big-feature",
                                          design=DESIGN_OVERSIZED_SKELETON,
                                          tasks=TASKS_OVERSIZED)
-            code, out = _run_hook(command="bd close big-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close big-1", cwd=root,
+                bead_links={"big-1": "openspec/changes/big-feature/design.md"})
         assert code == 0
         reason = _reason(out)
         # proof of delivery AND oversized skeleton both present
@@ -387,29 +458,36 @@ class TestOpenspecChange:
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, name="kitchen-sink",
                                          design=design, tasks=TASKS_OVERSIZED)
-            code, out = _run_hook(command="bd close ks-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close ks-1", cwd=root,
+                bead_links={"ks-1": "openspec/changes/kitchen-sink/design.md"})
         assert code == 0
         assert _decision(out) == "ask"
 
 
 # ===========================================================================
-# Hook behavior — legacy docs/plans/ fallback
+# Hook behavior — legacy docs/plans/ designs
 # ===========================================================================
 
-class TestLegacyFallback:
-    def test_legacy_design_doc_proof_surfaces(self):
-        """No openspec/changes/ -> fall back to docs/plans/."""
+class TestLegacyPlansDesign:
+    def test_a_bead_linking_a_legacy_design_doc_is_asked_about(self):
+        """docs/plans/ is still a real design link, not just an openspec one."""
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_legacy_doc(tmp, content=DESIGN_FULL)
-            code, out = _run_hook(command="bd close leg-1", cwd=root)
+            code, out = _run_hook(
+                command="bd close leg-1", cwd=root,
+                bead_links={"leg-1": "docs/plans/2026-05-14-thing-design.md"})
         assert code == 0
         assert _decision(out) == "ask"
         assert "worth continuing" in _reason(out)
 
-    def test_openspec_takes_priority_over_legacy(self):
-        """When both exist, openspec/changes/ is used."""
+    def test_the_bead_selects_its_design_rather_than_a_directory_precedence(self):
+        """An unrelated openspec change must not displace the linked plan doc.
+
+        The old hook preferred openspec/changes/ wholesale and ignored the plan
+        doc; whichever directory won, neither answer was about the closing bead.
+        """
         with tempfile.TemporaryDirectory() as tmp:
-            # openspec change is clean; legacy doc has a proof of delivery
             change_dir = Path(tmp) / "openspec" / "changes" / "tidy-feature"
             change_dir.mkdir(parents=True)
             (change_dir / "design.md").write_text(DESIGN_CLEAN)
@@ -417,25 +495,33 @@ class TestLegacyFallback:
             plans = Path(tmp) / "docs" / "plans"
             plans.mkdir(parents=True)
             (plans / "old-design.md").write_text(DESIGN_FULL)
-            code, out = _run_hook(command="bd close t-1", cwd=tmp)
-        # openspec change is clean -> silent allow, legacy doc ignored
+            code, out = _run_hook(
+                command="bd close t-1", cwd=tmp,
+                bead_links={"t-1": "docs/plans/old-design.md"})
         assert code == 0
-        assert out == ""
+        assert _decision(out) == "ask"
+        reason = _reason(out)
+        assert "old-design.md" in reason
+        assert "tidy-feature" not in reason
 
 
 # ===========================================================================
 # Escape and dedup: the gate must be answerable (escapement-kdrc)
 # ===========================================================================
 
+_MY_FEATURE_LINK = {"mine-1": "openspec/changes/my-feature/design.md"}
+
+
 class TestInlineWaiver:
     def test_waiver_with_substantive_reason_allows(self):
-        """THE ESCAPE: a session closing work unrelated to the newest design
-        (shared checkout) must be able to proceed, with the reason recorded."""
+        """THE ESCAPE: a close whose linked design cannot honestly be answered
+        (superseded, rolled back) must be able to proceed, reason recorded."""
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
             code, out = _run_hook(
-                command="bd close mine-1  # close-gate-waiver: closing code_touch fix, lean-proof-flow design is another session's in-flight work",
+                command="bd close mine-1  # close-gate-waiver: the shipped work was rolled back in the incident review, so there is no delivery to verify",
                 cwd=root,
+                bead_links=_MY_FEATURE_LINK,
             )
         assert code == 0
         assert out == ""  # silent allow, not an ask
@@ -447,6 +533,7 @@ class TestInlineWaiver:
             code, out = _run_hook(
                 command="bd close mine-1  # close-gate-waiver: because",
                 cwd=root,
+                bead_links=_MY_FEATURE_LINK,
             )
         assert code == 0
         assert _decision(out) == "ask"
@@ -455,7 +542,8 @@ class TestInlineWaiver:
         """REPAIR: the ask itself must teach the way out, or it is a dead end."""
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
-            code, out = _run_hook(command="bd close mine-1", cwd=root, session_id="esc-no-hint")
+            code, out = _run_hook(command="bd close mine-1", cwd=root,
+                                  session_id="esc-no-hint", bead_links=_MY_FEATURE_LINK)
         assert code == 0
         assert "close-gate-waiver" in _reason(out)
 
@@ -472,9 +560,11 @@ class TestDedupRegression:
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
-                _, first = _run_hook(command="bd close mine-1", cwd=root, session_id=sid)
+                _, first = _run_hook(command="bd close mine-1", cwd=root,
+                                     session_id=sid, bead_links=_MY_FEATURE_LINK)
                 assert _decision(first) == "ask"
-                code, second = _run_hook(command="bd close mine-1", cwd=root, session_id=sid)
+                code, second = _run_hook(command="bd close mine-1", cwd=root,
+                                         session_id=sid, bead_links=_MY_FEATURE_LINK)
             assert code == 0
             assert second == ""
         finally:
@@ -487,6 +577,7 @@ class TestDedupRegression:
         with tempfile.TemporaryDirectory() as tmp:
             root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
             for _ in range(2):
-                code, out = _run_hook(command="bd close mine-1", cwd=root)
+                code, out = _run_hook(command="bd close mine-1", cwd=root,
+                                      bead_links=_MY_FEATURE_LINK)
                 assert code == 0
                 assert _decision(out) == "ask"

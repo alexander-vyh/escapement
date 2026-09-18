@@ -170,6 +170,12 @@ EXPECTED_TS_FUNCTIONS = {
     "runDispatcher",
     "surfaceDiagnostics",
     "fileGatePayload",
+    # Host identity, not policy: reads Pi's session id off the handler context
+    # so the payload carries the same `session_id` every gate already reads on
+    # Claude. It decides nothing about the tool call. Passing a per-call id here
+    # silently defeated per-session dedup in discovery-close-gate, which is why
+    # this is a named, tested seam rather than two inline narrowings.
+    "sessionIdOf",
 }
 
 
