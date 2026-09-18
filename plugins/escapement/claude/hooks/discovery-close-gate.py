@@ -75,6 +75,14 @@ def find_design_docs(plans_dir: Path) -> list:
 # the question as friction not signal). Track which design's prompts have
 # already fired this session; skip silent re-prompts on the same design.
 
+# Inline waiver: `# close-gate-waiver: <reason>` — same documented escape as
+# cache_write_guard. For a session whose close concerns a DIFFERENT design
+# than the newest openspec change (shared checkout), the question is noise
+# with no honest answer; the waiver records why and proceeds.
+_CLOSE_WAIVER = re.compile(r"#\s*close-gate-waiver:\s*(.+)$", re.IGNORECASE)
+_WAIVER_MIN_REASON = 20
+
+
 def _dedup_state_file(session_id: str) -> Path:
     return Path(f"/tmp/discovery_close_gate_{session_id}.json")
 
@@ -242,6 +250,22 @@ def main() -> int:
     project_dir = data.get("cwd", "") or data.get("workingDirectory", "") or os.getcwd()
     session_id = data.get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
 
+    # Inline waiver, mirroring cache_write_guard's documented escape: the ask
+    # is answerable, but a session closing work that has nothing to do with
+    # the newest openspec design in a shared checkout needs a way past the
+    # misattributed question. A substantive reason is required, and the waiver
+    # is recorded as signal like every other decision.
+    waiver = _CLOSE_WAIVER.search(command)
+    if waiver and len(waiver.group(1).strip()) >= _WAIVER_MIN_REASON:
+        _record_signal(
+            gate_name="discovery_close_gate",
+            decision="waiver-accepted",
+            reason=waiver.group(1).strip()[:200],
+            session_id=session_id or None,
+        )
+        return allow()
+
+
     # --- Locate the design: openspec/changes/ first, docs/plans/ as fallback ---
     design_content: Optional[str] = None
     change_dir: Optional[Path] = None
@@ -348,7 +372,12 @@ def main() -> int:
         question_count=len(parts),
     )
     _mark_prompted(session_id, design_path_str)
-    return ask(hook_event, header + "\n\n".join(parts))
+    escape_hint = (
+        "\n\nIf this design is not the work you are closing (shared checkout), "
+        "answer it and re-run; to proceed past a misattributed question, re-run "
+        "with `# close-gate-waiver: <why, 20+ chars>`."
+    )
+    return ask(hook_event, header + "\n\n".join(parts) + escape_hint)
 
 
 if __name__ == "__main__":

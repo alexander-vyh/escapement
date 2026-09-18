@@ -139,7 +139,7 @@ def _make_legacy_doc(tmpdir, name="2026-05-14-thing-design.md", content=""):
 
 
 def _run_hook(hook_event="PreToolUse", tool_name="Bash", command="bd close my-1",
-              cwd="", raw_stdin=None):
+              cwd="", raw_stdin=None, session_id=None):
     """Run the hook's main() and return (exit_code, stdout)."""
     mod = _import_hook()
     if raw_stdin is None:
@@ -147,6 +147,8 @@ def _run_hook(hook_event="PreToolUse", tool_name="Bash", command="bd close my-1"
                    "tool_input": {"command": command}}
         if cwd:
             payload["cwd"] = cwd
+        if session_id is not None:
+            payload["session_id"] = session_id
         stdin_data = json.dumps(payload)
     else:
         stdin_data = raw_stdin
@@ -419,3 +421,72 @@ class TestLegacyFallback:
         # openspec change is clean -> silent allow, legacy doc ignored
         assert code == 0
         assert out == ""
+
+
+# ===========================================================================
+# Escape and dedup: the gate must be answerable (escapement-kdrc)
+# ===========================================================================
+
+class TestInlineWaiver:
+    def test_waiver_with_substantive_reason_allows(self):
+        """THE ESCAPE: a session closing work unrelated to the newest design
+        (shared checkout) must be able to proceed, with the reason recorded."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
+            code, out = _run_hook(
+                command="bd close mine-1  # close-gate-waiver: closing code_touch fix, lean-proof-flow design is another session's in-flight work",
+                cwd=root,
+            )
+        assert code == 0
+        assert out == ""  # silent allow, not an ask
+
+    def test_waiver_with_short_reason_still_asks(self):
+        """A waiver is an escape, not a magic word: the reason must be substantive."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
+            code, out = _run_hook(
+                command="bd close mine-1  # close-gate-waiver: because",
+                cwd=root,
+            )
+        assert code == 0
+        assert _decision(out) == "ask"
+
+    def test_ask_message_names_the_waiver_escape(self):
+        """REPAIR: the ask itself must teach the way out, or it is a dead end."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
+            code, out = _run_hook(command="bd close mine-1", cwd=root, session_id="esc-no-hint")
+        assert code == 0
+        assert "close-gate-waiver" in _reason(out)
+
+
+class TestDedupRegression:
+    def test_same_session_id_asks_once_then_allows(self):
+        """THE DEFECT (escapement-kdrc): the Pi adapter keyed session_id on the
+        per-call toolCallId, so the ask-once dedup never engaged and every
+        closing attempt blocked forever. With a stable session id, the second
+        attempt proceeds — ask once, answer, continue."""
+        sid = "esc-dedup-regression"
+        state = Path(tempfile.gettempdir()) / f"discovery_close_gate_{sid}.json"
+        state.unlink(missing_ok=True)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
+                _, first = _run_hook(command="bd close mine-1", cwd=root, session_id=sid)
+                assert _decision(first) == "ask"
+                code, second = _run_hook(command="bd close mine-1", cwd=root, session_id=sid)
+            assert code == 0
+            assert second == ""
+        finally:
+            state.unlink(missing_ok=True)
+
+    def test_without_session_id_asks_every_time(self):
+        """Pins the fail-loud default: no session identity means no dedup.
+        Adapters that supply no id get the question every time — visible,
+        not silently suppressed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_openspec_change(tmp, design=DESIGN_FULL, tasks=TASKS_OK)
+            for _ in range(2):
+                code, out = _run_hook(command="bd close mine-1", cwd=root)
+                assert code == 0
+                assert _decision(out) == "ask"

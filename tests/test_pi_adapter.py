@@ -492,6 +492,91 @@ console.log(JSON.stringify({ safe: safe ?? null, denied, injected }));
     ], "each Pi tool call must use exactly one shared dispatcher process"
 
 
+def test_pi_extension_sends_one_stable_session_id_across_tool_calls(tmp_path) -> None:
+    """THE DEFECT (escapement-kdrc): session_id was mapped to toolCallId,
+    which is unique per call, so ask-once gate dedup never engaged and every
+    bead-closing attempt re-asked forever. The dispatcher payload must carry
+    ONE id for the whole session, distinct from every toolCallId."""
+    payloads_log = tmp_path / "dispatcher-payloads.log"
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    python_shim = shim_dir / "python3"
+    python_shim.write_text(
+        "#!/bin/sh\n"
+        f"tee -a {payloads_log!s} | {sys.executable} \"$@\"\n",
+        encoding="utf-8",
+    )
+    python_shim.chmod(0o755)
+    probe = tmp_path / "probe.mjs"
+    probe.write_text(
+        """
+const { default: extension } = await import(process.argv[2]);
+const handlers = new Map();
+extension({
+  on(event, handler) {
+    const registered = handlers.get(event) ?? [];
+    registered.push(handler);
+    handlers.set(event, registered);
+  },
+});
+const toolCalls = handlers.get("tool_call") ?? [];
+if (toolCalls.length !== 1) {
+  throw new Error(`Expected one Pi tool_call handler, got ${toolCalls.length}`);
+}
+const toolCall = toolCalls[0];
+const context = { cwd: process.argv[3] };
+const first = await toolCall({
+  type: "tool_call", toolCallId: "call-alpha", toolName: "bash",
+  input: { command: "pwd" },
+}, context);
+const second = await toolCall({
+  type: "tool_call", toolCallId: "call-beta", toolName: "bash",
+  input: { command: "pwd" },
+}, context);
+console.log(JSON.stringify({ first: first ?? null, second: second ?? null }));
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "node",
+            "--experimental-strip-types",
+            str(probe),
+            EXTENSION.as_uri(),
+            str(ROOT),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "PATH": f"{shim_dir}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output["first"] is None and output["second"] is None
+
+    raw = payloads_log.read_text(encoding="utf-8")
+    payloads: list[dict] = []
+    decoder = json.JSONDecoder()
+    index = 0
+    while index < len(raw):
+        while index < len(raw) and raw[index].isspace():
+            index += 1
+        if index >= len(raw):
+            break
+        payload, index = decoder.raw_decode(raw, index)
+        payloads.append(payload)
+    assert len(payloads) == 2, "both tool calls must reach the dispatcher"
+    session_ids = {p.get("session_id") for p in payloads}
+    assert session_ids == {payloads[0]["session_id"]}, (
+        "session_id must be stable across tool calls"
+    )
+    assert payloads[0]["session_id"] not in {"call-alpha", "call-beta"}, (
+        "session_id must not be the per-call toolCallId"
+    )
+
+
 def test_real_pi_sdk_loads_installed_extension_without_duplicate_skills_and_nonce_gate(
     tmp_path,
 ) -> None:
