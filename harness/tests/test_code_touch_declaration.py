@@ -208,6 +208,73 @@ def test_shell_interpreted_heredoc_body_still_counts(tmp_path):
     assert code_touch.touched_code(t, cwd=str(repo)) is True
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The reported case: inline Python via -c, single- and double-quoted.
+        "python3 -c 'import sys; s = sys.stdin.read(); print(len(s) > 300)'",
+        "python3 -c \"rows = [r for r in rs if r.n > 2000:]\"",
+        # A -c body long enough to span lines.
+        "python3 -c '\nif a > b:\n    print(a)\n'",
+        # Other interpreters that take their program behind a flag.
+        "node -e 'console.log(a > b)'",
+        "node -p 'items.filter(i => i.n > 3).length'",
+        "ruby -e 'puts a > b'",
+        "perl -e 'print 1 if $a > $b'",
+        # awk and jq take the program POSITIONALLY, as the first quoted token.
+        "awk '$1 > cutoff { print }' data.txt",
+        "awk -F'\\t' '$2 > limit { print $1 }' data.tsv",
+        "jq '.n > threshold' data.json",
+        "jq -r '.items[] | select(.count > 5)' data.json",
+        # Quoted text inside a shell-run pipeline is no more a redirect.
+        "echo x && python3 -c 'a > b' | sort",
+    ],
+)
+def test_inline_interpreter_body_is_not_a_shell_redirect(tmp_path, command):
+    """THE SAME FALSE POSITIVE WITHOUT THE HEREDOC (escapement-pww5).
+
+    Auto mode steers toward "short scripts", and inline `python3 -c` / `node -e`
+    / awk / jq programs are the commonest form. A `>` comparison in that quoted
+    program read as a shell redirect names a repo file that never existed, and
+    `is_code_path` cannot reject it -- it asks git about the DIRECTORY, because
+    "the file itself may not exist yet". The gate then blocks a session that
+    wrote nothing, creating exactly the fake-contract pressure the module
+    docstring refuses.
+    """
+    repo = _git_repo(tmp_path)
+    t = _transcript(tmp_path, [{"name": "Bash", "input": {"command": command}}])
+    assert code_touch.touched_code(t, cwd=str(repo)) is False, (
+        f"inline program text misread as a write: {command!r}"
+    )
+
+
+def test_redirect_outside_an_inline_program_still_counts(tmp_path):
+    """RECALL GUARD: the quoted program is inert, the shell around it is not.
+
+    `python3 -c 'print(1)' > out.py` writes out.py through SHELL, not Python;
+    the redirect sits outside the quotes and must survive the strip.
+    """
+    repo = _git_repo(tmp_path)
+    target = repo / "src" / "app.py"
+    t = _transcript(
+        tmp_path,
+        [{"name": "Bash", "input": {"command": f"python3 -c 'print(1)' > {target}"}}],
+    )
+    assert code_touch.touched_code(t, cwd=str(repo)) is True
+
+
+def test_redirect_after_a_positional_jq_filter_still_counts(tmp_path):
+    """RECALL GUARD: stripping awk/jq programs positionally must not eat the
+    shell redirect that trails them."""
+    repo = _git_repo(tmp_path)
+    target = repo / "src" / "out.txt"
+    t = _transcript(
+        tmp_path,
+        [{"name": "Bash", "input": {"command": f"jq -r '.n > 5' data.json > {target}"}}],
+    )
+    assert code_touch.touched_code(t, cwd=str(repo)) is True
+
+
 def test_scratchpad_writes_do_not_count(tmp_path):
     """CONTROL: a scratch analysis script ships nothing, so there is no outcome."""
     repo = _git_repo(tmp_path)
