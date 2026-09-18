@@ -63,6 +63,11 @@ CAPABILITIES_END = "<!-- escapement:capabilities:end -->"
 ADAPTER_MAPPING_START = "<!-- escapement:adapter-mapping:start -->"
 ADAPTER_MAPPING_END = "<!-- escapement:adapter-mapping:end -->"
 SHARED_HOOK_SUPPORT = {
+    # Token-position-aware reader for `bd <subcommand>` invocations, imported by
+    # every bd-triggered gate. Omitting it makes those gates fail silent: they
+    # refuse to guess with a substring match, so the gate is inert where it was
+    # needed.
+    "claude/hooks/_bd_command.py",
     "claude/hooks/_worktree_cli.py",
     "claude/hooks/_gate_signal.py",
     "claude/hooks/_advisory_dedupe.py",

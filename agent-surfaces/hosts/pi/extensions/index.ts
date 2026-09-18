@@ -189,6 +189,31 @@ function runDispatcher(
   });
 }
 
+// A per-tool-call id is NOT a session id. Any gate that dedupes an advisory
+// prompt per session keys on whatever this returns; handing it `event.toolCallId`
+// makes every call look like a fresh session, so a once-per-session prompt
+// re-fires on every command until the reader learns to dismiss it. Pi exposes
+// the real one via ctx.sessionManager.getSessionId().
+function sessionIdOf(context: unknown): string {
+  if (!context || typeof context !== "object") return "";
+  const manager = "sessionManager" in context ? context.sessionManager : undefined;
+  if (manager && typeof manager === "object" && "getSessionId" in manager) {
+    const getSessionId = manager.getSessionId;
+    if (typeof getSessionId === "function") {
+      const resolved = getSessionId.call(manager);
+      if (typeof resolved === "string" && resolved.length > 0) return resolved;
+    }
+  }
+  if ("sessionId" in context) {
+    const direct = context.sessionId;
+    if (typeof direct === "string" && direct.length > 0) return direct;
+  }
+  // Nothing host-provided: fall back to the per-load id, which is stable for
+  // this instance's lifetime. Never a per-call value — that is what silently
+  // defeated the dedup in the first place.
+  return SESSION_ID;
+}
+
 function surfaceDiagnostics(pi: PiAPI, result: DispatcherResponse): void {
   const messages = [result.systemMessage, result.hookSpecificOutput?.additionalContext]
     .filter((message): message is string => Boolean(message));
@@ -269,7 +294,7 @@ export default function escapementPi(pi: PiAPI): void {
           runtime,
           runtime.fileGates,
           {
-            session_id: SESSION_ID,
+            session_id: sessionIdOf(context),
             cwd: context.cwd,
             hook_event_name: "PreToolUse",
             ...mapped,
@@ -303,7 +328,7 @@ export default function escapementPi(pi: PiAPI): void {
         runtime,
         runtime.gates,
         {
-          session_id: SESSION_ID,
+          session_id: sessionIdOf(context),
           cwd: context.cwd,
           hook_event_name: "PreToolUse",
           tool_name: "Bash",

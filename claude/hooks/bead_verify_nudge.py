@@ -51,6 +51,14 @@ except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
 
+# One owner for "does this command really invoke `bd <subcommand>`". Shared with
+# discovery-close-gate, which learned the hard way that a substring match fires
+# on prose. Missing sibling => the nudge stays silent rather than guessing.
+try:
+    from _bd_command import invokes as _bd_invokes
+except ImportError:  # pragma: no cover
+    _bd_invokes = None  # type: ignore[assignment]
+
 # Mirrors derive_contract._VERIFY_BLOCK_RE. Only a fence tagged `verify` counts, so
 # an illustrative ``` block in acceptance criteria is never mistaken for an oracle.
 _VERIFY_BLOCK_RE = re.compile(r"```[ \t]*verify[ \t]*\r?\n(.*?)\r?\n```", re.S)
@@ -79,23 +87,13 @@ _NUDGE = (
 def _is_bd_create(command: str) -> bool:
     """True when a segment of the command actually invokes `bd create`.
 
-    Token-position aware so a `bd create` mentioned inside a quoted commit message
-    or an echo does not trip the nudge.
+    Token-position aware so a `bd create` mentioned inside a quoted commit
+    message or an echo does not trip the nudge. The parsing itself lives in
+    `_bd_command`, shared with the other bd-triggered gates.
     """
-    for segment in _SHELL_SEP_RE.split(command):
-        try:
-            tokens = shlex.split(segment)
-        except ValueError:
-            continue
-        i = 0
-        # step over leading env assignments and wrappers
-        while i < len(tokens) and ("=" in tokens[i] and not tokens[i].startswith("-")):
-            i += 1
-        while i < len(tokens) and tokens[i] in ("env", "command"):
-            i += 1
-        if i + 1 < len(tokens) and Path(tokens[i]).name == "bd" and tokens[i + 1] == "create":
-            return True
-    return False
+    if _bd_invokes is None:
+        return False
+    return _bd_invokes(command, "create")
 
 
 def _acceptance_text(command: str) -> str:

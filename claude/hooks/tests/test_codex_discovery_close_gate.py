@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -43,6 +44,30 @@ def _make_change(cwd: Path, design_text: str | None) -> None:
     change_dir = cwd / "openspec" / "changes" / "test-change"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "design.md").write_text(design_text, encoding="utf-8")
+
+
+def _link_bead(cwd: Path, bead_id: str, reference: str) -> None:
+    """Put a `bd` on PATH that reports this bead's design reference.
+
+    The gate resolves a design from the closing bead's own record, so a Codex
+    session that wants the questions has to have a bead that links the design.
+    """
+    bin_dir = cwd / "fake-bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / "bd"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        f"BEAD, REFERENCE = {bead_id!r}, {reference!r}\n"
+        "args = sys.argv[1:]\n"
+        "if len(args) >= 2 and args[0] == 'show' and args[1] == BEAD:\n"
+        "    print(json.dumps([{'id': BEAD, 'description': REFERENCE}]))\n"
+        "    sys.exit(0)\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
 def _run_main(command: str, cwd: Path) -> tuple[int, dict | None]:
@@ -85,6 +110,7 @@ def test_codex_close_asks_when_design_has_proof_of_delivery(tmp_path):
     fail here.
     """
     _make_change(tmp_path, _DESIGN_WITH_PROOF)
+    _link_bead(tmp_path, "disco-1", "openspec/changes/test-change/design.md")
     code, output = _run_main("bd close disco-1", cwd=tmp_path)
 
     assert code == 0
