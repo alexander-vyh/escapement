@@ -68,6 +68,10 @@ SHARED_HOOK_SUPPORT = {
     # refuse to guess with a substring match, so the gate is inert where it was
     # needed.
     "claude/hooks/_bd_command.py",
+    # Resolves which directory a command is about, read by the dispatcher
+    # before any gate runs. Omitting it silently restores the old behaviour:
+    # every gate judges the session's directory instead of the command's.
+    "claude/hooks/_effective_cwd.py",
     "claude/hooks/_worktree_cli.py",
     "claude/hooks/_gate_signal.py",
     "claude/hooks/_advisory_dedupe.py",

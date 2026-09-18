@@ -176,6 +176,10 @@ EXPECTED_TS_FUNCTIONS = {
     # silently defeated per-session dedup in discovery-close-gate, which is why
     # this is a named, tested seam rather than two inline narrowings.
     "sessionIdOf",
+    # Host plumbing, same category: forwards the per-call working directory the
+    # Bash tool already declares. It reads no command text and decides nothing;
+    # resolving a `cd` prefix stays in the dispatcher.
+    "cwdOf",
 }
 
 

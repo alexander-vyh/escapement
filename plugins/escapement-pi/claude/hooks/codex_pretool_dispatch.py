@@ -19,6 +19,37 @@ DECISION_STRENGTH = {"allow": 1, "ask": 2, "deny": 3}
 MAX_PAYLOAD_BYTES = 1_048_576
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from _effective_cwd import normalized as _effective_cwd_normalized
+except ImportError:  # pragma: no cover
+    _effective_cwd_normalized = None  # type: ignore[assignment]
+
+
+def _payload_with_effective_cwd(payload: str) -> str:
+    """Rewrite the payload's `cwd` to the directory the command runs in.
+
+    Any failure returns the payload untouched: a dispatcher that cannot read
+    its own input must still deliver it to the gates exactly as the host sent
+    it, rather than dropping a decision on the floor.
+    """
+    if _effective_cwd_normalized is None:
+        return payload
+    try:
+        parsed = json.loads(payload)
+    except (json.JSONDecodeError, ValueError):
+        return payload
+    if not isinstance(parsed, dict):
+        return payload
+    updated = _effective_cwd_normalized(parsed)
+    if updated is parsed:
+        return payload
+    try:
+        return json.dumps(updated)
+    except (TypeError, ValueError):
+        return payload
+
+
 class GateTimeoutError(BaseException):
     """Raised when one gate exceeds its manifest-declared budget."""
 
@@ -202,6 +233,11 @@ def main(argv: list[str] | None = None) -> int:
     except UnicodeDecodeError as exc:
         print(f"FATAL: hook payload is not UTF-8: {exc}", file=sys.stderr)
         return 2
+    # Every gate downstream reads `cwd` as "the repository this command
+    # touches". Resolve it once, here, so a call that names its own directory
+    # or opens with `cd /other/repo` is judged against that tree instead of
+    # whatever directory the session happens to sit in.
+    payload = _payload_with_effective_cwd(payload)
     timeouts: list[float | None] = args.gate_timeout or [None] * len(gates)
     results: list[dict[str, Any]] = []
     warnings: list[str] = []

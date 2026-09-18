@@ -214,6 +214,23 @@ function sessionIdOf(context: unknown): string {
   return SESSION_ID;
 }
 
+// Pi's Bash tool takes a per-call working directory. Gates read `cwd` as "the
+// repository this command touches", so sending the session's directory made a
+// command aimed at another checkout get judged against this one. The dispatcher
+// still resolves a leading `cd`; this only forwards what the call itself
+// declared, without reading the command.
+function cwdOf(event: unknown, context: unknown): unknown {
+  if (event && typeof event === "object" && "input" in event) {
+    const input = event.input;
+    if (input && typeof input === "object" && "cwd" in input) {
+      const declared = input.cwd;
+      if (typeof declared === "string" && declared.length > 0) return declared;
+    }
+  }
+  if (context && typeof context === "object" && "cwd" in context) return context.cwd;
+  return undefined;
+}
+
 function surfaceDiagnostics(pi: PiAPI, result: DispatcherResponse): void {
   const messages = [result.systemMessage, result.hookSpecificOutput?.additionalContext]
     .filter((message): message is string => Boolean(message));
@@ -295,7 +312,7 @@ export default function escapementPi(pi: PiAPI): void {
           runtime.fileGates,
           {
             session_id: sessionIdOf(context),
-            cwd: context.cwd,
+            cwd: cwdOf(event, context),
             hook_event_name: "PreToolUse",
             ...mapped,
           },
@@ -329,7 +346,7 @@ export default function escapementPi(pi: PiAPI): void {
         runtime.gates,
         {
           session_id: sessionIdOf(context),
-          cwd: context.cwd,
+          cwd: cwdOf(event, context),
           hook_event_name: "PreToolUse",
           tool_name: "Bash",
           tool_input: { command },
