@@ -335,6 +335,26 @@
           "fixtures": [
             "claude/hooks/tests/test_root_checkout_guard.py"
           ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "write",
+              "command": "python3 -B claude/hooks/root_checkout_guard.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "edit",
+              "command": "python3 -B claude/hooks/root_checkout_guard.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_root_checkout_guard.py"
+          ]
         }
       }
     },
