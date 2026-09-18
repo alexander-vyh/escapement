@@ -552,3 +552,87 @@ def test_root_guard_contains_no_shell_classifier_architecture():
         )
     )
     assert tool_input_index > tool_name_index + 1
+
+
+# --- Escape path (gate-design Rule 1) -------------------------------------
+#
+# A gate whose only outcomes are "comply" or "fail" sits on the coercive axis,
+# and its predicted failure is mock compliance. That is not hypothetical here:
+# on 2026-09-17 an agent denied Write on a primary checkout judged the work
+# impossible in a worktree (a needed file was untracked, so a worktree from
+# HEAD would not contain it), found no escape in the denial, and wrote the file
+# with a Bash heredoc instead. Enforcement covers four explicit-edit tools, so
+# the bypass succeeded and produced no signal at all.
+#
+# Extending enforcement over arbitrary Bash is explicitly out of this hook's
+# boundary. Giving the gate a first-class escape is not.
+
+WAIVER_REASON = "shared module is untracked, so a worktree from HEAD cannot build against it"
+
+
+def _waiver_path(repo: Path) -> Path:
+    return repo / ".beads" / ".root-checkout-waiver"
+
+
+def test_denial_documents_how_to_proceed_when_a_worktree_cannot_work(tmp_path):
+    repo = _make_primary_beads_repo(tmp_path)
+
+    _, output, _ = _run_payload(_write_payload(repo / "src" / "app.py", cwd=repo))
+
+    assert _decision(output) == "deny"
+    reason = _reason(output)
+    assert ".root-checkout-waiver" in reason, (
+        "the denial must name the escape path; an escape the agent has to find "
+        f"by reading source is not an escape. Got: {reason}"
+    )
+
+
+def test_a_substantive_waiver_allows_the_edit(tmp_path):
+    repo = _make_primary_beads_repo(tmp_path)
+    _waiver_path(repo).write_text(WAIVER_REASON, encoding="utf-8")
+
+    code, output, _ = _run_payload(_write_payload(repo / "src" / "app.py", cwd=repo))
+
+    assert code == 0
+    assert _decision(output) is None, f"a waived edit must proceed, got {output}"
+
+
+def test_a_placeholder_waiver_is_refused(tmp_path):
+    """Rule 3: validate the value, not its presence."""
+    repo = _make_primary_beads_repo(tmp_path)
+    _waiver_path(repo).write_text("tbd", encoding="utf-8")
+
+    _, output, _ = _run_payload(_write_payload(repo / "src" / "app.py", cwd=repo))
+
+    assert _decision(output) == "deny"
+    assert "reason" in _reason(output).lower()
+
+
+def test_an_empty_waiver_is_refused(tmp_path):
+    repo = _make_primary_beads_repo(tmp_path)
+    _waiver_path(repo).write_text("   \n", encoding="utf-8")
+
+    _, output, _ = _run_payload(_write_payload(repo / "src" / "app.py", cwd=repo))
+
+    assert _decision(output) == "deny"
+
+
+def test_the_waiver_file_itself_is_always_writable(tmp_path):
+    """The escape must be agent-invokable, so writing the waiver cannot be denied."""
+    repo = _make_primary_beads_repo(tmp_path)
+
+    code, output, _ = _run_payload(_write_payload(_waiver_path(repo), cwd=repo))
+
+    assert code == 0
+    assert _decision(output) is None, (
+        f"the gate must not block creation of its own escape hatch, got {output}"
+    )
+
+
+def test_an_unwaived_edit_is_still_denied(tmp_path):
+    """The escape must not weaken the default."""
+    repo = _make_primary_beads_repo(tmp_path)
+
+    _, output, _ = _run_payload(_write_payload(repo / "src" / "app.py", cwd=repo))
+
+    assert _decision(output) == "deny"

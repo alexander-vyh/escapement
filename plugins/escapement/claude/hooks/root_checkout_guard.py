@@ -26,6 +26,20 @@ except ImportError:  # pragma: no cover
         return None
 
 
+# Gate-design Rule 1: every gate needs a first-class escape path, documented in
+# the denial itself and invokable by the agent without escalating to the user.
+# Without one the predicted failure is mock compliance, and that is exactly what
+# happened on 2026-09-17: an agent denied Write here judged a worktree
+# impossible (it needed a file that was untracked, so a worktree from HEAD would
+# not contain it), found no way forward, and wrote the file with a Bash heredoc.
+# Arbitrary process effects stay outside this hook's enforcement boundary, so
+# the fix is an escape with a recorded reason rather than wider enforcement.
+WAIVER_RELATIVE_PATH = Path(".beads") / ".root-checkout-waiver"
+WAIVER_MIN_REASON_LENGTH = 20
+WAIVER_PLACEHOLDER_REASONS = frozenset(
+    {"tbd", "n/a", "na", "todo", "wip", "fixme", "none", "x", "?", "??", "???"}
+)
+
 PATH_KEY_BY_TOOL = {
     "Write": "file_path",
     "Edit": "file_path",
@@ -85,6 +99,25 @@ def _quote(value: object) -> str:
     return "'" + text.replace("'", "'\"'\"'") + "'"
 
 
+def _waiver_reason(root: Path) -> str | None:
+    """A substantive, agent-supplied reason for editing the primary checkout.
+
+    Presence is not enough. A gate that accepts any string teaches the shortest
+    passing one, which is how a waiver becomes a checkbox and the corpus stops
+    being worth reading.
+    """
+    try:
+        raw = (root / WAIVER_RELATIVE_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    reason = raw.strip()
+    if len(reason) < WAIVER_MIN_REASON_LENGTH:
+        return None
+    if reason.lower() in WAIVER_PLACEHOLDER_REASONS:
+        return None
+    return reason
+
+
 def _deny_reason(operation: str, root: Path) -> str:
     prefix = bundled_cli_prefix(Path(__file__))
     if prefix is None:
@@ -103,10 +136,20 @@ def _deny_reason(operation: str, root: Path) -> str:
             f"escapement-worktree transaction: `{invocation}`, then make the "
             "change there."
         )
+    waiver = (
+        "If the change genuinely cannot be made in a worktree -- for example it "
+        "depends on a file that is untracked here, so a worktree created from "
+        f"HEAD would not contain it -- write `{WAIVER_RELATIVE_PATH}` under "
+        f"`{root}` containing a reason of at least {WAIVER_MIN_REASON_LENGTH} "
+        "characters saying why, then retry. Writing that file is never blocked, "
+        "the reason is recorded as gate signal, and committing the dependency "
+        "first is usually the better answer. Do not route around this by "
+        "switching to a different tool."
+    )
     return (
         f"`{operation}` targets the primary checkout of a beads-managed repo "
-        f"at `{root}`. Routine agent implementation work must not dirty the "
-        f"root checkout. {repair}"
+        f"at `{root}`. Routine agent implementation work should not dirty the "
+        f"root checkout. {repair} {waiver}"
     )
 
 
@@ -141,8 +184,22 @@ def main() -> int:
     if target is None:
         return 0
     root = _primary_checkout_root_for(target)
-    if root is not None:
-        _deny(f"{tool_name} {target}", root, tool_name)
+    if root is None:
+        return 0
+    if _safe_resolve(target) == _safe_resolve(root / WAIVER_RELATIVE_PATH):
+        # An escape the gate blocks you from reaching is not an escape.
+        return 0
+    reason = _waiver_reason(root)
+    if reason is not None:
+        _record_signal(
+            gate_name="root_checkout_guard",
+            decision="waiver-accepted",
+            reason=reason,
+            tool=tool_name,
+            target=str(target),
+        )
+        return 0
+    _deny(f"{tool_name} {target}", root, tool_name)
     return 0
 
 
