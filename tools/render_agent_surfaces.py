@@ -297,6 +297,15 @@ def _render_fragment(root: Path, rel: str, identity: dict[str, Any]) -> str:
     return text
 
 
+# hosts.<id>.include_shared_fragments defaults True (codex/claude): their
+# rendered document is the host's ONLY delivery channel for the shared
+# Escapement workflow text, so it must carry the shared fragments in full.
+# Pi sets it False: the Pi host (OMP) auto-loads this repository's AGENTS.md
+# natively as repo-rules context on every session, so PI.md — injected a
+# second time via before_agent_start — only needs the Pi-specific delta.
+# Carrying the shared fragments in both would double every Pi session's
+# fixed context cost for text already delivered (escapement-w4sn is the
+# same principle applied to Claude's disjoint claude/rules/* channel).
 def _render_document(
     root: Path,
     manifest: dict[str, Any],
@@ -306,9 +315,10 @@ def _render_document(
     docs = manifest["documents"]
     host_doc = docs["hosts"][host]
     parts = [GENERATED_HEADER, "", f"# {host_doc['title']}", ""]
-    for rel in docs["shared_fragments"]:
-        parts.append(_render_fragment(root, rel, identity))
-        parts.append("")
+    if host_doc.get("include_shared_fragments", True):
+        for rel in docs["shared_fragments"]:
+            parts.append(_render_fragment(root, rel, identity))
+            parts.append("")
     for rel in host_doc["fragments"]:
         parts.append(_read_fragment(root, rel))
         parts.append("")

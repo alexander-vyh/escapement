@@ -58,7 +58,10 @@ The renderer owns these Pi distribution artifacts:
   `pi-package` keyword;
 - `plugins/escapement-pi/extensions/index.ts`, the thin host adapter;
 - `plugins/escapement-pi/gates.json`, the generated ready-gate inventory;
-- `plugins/escapement-pi/PI.md`, rendered shared instructions;
+- `plugins/escapement-pi/PI.md`, rendered Pi-specific delta instructions only
+  (`include_shared_fragments: false`) — OMP auto-loads this repository's
+  `AGENTS.md` natively as repo-rules context on every Pi session, so PI.md
+  omits the shared fragments to avoid injecting them a second time;
 - no package-level skill resource; Pi uses the generated native user/project
   `.agents/skills` surfaces already shared with Claude and Codex.
 

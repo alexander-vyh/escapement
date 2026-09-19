@@ -1487,6 +1487,56 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
             )
 
 
+# escapement (this change): plugins/escapement-pi/PI.md is injected in full by
+# before_agent_start on top of OMP's native AGENTS.md auto-load. Duplicating the
+# shared_fragments text in both doubled every Pi session's fixed context cost for
+# text already delivered — the same class of bug as escapement-w4sn on Claude.
+PI_SHARED_SENTINEL = "Beads is the task-state system, not the workflow-policy authority."
+
+
+def test_pi_instructions_do_not_duplicate_shared_workflow_already_in_agents_md():
+    """PI.md (Channel B, injected by before_agent_start) must not repeat the shared
+    Escapement workflow text that AGENTS.md (Channel A, OMP's native repo-rules
+    auto-load) already delivers to every Pi session.
+
+    Positive control: AGENTS.md still carries the sentinel (Channel A is intact)
+    and PI.md still carries the real Pi-specific delta, so the fix removed only
+    the duplicate, not the adapter notes.
+    """
+    agents_md = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    pi_md = (ROOT / "plugins" / "escapement-pi" / "PI.md").read_text(encoding="utf-8")
+
+    assert PI_SHARED_SENTINEL in agents_md, "Channel A must still carry shared workflow text"
+    assert PI_SHARED_SENTINEL not in pi_md, (
+        "PI.md must not duplicate shared workflow text AGENTS.md already delivers "
+        "natively to every Pi session"
+    )
+    pi_fragment = (ROOT / "agent-surfaces" / "onboarding" / "hosts" / "pi.md").read_text(
+        encoding="utf-8"
+    )
+    assert pi_fragment.strip() in pi_md, "PI.md must still carry the Pi-specific delta"
+
+
+def test_pi_dedup_guard_is_not_vacuous_without_the_manifest_flag(tmp_path):
+    """Negative control: dropping include_shared_fragments from the pi host entry
+    must reproduce the duplicate — proving the assertion above is load-bearing,
+    not incidentally true.
+    """
+    temp_root = copy_repo(tmp_path)
+    manifest_path = temp_root / "agent-surfaces" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["documents"]["hosts"]["pi"]["include_shared_fragments"]
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    result = run_renderer(root=temp_root)
+    assert result.returncode == 0, result.stderr
+
+    pi_md = (temp_root / "plugins" / "escapement-pi" / "PI.md").read_text(encoding="utf-8")
+    assert PI_SHARED_SENTINEL in pi_md, (
+        "removing the flag should reproduce the pre-fix duplicate; guard is vacuous"
+    )
+
+
 def test_claude_plugin_injects_rules_with_imperative_framing(tmp_path):
     """Behavioral: running inject-rules.sh emits SessionStart additionalContext
     carrying the bundled rules AND imperative framing (so injected rules match
