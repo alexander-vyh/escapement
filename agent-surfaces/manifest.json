@@ -29,6 +29,7 @@
       "pi": {
         "target": "plugins/escapement-pi/PI.md",
         "title": "Escapement Instructions For Pi",
+        "include_shared_fragments": false,
         "fragments": [
           "agent-surfaces/onboarding/hosts/pi.md"
         ]
