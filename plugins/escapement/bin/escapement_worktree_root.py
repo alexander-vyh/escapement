@@ -135,11 +135,6 @@ def synchronize_resolved_default(
 def sync_primary_checkout(repo: Path) -> RootSyncResult:
     """Resolve and synchronize a public primary-checkout request."""
     requested = repo.expanduser().resolve()
-    bare = git(
-        requested, "rev-parse", "--is-bare-repository", check=False
-    )
-    if bare.returncode == 0 and bare.stdout.strip() == "true":
-        raise WorktreeError(f"repository is not a primary checkout: {requested}")
     ctx = resolve_repository(requested)
     with repository_transaction_lock(ctx):
         source = resolve_default_source(ctx)
