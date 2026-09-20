@@ -14,6 +14,11 @@ from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Literal
 
+from escapement_worktree_root_health import (
+    PrimaryHealthError,
+    repair_flipped_primary,
+)
+
 OBJECT_ID_RE = re.compile(r"^[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?$")
 CREATION_TOKEN_FILE = "escapement-creation-owner"
 
@@ -303,9 +308,19 @@ def registered_branch_owners(ctx: RepositoryContext, branch_ref: str) -> list[st
 
 def resolve_repository(path: Path) -> RepositoryContext:
     requested = path.expanduser().resolve()
-    top_level = Path(
-        git(requested, "rev-parse", "--show-toplevel").stdout.strip()
-    ).resolve()
+    located = git(requested, "rev-parse", "--show-toplevel", check=False)
+    if located.returncode:
+        # Only a repository that already failed pays for the health probe.
+        try:
+            repaired = repair_flipped_primary(requested)
+        except PrimaryHealthError as error:
+            raise WorktreeError(str(error)) from error
+        if repaired is None:
+            raise WorktreeError(f"repository is not a primary checkout: {requested}")
+        located = git(requested, "rev-parse", "--show-toplevel", check=False)
+        if located.returncode:
+            raise WorktreeError(f"repository is not a primary checkout: {requested}")
+    top_level = Path(located.stdout.strip()).resolve()
     common_dir = Path(
         git(
             requested,
