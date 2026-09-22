@@ -77,6 +77,9 @@ SHARED_HOOK_SUPPORT = {
     "claude/hooks/_advisory_dedupe.py",
     "claude/hooks/_local_judge_client.py",
     "claude/hooks/_gh_command.py",
+    # The merge gate's green-status half. Omitting it makes the gate deny every merge
+    # (it fails toward denying, never toward a silent allow) in the installed plugin.
+    "claude/hooks/_merge_green_status.py",
     # Landing-time gates share repository-neutral origin/HEAD + merge-base
     # authority. Omitting this sibling makes installed hooks fail open.
     "claude/hooks/git_change_scope.py",

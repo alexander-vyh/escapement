@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -53,12 +54,30 @@ assert _spec.loader is not None
 _spec.loader.exec_module(guard)
 
 
-def _run_payload(payload: dict) -> tuple[int, dict, str]:
+class _StubGreen:
+    """A green check result, so the tests below stay about AUTHORITY.
+
+    The gate now requires two independent conditions: the repo declared auto-merge, and
+    the pull request is actually green (`_merge_green_status`). These tests own the first
+    condition; `tests/test_merge_green_status.py` owns the second. Without this stub they
+    would shell out to the real `gh` in a temp directory, fail to observe anything, and
+    deny for a reason that has nothing to do with what they are testing.
+    """
+
+    state = "green"
+    detail = "stubbed: green observation is covered by tests/test_merge_green_status.py"
+    ref = "262"
+    merge_worthy = True
+
+
+def _run_payload(payload: dict, *, green: bool = True) -> tuple[int, dict, str]:
     stdout = io.StringIO()
+    observer = (lambda *a, **k: _StubGreen()) if green else guard._observe_green
     with (
         patch("sys.stdin", io.StringIO(json.dumps(payload))),
         patch("sys.stdout", stdout),
         patch.object(guard, "_record_signal", lambda *a, **k: None),
+        patch.object(guard, "_observe_green", observer),
     ):
         try:
             code = guard.main()
@@ -152,6 +171,30 @@ def _stale_sibling_worktree(tmp_path: Path, *, primary_declaration: dict | None)
     return nested
 
 
+def _green_gh_on_path(root: Path) -> dict:
+    """PATH with a `gh` that reports a green pull request.
+
+    These packaged-guard tests run the shipped script in a real subprocess, so the
+    in-process `_StubGreen` patch cannot reach them. They are about which repo.json the
+    guard resolves from a stale worktree; handing them a green `gh` keeps them about
+    that. The real observation is covered in tests/test_merge_green_status.py.
+    """
+    bin_dir = root / "_stub_bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        'sys.stdout.write(\'{"number": 262, "state": "OPEN", "statusCheckRollup": '
+        '[{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", '
+        '"conclusion": "SUCCESS"}]}\')\n'
+    )
+    gh.chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    return env
+
+
 def _run_packaged_guard(hook_path: Path, *, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-B", str(hook_path)],
@@ -160,6 +203,7 @@ def _run_packaged_guard(hook_path: Path, *, cwd: Path) -> subprocess.CompletedPr
         capture_output=True,
         check=False,
         cwd=cwd,
+        env=_green_gh_on_path(cwd.parent),
     )
 
 

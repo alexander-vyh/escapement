@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import importlib.util
+import os
 import re
 import shutil
 import subprocess
@@ -105,7 +106,12 @@ MUTABLE_COUNT_RE = re.compile(
 )
 
 EXPECTED_SUPPORT_CLAIMS = {
-    "merge-green-status": "unsupported",
+    # "merge-green-status" is deliberately absent: this table enumerates GAPS, and an
+    # absent id reads as full enforcement. The merge gate now requires both declared
+    # authority and an observed-green PR (claude/hooks/_merge_green_status.py), proven
+    # by tests/test_merge_green_status.py. Prose still may not assert the mechanic —
+    # FALSE_SUPPORT_CLAIM_MUTATIONS keeps that invariant, whose point is placement
+    # rather than polarity.
     "confirm-class-enforcement": "reserved",
     "deploy-execution": "informational",
     "code-touch-detection": "partial",
@@ -129,10 +135,6 @@ EXPECTED_SUPPORT_REASONS = {
         "and are high-recall but not exhaustive, so a sufficiently indirect write can "
         "evade detection. A missing transcript, missing cwd, or unavailable git all "
         "resolve to did-not-touch-code, so the gate fails open by design."
-    ),
-    "merge-green-status": (
-        "The merge authorization hook resolves repository-declared merge authority but "
-        "does not observe pull-request check or green status."
     ),
     "confirm-class-enforcement": (
         "Repository confirmation classes are stored but are not currently enforced by "
@@ -676,22 +678,61 @@ def test_support_claims_match_executed_point_of_effect_controls(tmp_path: Path):
         "deploy": {"command": f"touch {deploy_sentinel}"},
     }
     (repo / ".escapement" / "repo.json").write_text(json.dumps(declaration), encoding="utf-8")
+    # The merge-green-status claim flipped, so its control flips with it. Asserting the
+    # claim's absence from the manifest would only prove a table was edited; this runs
+    # the shipped gate against a stub `gh` and proves the mechanic exists. A green PR
+    # must still merge and a red one must not — either assertion alone is satisfied by a
+    # degenerate gate (one that ignores checks, one that denies everything).
+    stub_bin = tmp_path / "stub-bin"
+    stub_bin.mkdir()
+    gh_stub = stub_bin / "gh"
+
+    def _set_conclusion(conclusion: str) -> None:
+        gh_stub.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "sys.stdout.write(json.dumps({'number': 123, 'state': 'OPEN', "
+            "'statusCheckRollup': [{'__typename': 'CheckRun', 'name': 'pytest', "
+            f"'status': 'COMPLETED', 'conclusion': {conclusion!r}}}]}}))\n",
+            encoding="utf-8",
+        )
+        gh_stub.chmod(0o755)
+
     payload = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "gh pr merge 123 --squash"},
         "cwd": str(repo),
     }
-    merge = subprocess.run(
-        [sys.executable, "-B", str(ROOT / "claude/hooks/merge_authorization_gate.py")],
-        input=json.dumps(payload),
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    stub_env = dict(os.environ)
+    stub_env["PATH"] = f"{stub_bin}{os.pathsep}{stub_env['PATH']}"
+    stub_env["BEADS_DIR"] = str(tmp_path / "beads")
+
+    def _run_merge_gate() -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, "-B", str(ROOT / "claude/hooks/merge_authorization_gate.py")],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            check=False,
+            env=stub_env,
+        )
+
+    _set_conclusion("SUCCESS")
+    merge = _run_merge_gate()
+    # confirm_class is declared above and remains reserved/unenforced, so an authorized,
+    # green PR still merges silently. That is this assertion's second job.
     assert merge.returncode == 0 and merge.stdout == "", (
-        "current gate unexpectedly observed green status or enforced confirm_class"
+        "gate denied an authorized, green pull request — "
+        "either green observation is broken or confirm_class became enforced"
     )
+    assert not deploy_sentinel.exists(), "merge authorization executed informational deploy metadata"
+
+    _set_conclusion("FAILURE")
+    red = _run_merge_gate()
+    assert red.returncode == 0 and red.stdout, "gate allowed a merge with a failing check"
+    red_reason = json.loads(red.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "pytest" in red_reason, f"denial must name the failing check: {red_reason}"
     assert not deploy_sentinel.exists(), "merge authorization executed informational deploy metadata"
 
     probe = subprocess.run(

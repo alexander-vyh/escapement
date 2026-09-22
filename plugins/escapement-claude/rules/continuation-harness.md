@@ -173,8 +173,6 @@ dependency and continue the rest.
 ### Per-repo outcome authorization — the durable authorization the base prompt defers to
 
 <!-- escapement:support-claims:start
-merge-green-status=unsupported
-merge-green-status-reason=The merge authorization hook resolves repository-declared merge authority but does not observe pull-request check or green status.
 confirm-class-enforcement=reserved
 confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
 deploy-execution=informational

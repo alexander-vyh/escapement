@@ -29,8 +29,6 @@ Informational side questions do not replace active work unless the user cancels
 or redirects.
 
 <!-- escapement:support-claims:start
-merge-green-status=unsupported
-merge-green-status-reason=The merge authorization hook resolves repository-declared merge authority but does not observe pull-request check or green status.
 confirm-class-enforcement=reserved
 confirm-class-enforcement-reason=Repository confirmation classes are stored but are not currently enforced by the merge authorization hook.
 deploy-execution=informational
@@ -44,8 +42,7 @@ codex-scheduled-continuation-reason=Codex has no scheduled wakeup, task-mode rep
 -->
 <!-- escapement:support-claims:end -->
 
-Enforcement is capability-honest: the merge hook does not observe pull-request
-green status, `confirm_class` is reserved and unenforced, deploy metadata is
-informational only, and wakeup scheduling, task-mode binding, and the local
-judge remain Claude-only. These gaps do not
-narrow delegated means, but must not be described as mechanically enforced.
+Enforcement is capability-honest: `confirm_class` is reserved and unenforced,
+deploy metadata is informational only, and wakeup scheduling, task-mode binding,
+and the local judge remain Claude-only. These gaps do not narrow delegated
+means, but must not be described as mechanically enforced.
