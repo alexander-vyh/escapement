@@ -976,6 +976,30 @@
       }
     },
     {
+      "id": "prepatch_failure_gate",
+      "description": "At landing, revert the change's production hunks and run the tests it touched; ask when none of them failed, because a test that passes without the change is not evidence about it.",
+      "source": "claude/hooks/prepatch_failure_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "No captured Codex fixture proves the PreToolUse Bash payload carries the cwd this gate needs to resolve the repository and its merge-base."
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B ~/.claude/hooks/prepatch_failure_gate.py"
+            }
+          ],
+          "fixtures": [
+            "tests/test_prepatch_failure_gate.py"
+          ]
+        }
+      }
+    },
+    {
       "id": "merge_authorization_gate",
       "description": "Deterministic merge-authorization gate: resolves .escapement/repo.json instead of leaving the merge decision to agent judgment in conversation.",
       "source": "claude/hooks/merge_authorization_gate.py",

@@ -332,6 +332,15 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/prepatch_failure_gate.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/merge_authorization_gate.py\"",
             "type": "command"
           }

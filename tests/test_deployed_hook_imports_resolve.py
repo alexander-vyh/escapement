@@ -34,17 +34,28 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_HOOKS = ROOT / "claude" / "hooks"
+SOURCE_BIN = ROOT / "bin"
 
-PLUGIN_HOOK_DIRS = [
-    ROOT / "plugins" / "escapement-claude" / "hooks",
-    ROOT / "plugins" / "escapement" / "claude" / "hooks",
-    ROOT / "plugins" / "escapement-pi" / "claude" / "hooks",
+# (source dir, rendered dir) pairs. `bin/` was added after this check caught the same
+# failure a third time: #247 split `escapement_worktree_root_health.py` out of
+# `escapement_worktree_root.py` and `escapement_worktree_git.py` imports it at module
+# scope, but the renderer's vendor list was never updated — so running the renderer
+# PRUNED the module from all three plugin trees and every installed worktree guard
+# raised ModuleNotFoundError. `--check` stayed green throughout, because it validates
+# the targets the renderer knows about, not the ones it forgot.
+DEPLOYED_DIRS = [
+    (SOURCE_HOOKS, ROOT / "plugins" / "escapement-claude" / "hooks"),
+    (SOURCE_HOOKS, ROOT / "plugins" / "escapement" / "claude" / "hooks"),
+    (SOURCE_HOOKS, ROOT / "plugins" / "escapement-pi" / "claude" / "hooks"),
+    (SOURCE_BIN, ROOT / "plugins" / "escapement-claude" / "bin"),
+    (SOURCE_BIN, ROOT / "plugins" / "escapement" / "bin"),
+    (SOURCE_BIN, ROOT / "plugins" / "escapement-pi" / "bin"),
 ]
 
 
-def sibling_module_names() -> set[str]:
-    """Modules that live in claude/hooks/ and can only resolve as siblings."""
-    return {p.stem for p in SOURCE_HOOKS.glob("*.py")}
+def sibling_module_names(source_dir: Path = SOURCE_HOOKS) -> set[str]:
+    """Modules that live beside the deployed file and can only resolve as siblings."""
+    return {p.stem for p in source_dir.glob("*.py")}
 
 
 def imported_siblings(path: Path, siblings: set[str]) -> set[str]:
@@ -72,24 +83,29 @@ def imported_siblings(path: Path, siblings: set[str]) -> set[str]:
     return found
 
 
-@pytest.mark.parametrize("hooks_dir", PLUGIN_HOOK_DIRS, ids=lambda p: p.parts[-3])
-def test_every_deployed_hook_can_import_its_helpers(hooks_dir: Path):
-    if not hooks_dir.is_dir():
-        pytest.skip(f"{hooks_dir} is not rendered in this plugin")
+@pytest.mark.parametrize(
+    "source_dir,deployed_dir",
+    DEPLOYED_DIRS,
+    ids=lambda p: "/".join(p.parts[-3:]) if isinstance(p, Path) else str(p),
+)
+def test_every_deployed_module_can_import_its_helpers(source_dir: Path, deployed_dir: Path):
+    if not deployed_dir.is_dir():
+        pytest.skip(f"{deployed_dir} is not rendered in this plugin")
 
-    siblings = sibling_module_names()
-    present = {p.stem for p in hooks_dir.glob("*.py")}
+    siblings = sibling_module_names(source_dir)
+    present = {p.stem for p in deployed_dir.glob("*.py")}
     missing: list[str] = []
 
-    for deployed in sorted(hooks_dir.glob("*.py")):
+    for deployed in sorted(deployed_dir.glob("*.py")):
         for needed in sorted(imported_siblings(deployed, siblings)):
             if needed not in present:
                 missing.append(f"{deployed.name} imports {needed}, not vendored here")
 
     assert not missing, (
-        "deployed hooks would fail open on a missing sibling:\n  "
+        "deployed modules would fail on a missing sibling:\n  "
         + "\n  ".join(missing)
-        + "\n\nAdd the module to SHARED_HOOK_SUPPORT in tools/render_agent_surfaces.py."
+        + "\n\nAdd the module to SHARED_HOOK_SUPPORT or SHARED_RUNTIME_SUPPORT in "
+        + "tools/render_agent_surfaces.py."
     )
 
 
