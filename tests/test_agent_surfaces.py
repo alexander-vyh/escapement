@@ -1590,6 +1590,15 @@ def copy_repo(tmp_path):
 def _claude_skill_status_violations():
     """Skills whose manifest claude.status disagrees with the filesystem.
 
+    "Live" is resolved via the manifest's own `hosts.claude.counterpart` pointer
+    when declared (the authoritative claim: this exact path is what Claude
+    actually loads -- a `.claude/commands/opsx/*.md` command for the openspec
+    family, a `claude/skills/<id>/SKILL.md` vendored skill source for a
+    genuinely host-agnostic skill like `huh`). Falls back to the legacy
+    `.claude/skills/<id>` directory check only for entries with no counterpart
+    declared, so an entry that predates the `counterpart` field keeps its prior
+    behavior.
+
     Returns (unsupported_but_live, ready_but_unrendered).
     """
     manifest = json.loads(MANIFEST.read_text())
@@ -1597,8 +1606,13 @@ def _claude_skill_status_violations():
     ready_but_unrendered = []
     for skill in manifest["skills"]:
         sid = skill["id"]
-        status = skill.get("hosts", {}).get("claude", {}).get("status")
-        live = (ROOT / ".claude" / "skills" / sid).is_dir()
+        claude_host = skill.get("hosts", {}).get("claude", {})
+        status = claude_host.get("status")
+        counterpart = claude_host.get("counterpart")
+        if counterpart:
+            live = (ROOT / counterpart).exists()
+        else:
+            live = (ROOT / ".claude" / "skills" / sid).is_dir()
         if status == "unsupported" and live:
             unsupported_but_live.append(sid)
         elif status == "ready" and not live:
