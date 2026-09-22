@@ -86,8 +86,15 @@ def _run_gate(repo: Path, command: str = "git push origin feature", tmp_path: Pa
     }
     env = dict(os.environ)
     env["PREPATCH_VERIFY_DIR"] = str(VERIFIER_DIR)
-    # Keep the corpus of a test run out of the real signal store.
-    env["GATE_SIGNAL_FALLBACK_DIR"] = str((tmp_path or repo) / "signal")
+    # Keep synthetic decisions out of the real corpus. GATE_SIGNAL_FALLBACK_DIR alone is
+    # not enough: _gate_signal prefers a resolvable .beads/, and it resolves one by
+    # walking up from the hook process's CWD — which is this checkout. Without BEADS_DIR
+    # every case below appends "vacuous on app.py" to the store that
+    # gate_signal_analysis.py mines for recurrence.
+    signal_home = (tmp_path or repo) / "signal"
+    (signal_home / ".beads").mkdir(parents=True, exist_ok=True)
+    env["BEADS_DIR"] = str(signal_home / ".beads")
+    env["GATE_SIGNAL_FALLBACK_DIR"] = str(signal_home)
     result = subprocess.run([sys.executable, str(GATE)], input=json.dumps(payload),
                             capture_output=True, text=True, timeout=300, env=env)
     decision = None
