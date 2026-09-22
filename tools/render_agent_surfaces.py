@@ -48,6 +48,11 @@ except ModuleNotFoundError:
         validate_adapter as _validate_pi_adapter,
     )
 
+try:
+    from openspec_projection import projection_targets as _openspec_projection_targets
+except ModuleNotFoundError:
+    from tools.openspec_projection import projection_targets as _openspec_projection_targets
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = Path("agent-surfaces/manifest.json")
@@ -630,9 +635,22 @@ def rendered_targets(
         root / CODEX_PLUGIN_ROOT / "hooks" / "hooks.json": _render_codex_plugin_hooks(manifest),
     }
 
+    # OpenSpec canon (agent-surfaces/openspec/<op>.md) is the single authoring
+    # source for the four ops; project it into its host surfaces FIRST so the
+    # Codex-skill vendoring loop below vendors the freshly-projected bytes
+    # rather than a stale on-disk read of the very file this projection also
+    # writes (the canon/host data-flow-inversion this topology avoids: canon
+    # is read-only input, .agents/skills/openspec-*/SKILL.md and
+    # .claude/commands/opsx/*.md are write-only outputs, never both).
+    openspec_surfaces = _openspec_projection_targets(root)
+    targets.update(openspec_surfaces)
+
     for skill_path in sorted((root / ".agents" / "skills").glob("*/SKILL.md")):
         rel = skill_path.relative_to(root / ".agents")
-        targets[root / CODEX_PLUGIN_ROOT / rel] = skill_path.read_text(encoding="utf-8")
+        content = openspec_surfaces.get(skill_path, None)
+        if content is None:
+            content = skill_path.read_text(encoding="utf-8")
+        targets[root / CODEX_PLUGIN_ROOT / rel] = content
 
     for source in sorted(SHARED_RUNTIME_SUPPORT):
         content = (root / source).read_text(encoding="utf-8")
@@ -948,6 +966,9 @@ def validate_manifest(root: Path, manifest: dict[str, Any]) -> list[str]:
                 errors.append(f"skill {item_id}: missing host {host}")
                 continue
             _validate_host_entry("skill", item_id, host, hosts[host], errors)
+            counterpart = hosts[host].get("counterpart")
+            if counterpart and not (root / counterpart).exists():
+                errors.append(f"skill {item_id}: host {host} counterpart does not exist: {counterpart}")
         if hosts.get("codex", {}).get("status") == "ready":
             _validate_codex_skill(root, skill, errors)
 

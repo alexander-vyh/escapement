@@ -1612,60 +1612,78 @@
           "status": "ready"
         },
         "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses its host-specific beads-execution skill."
+          "status": "ready",
+          "counterpart": "claude/skills/beads-execution/SKILL.md",
+          "note": "Claude's live beads-execution body is a separate, deliberately divergent implementation (Task-tool subagent dispatch, SendMessage team coordination, wave-based parallel merging) \u2014 primitives Codex does not expose (blocked by CODEX_SKILL_FORBIDDEN). This entry's own `target` is the Codex body; `counterpart` is the file Claude actually loads. Not a wording divergence: the two bodies describe different execution models and are intentionally not unified."
+        }
+      }
+    },
+    {
+      "id": "huh",
+      "target": ".agents/skills/huh/SKILL.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/huh/SKILL.md"
         }
       }
     },
     {
       "id": "openspec-apply-change",
       "target": ".agents/skills/openspec-apply-change/SKILL.md",
+      "source": "agent-surfaces/openspec/apply.md",
       "hosts": {
         "codex": {
           "status": "ready"
         },
         "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses .claude/skills in this increment."
+          "status": "ready",
+          "counterpart": ".claude/commands/opsx/apply.md"
         }
       }
     },
     {
       "id": "openspec-archive-change",
       "target": ".agents/skills/openspec-archive-change/SKILL.md",
+      "source": "agent-surfaces/openspec/archive.md",
       "hosts": {
         "codex": {
           "status": "ready"
         },
         "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses .claude/skills in this increment."
+          "status": "ready",
+          "counterpart": ".claude/commands/opsx/archive.md"
         }
       }
     },
     {
       "id": "openspec-explore",
       "target": ".agents/skills/openspec-explore/SKILL.md",
+      "source": "agent-surfaces/openspec/explore.md",
       "hosts": {
         "codex": {
           "status": "ready"
         },
         "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses .claude/skills in this increment."
+          "status": "ready",
+          "counterpart": ".claude/commands/opsx/explore.md"
         }
       }
     },
     {
       "id": "openspec-propose",
       "target": ".agents/skills/openspec-propose/SKILL.md",
+      "source": "agent-surfaces/openspec/propose.md",
       "hosts": {
         "codex": {
           "status": "ready"
         },
         "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "Claude uses .claude/skills in this increment."
+          "status": "ready",
+          "counterpart": ".claude/commands/opsx/propose.md"
         }
       }
     }
