@@ -120,6 +120,11 @@ SHARED_RUNTIME_SUPPORT = {
     "bin/escapement_worktree_rollback_lock.py",
     "bin/escapement_worktree_rollback_ref.py",
     "bin/escapement_worktree_root.py",
+    # Split out of escapement_worktree_root.py by #247 and imported at module scope by
+    # escapement_worktree_git.py:17. Omitting it here does not fail --check (the check
+    # validates the targets it knows, not the ones it forgot), it silently PRUNES the
+    # module from every plugin tree and breaks the importer at runtime.
+    "bin/escapement_worktree_root_health.py",
 }
 CODEX_HOOK_SUPPORT = {
     # Codex Bash policy gates execute through one in-process dispatcher to avoid
