@@ -225,15 +225,18 @@ def project_op(canon_text: str, host: str) -> str:
     return f"{fm}\n\n{body}\n"
 
 
-def projection_targets(root: Path) -> dict[Path, str]:
-    """Map every host target path -> rendered content across all canon ops.
+def projection_targets(root: Path, canon_dir: Path | str = CANON_DIR) -> dict[Path, str]:
+    """Map every host target path -> rendered content for one canon directory.
 
     Canon dir is input-only; the returned paths are the write-only host
-    surfaces. Used to wire projection into the render / --check flow.
+    surfaces. Used to wire projection into the render / --check flow. First
+    used for the OpenSpec op canon (default ``canon_dir``); the same engine
+    also projects other multi-host skills with a small per-host content
+    variance (e.g. ``agent-surfaces/skills/``) — pass that directory in.
     """
     targets: dict[Path, str] = {}
-    canon_dir = root / CANON_DIR
-    for canon_path in sorted(canon_dir.glob("*.md")):
+    canon_path_dir = root / canon_dir
+    for canon_path in sorted(canon_path_dir.glob("*.md")):
         canon_text = canon_path.read_text(encoding="utf-8")
         parsed = parse_canon(canon_text)
         for host, rel_target in parsed["targets"].items():

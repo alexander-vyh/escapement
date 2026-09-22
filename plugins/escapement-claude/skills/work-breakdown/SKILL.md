@@ -1,10 +1,6 @@
 ---
-name: work-breakdown
-description: >
-  Translate a validated design (from openspec/changes/ or docs/plans/) into a
-  beads task graph with outcome-based acceptance criteria, failure modes,
-  scope boundaries, and spec traceability via --spec-id.
-  Invoked after the walking skeleton validates assumptions.
+name: "work-breakdown"
+description: "Translate a validated design (from openspec/changes/ or docs/plans/) into a beads task graph with outcome-based acceptance criteria, failure modes, scope boundaries, and spec traceability via --spec-id. Invoked after the walking skeleton validates assumptions."
 ---
 
 # Work Breakdown
@@ -332,31 +328,18 @@ The skill refuses to finalize the breakdown if any of these checks fail. All per
 
 ## Lean Review (automatic, feature/epic only)
 
-Before presenting the breakdown to the user, dispatch a lean-advisor agent to
-review the task graph for waste. This is automatic — do not ask permission.
+Before presenting the breakdown to the user, review the task graph for waste. This is automatic — do not ask permission.
 
-```
-Agent(subagent_type: "personal-lean-advisor"):
-  prompt: |
-    Review this work breakdown for waste, over-engineering, and unnecessary
-    complexity. The breakdown is for: [feature name]
+Checklist:
+- Are any tasks redundant or overlapping?
+- Could any two tasks be merged without losing clarity?
+- Are there tasks that don't trace to the riskiest assumption or a spec requirement?
+- Is the walking skeleton actually minimal, or has scope crept in?
+- Would a lean practitioner cut anything from this list?
 
-    Tasks:
-    [list each task: title, acceptance criteria, spec-id]
+Dispatch this as an isolated subagent so the review carries no anchoring bias from this conversation: `Agent(subagent_type: "personal-lean-advisor")`, prompt it with the breakdown's tasks (title, acceptance criteria, spec-id) plus the checklist above, and revise the breakdown if it finds waste.
 
-    Check:
-    - Are any tasks redundant or overlapping?
-    - Could any two tasks be merged without losing clarity?
-    - Are there tasks that don't trace to the riskiest assumption or a spec requirement?
-    - Is the walking skeleton actually minimal, or has scope crept in?
-    - Would a lean practitioner cut anything from this list?
-
-    Report only actionable findings. If the breakdown is clean, say so.
-```
-
-If the lean-advisor finds waste, revise the breakdown before presenting to the
-user. If clean, proceed. The user never sees the lean review unless it changes
-something — then note: "Lean review trimmed [N] tasks: [brief explanation]."
+The user never sees the lean review unless it changes something — then note: "Lean review trimmed [N] tasks: [brief explanation]."
 
 Skip this step for rapid-tier work.
 

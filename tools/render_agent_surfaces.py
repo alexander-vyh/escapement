@@ -638,14 +638,16 @@ def rendered_targets(
         root / CODEX_PLUGIN_ROOT / "hooks" / "hooks.json": _render_codex_plugin_hooks(manifest),
     }
 
-    # OpenSpec canon (agent-surfaces/openspec/<op>.md) is the single authoring
-    # source for the four ops; project it into its host surfaces FIRST so the
-    # Codex-skill vendoring loop below vendors the freshly-projected bytes
-    # rather than a stale on-disk read of the very file this projection also
-    # writes (the canon/host data-flow-inversion this topology avoids: canon
-    # is read-only input, .agents/skills/openspec-*/SKILL.md and
+    # Canon-projected surfaces (agent-surfaces/openspec/<op>.md, agent-surfaces/
+    # skills/<id>.md) are the single authoring source for ops/skills with a
+    # per-host content variance; project them into their host surfaces FIRST so
+    # the vendoring loops below vendor the freshly-projected bytes rather than a
+    # stale on-disk read of the very file this projection also writes (the
+    # canon/host data-flow-inversion this topology avoids: canon is read-only
+    # input, .agents/skills/*/SKILL.md, claude/skills/*/SKILL.md, and
     # .claude/commands/opsx/*.md are write-only outputs, never both).
     openspec_surfaces = _openspec_projection_targets(root)
+    openspec_surfaces.update(_openspec_projection_targets(root, canon_dir=Path("agent-surfaces/skills")))
     targets.update(openspec_surfaces)
 
     for skill_path in sorted((root / ".agents" / "skills").glob("*/SKILL.md")):
@@ -654,6 +656,10 @@ def rendered_targets(
         if content is None:
             content = skill_path.read_text(encoding="utf-8")
         targets[root / CODEX_PLUGIN_ROOT / rel] = content
+        for sibling in sorted(skill_path.parent.rglob("*")):
+            if sibling.is_file() and sibling != skill_path:
+                sib_rel = sibling.relative_to(root / ".agents")
+                targets[root / CODEX_PLUGIN_ROOT / sib_rel] = sibling.read_text(encoding="utf-8")
 
     for source in sorted(SHARED_RUNTIME_SUPPORT):
         content = (root / source).read_text(encoding="utf-8")
@@ -699,7 +705,14 @@ def rendered_targets(
     # Vendor Claude skills, commands, and agents at the plugin's default locations.
     for skill_path in sorted((root / "claude" / "skills").glob("*/SKILL.md")):
         rel = skill_path.relative_to(root / "claude")
-        targets[root / CLAUDE_PLUGIN_ROOT / rel] = skill_path.read_text(encoding="utf-8")
+        content = openspec_surfaces.get(skill_path, None)
+        if content is None:
+            content = skill_path.read_text(encoding="utf-8")
+        targets[root / CLAUDE_PLUGIN_ROOT / rel] = content
+        for sibling in sorted(skill_path.parent.rglob("*")):
+            if sibling.is_file() and sibling != skill_path:
+                sib_rel = sibling.relative_to(root / "claude")
+                targets[root / CLAUDE_PLUGIN_ROOT / sib_rel] = sibling.read_text(encoding="utf-8")
     for cmd_path in sorted((root / "claude" / "commands").glob("*.md")):
         targets[root / CLAUDE_PLUGIN_ROOT / "commands" / cmd_path.name] = cmd_path.read_text(encoding="utf-8")
     for agent_path in sorted((root / "claude" / "agents").glob("*.md")):

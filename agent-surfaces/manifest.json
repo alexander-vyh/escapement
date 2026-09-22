@@ -1627,6 +1627,33 @@
       }
     },
     {
+      "id": "discovery",
+      "target": ".agents/skills/discovery/SKILL.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/discovery/SKILL.md"
+        }
+      }
+    },
+    {
+      "id": "work-breakdown",
+      "target": ".agents/skills/work-breakdown/SKILL.md",
+      "source": "agent-surfaces/skills/work-breakdown.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/work-breakdown/SKILL.md"
+        }
+      }
+    },
+    {
       "id": "openspec-apply-change",
       "target": ".agents/skills/openspec-apply-change/SKILL.md",
       "source": "agent-surfaces/openspec/apply.md",
