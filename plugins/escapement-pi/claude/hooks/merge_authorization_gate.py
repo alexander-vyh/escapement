@@ -21,6 +21,13 @@ denies rather than allows. An unconfigured or unresolvable repo behaves exactly
 like today — stop and ask — it is never upgraded to authorization by a broken
 check.
 
+TWO conditions, not one. `auto_merge_on_green` is an authorization to merge a pull
+request *whose checks pass*, and for a long time this gate checked only the first half:
+the declaration resolved, the merge was allowed, and no check was ever observed. That is
+why AGENTS.md had to carry `merge-green-status=unsupported` as a standing admission.
+`_merge_green_status.observe()` now supplies the second half. `--auto` is honored as an
+equivalent, because it hands the same condition to GitHub to enforce.
+
 Escape path: `# merge-authorization-waiver: <reason>` appended to the `gh pr merge`
 command, once the user has given explicit go-ahead in the conversation this turn.
 The denial reason always names the TRUE cause (no repo.json declaration, or a
@@ -60,6 +67,11 @@ except ImportError:  # pragma: no cover - fail TOWARD checking, never silently d
 
     def is_gh_pr_command(command: str, *_verbs: str) -> bool:
         return bool(command) and _FALLBACK_MERGE_RE.search(command) is not None
+
+try:
+    from _merge_green_status import observe as _observe_green
+except ImportError:  # pragma: no cover - fail TOWARD denying, never silently allow
+    _observe_green = None
 
 
 def _add_repo_outcome_to_path() -> None:
@@ -148,6 +160,39 @@ def _authorizes_auto_merge(cwd: str) -> Optional[bool]:
         return None
 
 
+def _not_green_reason(status, command: str) -> str:
+    """The declaration authorizes merging a GREEN pull request. This is the other half."""
+    ref = status.ref or "the current branch's PR"
+    headline = {
+        "failing": f"{ref} is NOT green — {status.detail}.",
+        "pending": f"{ref} is not green YET — {status.detail}.",
+        "no-checks": (
+            f"{ref} has no checks, so there is no green to observe. "
+            f"`auto_merge_on_green` authorizes merging a green pull request; it cannot "
+            f"authorize one whose state is unobservable."
+        ),
+        "unknown": (
+            f"The check state of {ref} could not be observed — {status.detail}. "
+            f"An unobservable state is never upgraded into an authorization."
+        ),
+    }.get(status.state, f"{ref} is not green — {status.detail}.")
+
+    return (
+        f"merge_authorization_gate: {headline}\n\n"
+        f"This repo declares auto_merge_on_green, which is an authorization to merge "
+        f"when the checks pass — not an authorization to merge. Escape paths:\n"
+        f"  (1) Inspect it yourself: `gh pr checks {status.ref or ''}`.\n"
+        f"  (2) Let GitHub hold the condition: re-run with `--auto`, which merges the "
+        f"PR the moment its checks go green.\n"
+        f"  (3) Wait for the run to finish and retry.\n"
+        f"  (4) If merging without green is genuinely correct here, get the user's "
+        f"explicit go-ahead THIS turn and retry with "
+        f"`# merge-authorization-waiver: <reason>` appended to the command.\n"
+        f"Report the true cause: this is this repo's own check state, not an external "
+        f"or platform-level restriction."
+    )
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
@@ -180,14 +225,53 @@ def main() -> int:
 
     authorized = _authorizes_auto_merge(cwd)
     if authorized:
+        # The declaration is half the condition. `auto_merge_on_green` says "green",
+        # and until now nothing looked. A declaration-only allow is what let this repo
+        # merge without any observed check state at all.
+        if _observe_green is None:
+            reason = (
+                "merge_authorization_gate: the green-status observer could not be "
+                "imported, so check state is unobservable. An unresolvable check is "
+                "never upgraded into an authorization. Escape: re-run with `--auto` so "
+                "GitHub holds the green condition, or append "
+                "`# merge-authorization-waiver: <reason>` after getting the user's "
+                "explicit go-ahead this turn."
+            )
+            _record_signal(
+                gate_name="merge_authorization_gate",
+                decision="deny",
+                reason="green observer unavailable",
+                command=command,
+                cwd=cwd,
+            )
+            _emit_deny(reason)
+
+        status = _observe_green(command, cwd)
+        if status.merge_worthy:
+            _record_signal(
+                gate_name="merge_authorization_gate",
+                decision="allow",
+                reason=(
+                    "repo declares auto_merge_on_green with intended_outcome >= merged, "
+                    f"and the PR is {status.state} ({status.detail})"
+                ),
+                command=command,
+                cwd=cwd,
+                green_state=status.state,
+                pr_ref=status.ref,
+            )
+            return 0
+
         _record_signal(
             gate_name="merge_authorization_gate",
-            decision="allow",
-            reason="repo declares auto_merge_on_green with intended_outcome >= merged",
+            decision="deny",
+            reason=f"authorized but not green: {status.state} — {status.detail}",
             command=command,
             cwd=cwd,
+            green_state=status.state,
+            pr_ref=status.ref,
         )
-        return 0
+        _emit_deny(_not_green_reason(status, command))
 
     _record_signal(
         gate_name="merge_authorization_gate",

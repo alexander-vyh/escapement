@@ -52,11 +52,6 @@
   },
   "support_claims": [
     {
-      "id": "merge-green-status",
-      "status": "unsupported",
-      "reason": "The merge authorization hook resolves repository-declared merge authority but does not observe pull-request check or green status."
-    },
-    {
       "id": "confirm-class-enforcement",
       "status": "reserved",
       "reason": "Repository confirmation classes are stored but are not currently enforced by the merge authorization hook."

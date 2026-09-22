@@ -101,7 +101,10 @@ CORE_IDENTITY_SURFACES = (
     Path("CLAUDE.md"),
 )
 EXPECTED_SUPPORT_CLAIMS = {
-    "merge-green-status": "unsupported",
+    # "merge-green-status" is deliberately absent. This list enumerates GAPS; an
+    # absent id reads as full enforcement. The merge gate now requires both declared
+    # authority and an observed-green pull request (_merge_green_status.observe), so
+    # carrying it here would be a false admission rather than an honest one.
     "confirm-class-enforcement": "reserved",
     "deploy-execution": "informational",
     "code-touch-detection": "partial",
@@ -125,10 +128,6 @@ EXPECTED_SUPPORT_REASONS = {
         "and are high-recall but not exhaustive, so a sufficiently indirect write can "
         "evade detection. A missing transcript, missing cwd, or unavailable git all "
         "resolve to did-not-touch-code, so the gate fails open by design."
-    ),
-    "merge-green-status": (
-        "The merge authorization hook resolves repository-declared merge authority but "
-        "does not observe pull-request check or green status."
     ),
     "confirm-class-enforcement": (
         "Repository confirmation classes are stored but are not currently enforced by "
