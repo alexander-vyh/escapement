@@ -337,7 +337,7 @@ Checklist:
 - Is the walking skeleton actually minimal, or has scope crept in?
 - Would a lean practitioner cut anything from this list?
 
-Dispatch this as an isolated subagent so the review carries no anchoring bias from this conversation: `Agent(subagent_type: "personal-lean-advisor")`, prompt it with the breakdown's tasks (title, acceptance criteria, spec-id) plus the checklist above, and revise the breakdown if it finds waste.
+Run through the checklist above yourself before presenting the breakdown -- no isolated subagent dispatch is available on this host. Revise the breakdown if the checklist finds waste.
 
 The user never sees the lean review unless it changes something — then note: "Lean review trimmed [N] tasks: [brief explanation]."
 

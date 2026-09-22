@@ -1,6 +1,19 @@
 ---
-name: "work-breakdown"
-description: "Translate a validated design (from openspec/changes/ or docs/plans/) into a beads task graph with outcome-based acceptance criteria, failure modes, scope boundaries, and spec traceability via --spec-id. Invoked after the walking skeleton validates assumptions."
+op: work-breakdown
+slots:
+  lean_review_dispatch:
+    claude: "Dispatch this as an isolated subagent so the review carries no anchoring bias from this conversation: `Agent(subagent_type: \"personal-lean-advisor\")`, prompt it with the breakdown's tasks (title, acceptance criteria, spec-id) plus the checklist above, and revise the breakdown if it finds waste."
+    codex: "Run through the checklist above yourself before presenting the breakdown -- no isolated subagent dispatch is available on this host. Revise the breakdown if the checklist finds waste."
+targets:
+  claude: claude/skills/work-breakdown/SKILL.md
+  codex: .agents/skills/work-breakdown/SKILL.md
+frontmatter:
+  claude:
+    name: "work-breakdown"
+    description: "Translate a validated design (from openspec/changes/ or docs/plans/) into a beads task graph with outcome-based acceptance criteria, failure modes, scope boundaries, and spec traceability via --spec-id. Invoked after the walking skeleton validates assumptions."
+  codex:
+    name: "work-breakdown"
+    description: "Translate a validated design (from openspec/changes/ or docs/plans/) into a beads task graph with outcome-based acceptance criteria, failure modes, scope boundaries, and spec traceability via --spec-id. Invoked after the walking skeleton validates assumptions."
 ---
 
 # Work Breakdown
@@ -337,7 +350,7 @@ Checklist:
 - Is the walking skeleton actually minimal, or has scope crept in?
 - Would a lean practitioner cut anything from this list?
 
-Dispatch this as an isolated subagent so the review carries no anchoring bias from this conversation: `Agent(subagent_type: "personal-lean-advisor")`, prompt it with the breakdown's tasks (title, acceptance criteria, spec-id) plus the checklist above, and revise the breakdown if it finds waste.
+{{slot:lean_review_dispatch}}
 
 The user never sees the lean review unless it changes something — then note: "Lean review trimmed [N] tasks: [brief explanation]."
 
