@@ -9,12 +9,12 @@ openspec/changes/{name}/design.md (excluding archive/) with:
   - ## Non-Goals
   - ## Riskiest Assumption
 
-Bugs and chores are always allowed. Standalone tasks trigger an "ask" prompt.
+Bugs, chores, and tasks are always allowed.
 
 Input (via stdin):
   JSON with hook_event_name, tool_name, tool_input
 Exit codes:
-  0 — allow, ask, OR deny. The deny decision is carried by the
+  0 — allow OR deny. The deny decision is carried by the
       permissionDecision="deny" JSON on stdout (the single-signal contract).
       Exit 2 is the mutually-exclusive legacy stderr path; emitting both is a
       contradictory double-block, so this hook never exits 2.
@@ -66,11 +66,6 @@ def parse_type_flag(command: str) -> str | None:
     return None
 
 
-def has_parent_flag(command: str) -> bool:
-    """Check if the command has a --parent flag."""
-    return bool(re.search(r'--parent\b', command))
-
-
 # ---------------------------------------------------------------------------
 # Design doc validation
 # ---------------------------------------------------------------------------
@@ -119,18 +114,6 @@ def check_design_doc_sections(doc: Path) -> list[str]:
 
 def allow() -> int:
     """Allow the action (exit 0, no output needed)."""
-    return 0
-
-
-def ask(hook_event: str, message: str) -> int:
-    """Prompt the user for confirmation (exit 0 with ask decision)."""
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": hook_event,
-            "permissionDecision": "ask",
-            "permissionDecisionReason": message,
-        }
-    }))
     return 0
 
 
@@ -219,36 +202,13 @@ def main() -> int:
             )
             return allow()
 
-        # No valid feature-schema design doc — ask, showing what's missing on the
-        # most recent partial doc.
-        docs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        best_doc = docs[0]
-        missing_list = ", ".join(check_design_doc_sections(best_doc))
-        _record_signal(
-            gate_name="discovery_gate",
-            decision="ask",
-            reason=f"design doc missing sections: {missing_list}",
-            story_type=story_type,
-            doc=str(best_doc.relative_to(project_dir)),
-        )
-        return ask(
-            hook_event,
-            f"No design doc with required sections found. "
-            f"Most recent doc '{best_doc.relative_to(project_dir)}' is missing: "
-            f"{missing_list}. Add them or say 'proceed' to continue anyway.",
-        )
-
-    # Task (explicit or default when no -t flag) without --parent → ask
-    if story_type == "task" or story_type is None:
-        if not has_parent_flag(command):
-            return ask(
-                hook_event,
-                "Is this new feature work? Run /discovery first, or say 'proceed'.",
-            )
-        # Task with --parent is fine (subtask of existing work)
+        # A partial design doc no longer gates. The ask tier this branch used
+        # to emit was retired (escapement-e9v.12): no host records an
+        # approve/refuse outcome for an ask, so the class was unmeasurable.
+        # Section completeness is not enforced.
         return allow()
 
-    # Unknown type — allow
+    # Tasks and unknown types — allow
     return allow()
 
 

@@ -886,10 +886,20 @@ def main() -> int:
     if not issues:
         if fixture_issues:
             return allow_with_fixture_warning(fixture_issues, fixture_scan)
+        # A truncated fixture scan is a degraded allow, not a clean one: the
+        # gate could not read every fixture it was asked about. Plain `allow`
+        # rows are no longer persisted (escapement-e9v.12 — 56% of the corpus
+        # recorded that nothing happened), so a truncated scan records as
+        # `allow-with-warning` to keep the coverage gap visible in the corpus.
+        truncated = bool(fixture_scan.get("fixture_scan_truncated_files"))
         _record_signal(
             gate_name="implementation_echo_test_gate",
-            decision="allow",
-            reason="no implementation-echo patterns detected",
+            decision="allow-with-warning" if truncated else "allow",
+            reason=(
+                "no implementation-echo patterns detected; fixture scan truncated"
+                if truncated
+                else "no implementation-echo patterns detected"
+            ),
             **fixture_scan,
         )
         return allow()

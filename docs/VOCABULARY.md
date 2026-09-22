@@ -429,7 +429,10 @@ implementation. Sequence: **Outcome → Oracle → Constraints → Tests → Cod
 - **Oracle downgrade** — Weakening what a test *proves* to make it pass: swapping a
   business-outcome assertion for an implementation detail, testing an intermediate artifact
   instead of the user-facing output, removing a negative control. Forbidden.
-  *In repo:* `claude/rules/never-suppress.md`; `claude/hooks/oracle_downgrade_warning_gate.py`.
+  *In repo:* `claude/rules/never-suppress.md`; `claude/hooks/oracle_strength_diff.py`
+  (the corpus-validated strength differ, invoked deliberately — the hooks that fired it
+  at every commit were retired in escapement-e9v.12 after a 10-case replay corpus showed
+  no tier of it could discriminate a downgrade from legitimate red→green TDD).
 
 - **Positive control** — A fixture/input that proves valid output is *not accidentally
   dropped* (the fix didn't make the result empty).

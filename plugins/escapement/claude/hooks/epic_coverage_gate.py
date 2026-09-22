@@ -401,7 +401,7 @@ def deny(message: str) -> NoReturn:
     # *alongside* this JSON is the contradictory double-block fxh.7 removed
     # from every other hook (Claude Code treats exit 2 as its own
     # stderr-block signal; pairing it with a deny-JSON sends two competing
-    # blocks). Mirror discovery-close-gate.py's exit-0 structured-decision path.
+    # blocks). The decision is the JSON document; the exit status is only 0.
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

@@ -38,7 +38,12 @@ PLUGIN_HOOKS = ROOT / "plugins" / "escapement-claude" / "hooks" / "hooks.json"
 MIGRATED_FROM_TEMPLATE = {"project-bootstrap.sh"}
 
 # Positive control: guards against a "fix" that just deletes hooks wholesale.
-MIN_PLUGIN_HOOK_SCRIPTS = 41
+# Re-baselined 41 -> 39 in escapement-e9v.12, which deliberately retired six
+# hooks (both oracle_downgrade_*, tdd-gate, outcome_assertion_gate,
+# discovery-nudge, discovery-close-gate). The real migration oracle is the
+# MIGRATED_FROM_TEMPLATE set difference above; this floor only catches a
+# wholesale drop, so it must move deliberately, never automatically.
+MIN_PLUGIN_HOOK_SCRIPTS = 39
 
 _SCRIPT_RE = re.compile(r"([\w.-]+\.(?:py|sh))")
 

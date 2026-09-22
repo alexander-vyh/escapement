@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Public hook entrypoint for Test Oracle Brief edit and landing gates."""
+"""Public hook entrypoint for the Test Oracle Brief landing gate.
+
+Edit events are observed for signal only; the landing gate is the sole
+blocking tier. The edit-time ask decision was retired in escapement-e9v.12 —
+no host records an approve/refuse outcome for an ask, so the class was
+unmeasurable.
+"""
 
 from __future__ import annotations
 
@@ -43,21 +49,6 @@ FILE_PATH_KEYS = ("file_path", "relative_path", "notebook_path")
 
 
 def allow() -> int:
-    return 0
-
-
-def ask(reason: str) -> int:
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "ask",
-                    "permissionDecisionReason": reason,
-                }
-            }
-        )
-    )
     return 0
 
 
@@ -116,8 +107,6 @@ def block_message(
     reason: str,
     repo_root: Path,
     files: list[str],
-    *,
-    ask_decision: bool,
 ) -> str:
     sample_files = "\n".join(f"  - {name}" for name in files[:8])
     if len(files) > 8:
@@ -139,11 +128,6 @@ def block_message(
         + "\n\nRelevant changed/target files:\n"
         + (sample_files if sample_files else "  - unknown")
     )
-    if ask_decision:
-        message += (
-            "\n\nThis ask decision is recorded. This hook cannot observe or record "
-            "a later host approval or rejection."
-        )
     return message
 
 
@@ -186,16 +170,9 @@ def handle_edit_gate(data: dict) -> int:
         )
         return allow()
 
-    reason = reason or "Test Oracle Brief is missing required explanatory content."
-    record_decision_signal(
-        data,
-        decision="ask",
-        reason=reason,
-        category=category,
-        target=target,
-        stage="edit",
-    )
-    return ask(block_message(reason, repo_root, [target], ask_decision=True))
+    # A missing or invalid brief no longer gates edits: the ask tier this
+    # branch used to emit was retired in escapement-e9v.12.
+    return allow()
 
 
 def _command_from(data: dict) -> str:
@@ -245,7 +222,7 @@ def handle_bash_landing_gate(data: dict) -> int:
         stage=stage,
         file_count=len(relevant),
     )
-    return deny(block_message(reason, repo_root, relevant, ask_decision=False))
+    return deny(block_message(reason, repo_root, relevant))
 
 
 def main() -> int:

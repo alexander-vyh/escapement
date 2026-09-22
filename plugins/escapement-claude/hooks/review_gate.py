@@ -129,17 +129,7 @@ _WARN_NO_REVIEW = (
     "adversarial-reviewer, test-quality-reviewer), OR\n"
     "  (2) the agent's name/description/prompt contains a review-word "
     "(review, audit, critique, etc.).\n\n"
-    "If you've already reviewed manually or this work doesn't need "
-    "review, say 'proceed' to close anyway."
-)
-
-# Concise remedy surfaced as the ask-decision reason. Names the concrete
-# escape path (dispatch a reviewer subagent, or say 'proceed') so the gate
-# is actionable rather than a bare prohibition (gate-design.md Rule 1).
-_ASK_REASON = (
-    "No review agent was dispatched before this close. Dispatch a "
-    "code-reviewer or adversarial-reviewer subagent first, or say "
-    "'proceed' to close without review."
+    "This notice does not block the close — it is advisory only."
 )
 
 
@@ -182,16 +172,12 @@ def main() -> int:
             )
             return 0
 
-        # No review agent — ask the user to confirm before closing. This is a
-        # soft gate: it never denies, only surfaces the missed review so the
-        # user can dispatch a reviewer or knowingly proceed.
-        #
-        # CANONICAL DECISION CONTRACT: the decision is signaled with a single
-        # mechanism — one permissionDecision JSON document on stdout, exit 0.
-        # Exit 2 is the mutually-exclusive legacy stderr-feedback path; emitting
-        # both the JSON decision *and* a non-zero exit is a contradictory
-        # double-signal. This advisory gate uses the same single-mechanism
-        # JSON-on-stdout-plus-exit-0 contract as the hard-deny gates.
+        # No review agent was dispatched. This gate is advisory: it emits a
+        # system message plus additionalContext and NO permissionDecision
+        # field, so the close always proceeds (same shape as
+        # bead_verify_nudge.py). The ask decision this branch used to emit was
+        # retired in escapement-e9v.12 — no host records an approve/refuse
+        # outcome for an ask, so the class was unmeasurable.
         _record_signal(
             gate_name="review_gate",
             decision="nudge",
@@ -201,8 +187,6 @@ def main() -> int:
             "systemMessage": _WARN_NO_REVIEW,
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "ask",
-                "permissionDecisionReason": _ASK_REASON,
                 "additionalContext": _WARN_NO_REVIEW,
             },
         }

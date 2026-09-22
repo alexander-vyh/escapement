@@ -51,9 +51,9 @@ except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
 
-# One owner for "does this command really invoke `bd <subcommand>`". Shared with
-# discovery-close-gate, which learned the hard way that a substring match fires
-# on prose. Missing sibling => the nudge stays silent rather than guessing.
+# One owner for "does this command really invoke `bd <subcommand>`", because a
+# substring match fires on prose. Missing sibling => the nudge stays silent
+# rather than guessing.
 try:
     from _bd_command import invokes as _bd_invokes
 except ImportError:  # pragma: no cover
@@ -89,7 +89,7 @@ def _is_bd_create(command: str) -> bool:
 
     Token-position aware so a `bd create` mentioned inside a quoted commit
     message or an echo does not trip the nudge. The parsing itself lives in
-    `_bd_command`, shared with the other bd-triggered gates.
+    `_bd_command`.
     """
     if _bd_invokes is None:
         return False

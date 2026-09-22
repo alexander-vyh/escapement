@@ -86,7 +86,6 @@ def test_claude_eval_workflow_profile_wires_escapement_context_and_openspec():
         "Bash(bd close:*)",
         "Bash(openspec:*)",
         "Bash(git worktree add:*)",
-        "Bash(gh pr create:*)",
     ):
         assert matcher in matchers
 

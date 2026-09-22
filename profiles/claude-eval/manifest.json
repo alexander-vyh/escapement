@@ -28,9 +28,7 @@
   "required_hooks": [
     "validate_no_shirking.py",
     "test_oracle_brief_gate.py",
-    "tdd-gate.py",
     "implementation_echo_test_gate.py",
-    "oracle_downgrade_warning_gate.py",
     "file_complexity_gate.py",
     "serena_preference_gate.py",
     "context_burn_detector.py",
@@ -45,11 +43,9 @@
     "discovery-gate.py",
     "spec_id_enforcement.py",
     "openspec_task_reconciliation_gate.py",
-    "discovery-close-gate.py",
     "epic_coverage_gate.py",
     "openspec_init_guard.py",
-    "beads_worktree_guard.py",
-    "outcome_assertion_gate.py"
+    "beads_worktree_guard.py"
   ],
   "excluded_surfaces": [
     "Claude authentication/session state",

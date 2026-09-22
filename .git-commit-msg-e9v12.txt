@@ -1,0 +1,39 @@
+Retire the ask decision class and both oracle_downgrade hooks (escapement-e9v.12)
+
+Across 106,724 gate-signal rows, `ask` fired 15,315 times and captured 17
+rationales; `deny` plus a named waiver captured 4,621. No host writes an
+approve/refuse row for an ask, so the class cannot be evaluated at a half-life
+review. Pi has no prompt primitive: its adapter mapped any non-allow decision
+to a hard block, so an ask there was a deny with no waiver flag. When the
+session-keyed fire-once dedup broke (escapement-kdrc regression: gates received
+per-call toolu_* ids; 54 single-use state dirs observed), that deny became
+unclearable and a live session bypassed every Bash gate through a non-Bash tool
+surface.
+
+A gate now decides mechanically and denies with a named escape, or it does not
+exist. Advisory prose addressed to an agent's memory is not a mechanism.
+
+Deleted: oracle_downgrade_warning_gate, oracle_downgrade_stop, _advisory_dedupe,
+tdd-gate, outcome_assertion_gate, discovery-nudge, discovery-close-gate, and the
+ask tiers of discovery-gate, review_gate and test_oracle_brief_gate (those three
+keep their deny/nudge behaviour). escapement-esc had already proved on a 10-case
+real corpus that no oracle-downgrade deny tier discriminates a weakening from
+legitimate red->green TDD, which is why nothing replaces them.
+oracle_strength_diff.py is retained as an explicitly-invoked CLI.
+
+_gate_signal.record no longer persists `allow` rows: 59,457 of 106,724 rows
+recorded that nothing happened. implementation_echo_test_gate now records a
+truncated fixture scan as allow-with-warning so degraded coverage stays visible.
+
+Also fixed, both surfaced by this change:
+- bin/escapement_worktree_root_health.py was missing from SHARED_RUNTIME_SUPPORT,
+  so a full re-render pruned a module escapement_worktree_git.py imports.
+- test_codex_behavioral_gate_has_exact_event_shape pinned a derived timeout sum
+  (139s); it now derives the budget from the dispatcher's own --gate-timeout
+  values, which is the hazard it meant to catch.
+
+The gate-decision replay corpus keeps all 180 recorded cases and its reviewer
+receipt byte-identical; 65 cases still execute and 115 skip with a reason
+naming the retired cell or the retired decision class.
+
+Full suite: 2960 passed, 7 skipped. python3 tools/render_agent_surfaces.py --check: clean.

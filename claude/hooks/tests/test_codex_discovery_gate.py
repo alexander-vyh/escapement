@@ -135,21 +135,18 @@ def test_codex_bug_create_bypasses_gate(tmp_path):
     assert output is None, "bug creates must be allowed without a design doc"
 
 
-def test_codex_incomplete_design_doc_asks_not_denies(tmp_path):
-    """Partial design doc (missing sections) results in ask, not silent allow.
+def test_codex_incomplete_design_doc_allows(tmp_path):
+    """Partial design doc (missing sections) allows.
 
-    A design doc that exists but lacks required sections should surface the gap —
-    an empty file must not masquerade as passing discovery.
+    The ask tier this branch used to emit was retired (escapement-e9v.12); it
+    must not have been escalated into a deny.
     """
     _make_design_doc(tmp_path, content="## Problem Statement\nOnly one section.\n")
     payload = _payload("bd create 'add recurring tasks' -t feature", str(tmp_path))
     code, output = _run_main(payload)
 
     assert code == 0
-    # Hook must signal something (ask or deny) rather than silently allowing
-    assert output is not None, (
-        "a partial design doc must not silently allow — the gate must surface the gap"
-    )
+    assert output is None, "a partial design doc must not block — the ask tier is retired"
 
 
 def test_codex_non_pretooluse_is_allowed(tmp_path):

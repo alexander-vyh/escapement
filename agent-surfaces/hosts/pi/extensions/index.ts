@@ -12,7 +12,7 @@ type PiAPI = {
 type Gate = { id: string; source: string; timeout_seconds: number };
 type HookOutput = {
   hookEventName: "PreToolUse";
-  permissionDecision?: "allow" | "ask" | "deny";
+  permissionDecision?: "allow" | "deny";
   permissionDecisionReason?: string;
   additionalContext?: string;
 };
@@ -23,11 +23,12 @@ const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_OUTPUT_BYTES = 1_048_576;
 
 // Pi supplies no conversation identifier, and event.toolCallId is unique per
-// call — keying ask-once gate dedup on it made every prompt fire forever
-// (escapement-kdrc). A per-load id is stable for this extension instance,
-// which is the lifetime those gates dedup over. If one process hosts several
-// conversations, they share the id: the worst case suppresses a repeat NUDGE
-// across conversations, never a deny, and the inline waiver remains.
+// call — keying once-per-session gate dedup on it made every prompt fire
+// forever (escapement-kdrc). A per-load id is stable for this extension
+// instance, which is the lifetime those gates dedup over. If one process
+// hosts several conversations, they share the id: the worst case suppresses
+// a repeat NUDGE across conversations, never a deny, and the inline waiver
+// remains.
 const SESSION_ID = randomUUID();
 
 function fail(message: string): never {
@@ -105,7 +106,6 @@ function parseDispatcherResponse(stdout: string): DispatcherResponse {
     if (
       hook.permissionDecision !== undefined
       && hook.permissionDecision !== "allow"
-      && hook.permissionDecision !== "ask"
       && hook.permissionDecision !== "deny"
     ) {
       return fail("dispatcher permission decision is invalid");
@@ -320,7 +320,7 @@ export default function escapementPi(pi: PiAPI): void {
         );
         surfaceDiagnostics(pi, result);
         const hook = result.hookSpecificOutput;
-        if (hook?.permissionDecision === "deny" || hook?.permissionDecision === "ask") {
+        if (hook?.permissionDecision === "deny") {
           return {
             block: true,
             reason: hook.permissionDecisionReason || "Escapement blocked this file write",
@@ -356,7 +356,7 @@ export default function escapementPi(pi: PiAPI): void {
       surfaceDiagnostics(pi, result);
       const hook = result.hookSpecificOutput;
       const decision = hook?.permissionDecision;
-      if (decision === "deny" || decision === "ask") {
+      if (decision === "deny") {
         return {
           block: true,
           reason: hook.permissionDecisionReason || "Escapement blocked this Bash call",

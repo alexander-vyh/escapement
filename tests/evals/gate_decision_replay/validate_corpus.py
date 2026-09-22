@@ -15,12 +15,32 @@ EVAL_DIR = Path(__file__).resolve().parent
 ROOT = EVAL_DIR.parents[2]
 DECISIONS = {"allow", "ask", "deny"}
 SUPPORTED_CELLS = {
-    ("tdd_gate", "claude"),
     ("test_oracle_brief_gate", "claude"),
     ("test_oracle_brief_gate", "codex"),
+}
+# escapement-e9v.12 (2026-09-21) deleted these gates outright, so their cases can
+# no longer be executed against a shipped surface. The rows stay: corpus, labels
+# and source events are recorded evidence, and reviewer-receipt.json attests the
+# labels exactly as written.
+RETIRED_CELLS = {
+    ("tdd_gate", "claude"),
     ("outcome_assertion_gate", "claude"),
     ("outcome_assertion_gate", "codex"),
 }
+KNOWN_CELLS = SUPPORTED_CELLS | RETIRED_CELLS
+# escapement-e9v.12 also retired the `ask` permission-decision class repo-wide. A
+# case whose attested label expects `ask` describes a decision no shipped gate can
+# emit any more, so it is unreplayable rather than wrong.
+RETIRED_DECISIONS = {"ask"}
+
+
+def skip_reason(case: dict[str, Any], label: dict[str, Any]) -> str | None:
+    """Why this case cannot be replayed today, or None if it still runs."""
+    if (case.get("gate"), case.get("host")) in RETIRED_CELLS:
+        return "retired cell: hook deleted in escapement-e9v.12"
+    if label.get("expected_decision") in RETIRED_DECISIONS:
+        return "retired decision class: ask, escapement-e9v.12"
+    return None
 
 
 class ValidationError(ValueError):
@@ -71,9 +91,11 @@ def validate(
         raise ValidationError("source events do not join exactly to corpus cases")
 
     cell_counts = Counter((row.get("gate"), row.get("host")) for row in cases)
-    if set(cell_counts) != SUPPORTED_CELLS or set(cell_counts.values()) != {36}:
+    # Every case must belong to a known cell and every known cell keeps its full
+    # 36 rows. Supported cells replay; retired cells are held as evidence.
+    if set(cell_counts) != KNOWN_CELLS or set(cell_counts.values()) != {36}:
         raise ValidationError(
-            f"supported cell allocation is incomplete: {dict(cell_counts)}"
+            f"known cell allocation is incomplete: {dict(cell_counts)}"
         )
 
     source_revision = receipt.get("source_revision")
@@ -105,11 +127,15 @@ def validate(
             raise ValidationError(f"{case['case_id']} has the wrong policy revision")
         if case.get("source_revision") != source_revision:
             raise ValidationError(f"{case['case_id']} has the wrong source revision")
-        surface = Path(str(case.get("surface", "")))
+        surface = Path(str(case.get("surface") or ""))
+        # A retired cell's surface was deleted with its gate, so only its shape is
+        # still checkable.
+        retired_cell = (case.get("gate"), case.get("host")) in RETIRED_CELLS
         if (
-            surface.is_absolute()
+            not case.get("surface")
+            or surface.is_absolute()
             or ".." in surface.parts
-            or not (ROOT / surface).is_file()
+            or (not retired_cell and not (ROOT / surface).is_file())
         ):
             raise ValidationError(f"{case['case_id']} has an invalid public surface")
         source = sources[case["source_event_id"]]

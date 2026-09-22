@@ -74,7 +74,6 @@ SHARED_HOOK_SUPPORT = {
     "claude/hooks/_effective_cwd.py",
     "claude/hooks/_worktree_cli.py",
     "claude/hooks/_gate_signal.py",
-    "claude/hooks/_advisory_dedupe.py",
     "claude/hooks/_local_judge_client.py",
     "claude/hooks/_gh_command.py",
     # Landing-time gates share repository-neutral origin/HEAD + merge-base
@@ -87,10 +86,6 @@ SHARED_HOOK_SUPPORT = {
     # One owner for how a hook speaks to a host. A wrong wire shape is silent:
     # the hook fires, decides correctly, and nothing happens.
     "claude/hooks/_host_output.py",
-    # Both advisory boundaries use the corpus-backed per-function strength
-    # differ; its parser is a required transitive sibling in installed hosts.
-    "claude/hooks/oracle_strength_diff.py",
-    "claude/hooks/oracle_strength_parse.py",
     # implementation_echo_test_gate imports this policy helper in both hosts.
     # Omitting it makes the defensive import fallback hard-deny fixture echoes.
     "claude/hooks/data_fixture_echo.py",
@@ -120,6 +115,11 @@ SHARED_RUNTIME_SUPPORT = {
     "bin/escapement_worktree_rollback_lock.py",
     "bin/escapement_worktree_rollback_ref.py",
     "bin/escapement_worktree_root.py",
+    # escapement_worktree_git.py imports this at module scope; omitting it made
+    # the rendered wrapper's worktree CLI ImportError on first use. It was
+    # present in the committed plugin trees but absent from this list, so any
+    # full re-render pruned it (found by escapement-e9v.12's re-render).
+    "bin/escapement_worktree_root_health.py",
 }
 CODEX_HOOK_SUPPORT = {
     # Codex Bash policy gates execute through one in-process dispatcher to avoid
@@ -984,7 +984,6 @@ def validate_codex_surfaces(targets: dict[Path, str], manifest: dict[str, Any]) 
     for required in (
         "test_oracle_brief_gate.py",
         "implementation_echo_test_gate.py",
-        "oracle_downgrade_warning_gate.py",
     ):
         if not any(required in command for command in plugin_commands):
             errors.append(f"Codex plugin hooks must include {required}")

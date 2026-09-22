@@ -74,8 +74,10 @@ escape — the gate cannot silently omit a waiver path.
 - **`discovery_input_gate.py`** — `schema: rapid` is a first-class
   exemption; `none — <reason>` is accepted as a filled value for
   fields that genuinely don't apply.
-- **`tdd-gate.py`** — denial says `say 'proceed' to skip TDD for this
-  change`. Agent-invokable, zero-friction, no source-reading required.
+- **`beads_worktree_guard.py`** — the denial prints the exact
+  `escapement-worktree create --repo … --name … --branch …` command for
+  the situation at hand. The escape is the correct action, spelled out;
+  no source-reading, no human round trip.
 - **`serena_preference_gate.py`** — denial enumerates four alternative
   Serena calls with the correct parameters injected for *this specific
   file path*. The "escape" IS the correct path; the gate is a redirect
@@ -117,8 +119,8 @@ Minimum acceptable persistence shapes:
   keyed by gate and decision. Becomes the labeled corpus for revising
   the gate's heuristic.
 
-A gate whose only output is a conversation-level `systemMessage`,
-`ask` reason, or `deny` reason produces no learning data and cannot
+A gate whose only output is a conversation-level `systemMessage` or
+`deny` reason produces no learning data and cannot
 be evaluated for half-life review (Operating Rule 1 from the
 principle file). You cannot prune what you cannot count.
 
@@ -131,22 +133,18 @@ remediated — `claude/hooks/_gate_signal.py` now provides a shared
 `record()` helper that appends to `.beads/.gate-signal.jsonl`, and
 the corpus has accumulated real decisions across many sessions.
 
-**Current state (as of 2026-05-29):** 15 gates emit persistent
+**Current state (as of 2026-09-21):** 11 gates emit persistent
 signal via `_gate_signal.record()`:
 
 - `context_burn_detector.py`
 - `discovery_input_gate.py`
-- `discovery-close-gate.py`
 - `discovery-gate.py`
 - `enforce_named_agents.py`
 - `implementation_echo_test_gate.py`
 - `no_direct_send_guard.py`
-- `oracle_downgrade_warning_gate.py`
-- `outcome_assertion_gate.py`
 - `review_gate.py`
 - `serena_preference_gate.py`
 - `spec_id_enforcement.py`
-- `tdd-gate.py`
 - `test_oracle_brief_gate.py`
 - `validate_no_shirking.py`
 
@@ -157,7 +155,6 @@ question for each is whether it should escalate to signal-worthy
 decisions, not whether it is currently in violation:
 
 - `design_doc_location_guard.py`
-- `discovery-nudge.py`
 - `mol_status_check.py`
 - `openspec_init_guard.py`
 - `review_nudge.py`

@@ -15,7 +15,11 @@ from types import ModuleType
 from typing import Any
 
 
-DECISION_STRENGTH = {"allow": 1, "ask": 2, "deny": 3}
+# The full permission-decision ladder: a gate either allows or blocks. An
+# unrecognized decision string is dropped by _aggregate rather than ranked,
+# so a stale gate emitting a retired class cannot crash the dispatcher or
+# leak an unhandled decision to the host.
+DECISION_STRENGTH = {"allow": 1, "deny": 2}
 MAX_PAYLOAD_BYTES = 1_048_576
 
 

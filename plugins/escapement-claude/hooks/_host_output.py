@@ -4,7 +4,12 @@ One owner, because getting it wrong is silent. A hook that denies in the wrong
 shape is deployed, fires, computes the right verdict, and changes nothing --
 which is what shipped in #205 and again in #208.
 
-Captured behavior, all three from live sessions rather than from docs:
+There are exactly two decision classes a hook may emit: `allow` (say nothing,
+which every host reads as the absence of a verdict) and `deny`. The old `ask`
+class is retired — no host wrote an approve/refuse row, so it was a hard block
+with no waiver wearing a question mark (escapement-e9v.12).
+
+Captured behavior, both from live sessions rather than from docs:
 
   deny      `hookSpecificOutput.permissionDecision` with status 0.
 

@@ -21,7 +21,6 @@ EXPECTED_CODEX_GATE = {
     "matcher": "Bash",
     "dispatcher": "codex_pretool_dispatch.py",
     "gate": "claude/hooks/test_oracle_brief_gate.py",
-    "timeout": 139,
 }
 CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = 'python3 -B "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"'
 CODEX_PLUGIN_CONTEXT_FRAGMENT = (
@@ -624,7 +623,6 @@ def test_codex_plugin_wrapper_hooks_are_self_contained_and_codex_shaped():
     assert CODEX_PLUGIN_CONTEXT_FRAGMENT in commands
     assert any("test_oracle_brief_gate.py" in command for command in commands)
     assert any("implementation_echo_test_gate.py" in command for command in commands)
-    assert any("oracle_downgrade_warning_gate.py" in command for command in commands)
 
     for command in commands:
         if "${PLUGIN_ROOT}/" not in command:
@@ -875,9 +873,20 @@ def test_codex_behavioral_gate_has_exact_event_shape():
         for hook in item.get("hooks", [])
         if EXPECTED_CODEX_GATE["dispatcher"] in hook.get("command", "")
         and EXPECTED_CODEX_GATE["gate"] in _dispatcher_gate_paths(hook["command"])
-        and hook.get("timeout") == EXPECTED_CODEX_GATE["timeout"]
     ]
     assert len(matches) == 1, "Codex Test Oracle Brief gate must run through one Bash dispatcher"
+
+    # The host budget must cover every gate the dispatcher chains, or the last
+    # gate is killed mid-decision and the command proceeds ungated. Derived
+    # from the command, never pinned: retiring or adding a gate legitimately
+    # changes the total, and the literal that used to sit here (139s) failed
+    # the roster change rather than the hazard (escapement-e9v.12).
+    command = matches[0]["command"]
+    gate_budget = sum(int(t) for t in re.findall(r"--gate-timeout\s+(\d+)", command))
+    assert gate_budget > 0, "dispatcher must declare per-gate timeouts"
+    assert matches[0]["timeout"] >= gate_budget, (
+        f"dispatcher budget {matches[0]['timeout']}s is under its gates' {gate_budget}s"
+    )
 
 
 def test_root_checkout_guard_is_enabled_only_where_command_cwd_is_verified():
@@ -952,7 +961,6 @@ def test_claude_path_classifying_gates_exclude_serena_without_project_root():
     path_classifiers = {
         "root_checkout_guard",
         "test_oracle_brief_gate",
-        "tdd-gate",
     }
     entries = {
         hook["id"]: hook

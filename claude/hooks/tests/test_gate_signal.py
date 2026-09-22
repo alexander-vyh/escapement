@@ -120,7 +120,7 @@ def test_record_appends_does_not_truncate(isolated_env, monkeypatch):
     beads_dir.mkdir()
     monkeypatch.setenv("BEADS_DIR", str(beads_dir))
 
-    record(gate_name="g1", decision="allow", reason="first")
+    record(gate_name="g1", decision="warn", reason="first")
     record(gate_name="g2", decision="deny", reason="second")
 
     lines = (beads_dir / _SIGNAL_FILENAME).read_text(
@@ -139,7 +139,7 @@ def test_record_omits_session_id_when_unset(isolated_env, monkeypatch):
     monkeypatch.setenv("BEADS_DIR", str(beads_dir))
     # CLAUDE_CODE_SESSION_ID is cleared by the fixture.
 
-    record(gate_name="g", decision="allow")
+    record(gate_name="g", decision="deny")
 
     entry = json.loads(
         (beads_dir / _SIGNAL_FILENAME).read_text(encoding="utf-8").strip()
@@ -148,6 +148,49 @@ def test_record_omits_session_id_when_unset(isolated_env, monkeypatch):
     # extras key omitted entirely when no extras passed.
     assert "extras" not in entry
 
+
+# ---------------------------------------------------------------------------
+# Allow rows are the gate's null result and are deliberately not persisted.
+# They were 59,457 of 106,724 rows in the live corpus with no reader, so every
+# query paid to filter past them. The skip must be invisible to callers: the
+# return value stays True, because a gate that treats a logging result as an
+# enforcement result would change behavior when the corpus shrinks.
+# ---------------------------------------------------------------------------
+
+def test_allow_rows_are_not_persisted(isolated_env, monkeypatch):
+    beads_dir = isolated_env / ".beads"
+    beads_dir.mkdir()
+    monkeypatch.setenv("BEADS_DIR", str(beads_dir))
+
+    persisted = record(gate_name="g", decision="allow", reason="nothing found")
+
+    assert persisted is True, "skipping an allow is not a persistence failure"
+    assert not (beads_dir / _SIGNAL_FILENAME).exists(), (
+        "an allow row must not reach the signal store"
+    )
+
+
+def test_every_non_allow_decision_still_persists(isolated_env, monkeypatch):
+    """Only the exact string 'allow' is skipped — near-misses still record."""
+    beads_dir = isolated_env / ".beads"
+    beads_dir.mkdir()
+    monkeypatch.setenv("BEADS_DIR", str(beads_dir))
+
+    decisions = [
+        "deny",
+        "warn",
+        "nudge",
+        "waiver-accepted",
+        "waiver-rejected",
+        "override-applied",
+        "override-rejected",
+        "allow-with-warning",
+    ]
+    for decision in decisions:
+        record(gate_name="g", decision=decision, reason="r")
+
+    lines = (beads_dir / _SIGNAL_FILENAME).read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["decision"] for line in lines] == decisions
 
 # ---------------------------------------------------------------------------
 # Negative control: no .beads/ anywhere → fail soft, no crash, no .beads-style
@@ -191,7 +234,7 @@ def test_record_fails_soft_on_unwritable_path(isolated_env, monkeypatch):
     monkeypatch.setenv("BEADS_DIR", str(beads_dir))
 
     # Must not raise despite the open() failing.
-    persisted = record(gate_name="g", decision="allow", reason="io error path")
+    persisted = record(gate_name="g", decision="deny", reason="io error path")
 
     assert persisted is False
     # The directory we created is still a directory (no file clobbered it).
@@ -324,7 +367,7 @@ def test_primary_beads_path_preferred_over_fallback(isolated_env, monkeypatch):
     fallback_dir = isolated_env / "fallback-home"
     monkeypatch.setenv(_gate_signal._FALLBACK_DIR_ENV, str(fallback_dir))
 
-    record(gate_name="g", decision="allow", reason="should go to .beads")
+    record(gate_name="g", decision="deny", reason="should go to .beads")
 
     assert (beads_dir / _SIGNAL_FILENAME).is_file()
     fallback_file = fallback_dir / _gate_signal._FALLBACK_FILENAME
@@ -369,7 +412,7 @@ def test_signal_sources_is_empty_when_nothing_was_ever_written(isolated_env):
 def test_signal_sources_finds_the_beads_store(isolated_env, monkeypatch):
     beads_dir = isolated_env / ".beads"
     beads_dir.mkdir()
-    record(gate_name="g", decision="allow", reason="r")
+    record(gate_name="g", decision="deny", reason="r")
 
     sources = _gate_signal.signal_sources()
 
@@ -380,7 +423,7 @@ def test_signal_sources_finds_the_fallback_store(isolated_env, monkeypatch):
     """No .beads/ anywhere: the row lands in the fallback and must be visible."""
     fallback_dir = isolated_env / "fallback"
     monkeypatch.setenv(_gate_signal._FALLBACK_DIR_ENV, str(fallback_dir))
-    record(gate_name="g", decision="ask", reason="r")
+    record(gate_name="g", decision="deny", reason="r")
 
     sources = _gate_signal.signal_sources()
 
@@ -392,10 +435,10 @@ def test_signal_sources_unions_both_stores(isolated_env, monkeypatch):
     """The real-world shape: some rows written without beads, some with."""
     fallback_dir = isolated_env / "fallback"
     monkeypatch.setenv(_gate_signal._FALLBACK_DIR_ENV, str(fallback_dir))
-    record(gate_name="early", decision="ask", reason="before beads existed")
+    record(gate_name="early", decision="deny", reason="before beads existed")
 
     (isolated_env / ".beads").mkdir()
-    record(gate_name="later", decision="allow", reason="after beads existed")
+    record(gate_name="later", decision="warn", reason="after beads existed")
 
     sources = _gate_signal.signal_sources()
 
@@ -423,7 +466,7 @@ def test_signal_sources_deduplicates_when_both_resolve_to_one_file(
     """Guard against double-counting if the fallback is pointed at .beads/."""
     beads_dir = isolated_env / ".beads"
     beads_dir.mkdir()
-    record(gate_name="g", decision="allow", reason="r")
+    record(gate_name="g", decision="deny", reason="r")
     monkeypatch.setenv(_gate_signal._FALLBACK_DIR_ENV, str(beads_dir))
     (beads_dir / _gate_signal._FALLBACK_FILENAME).write_text("", encoding="utf-8")
 

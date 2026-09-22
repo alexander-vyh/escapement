@@ -26,6 +26,8 @@ LEGACY_REGISTRATIONS = {
         "sha256": {
             "1213b2981f7a78664b749da5c107ce454df4d585568bd699909e4ed897df9fdb",
             "d9b69df769e10fe12146c988f30f0a83d542a567e1a27eb5abe8802b32a13a43",
+            # escapement-e9v.12 retired the edit-time ask tier, changing the bytes.
+            "9fee3f431e1da9caf1986fb13c2dbb5168860591704d0206bc2f2f215ee12732",
         },
     },
     "implementation_echo_test_gate.py": {
@@ -34,18 +36,9 @@ LEGACY_REGISTRATIONS = {
         "sha256": {
             "63b324594a1eb6ab2ebd1902c72e277fb7bfc280c7d6c98b752a7da76f8e511e",
             "1fa43667fbebac9555573729873faf3d269fc68d88f7e680570ef9abdf8ce19e",
-        },
-    },
-    "oracle_downgrade_warning_gate.py": {
-        "statusMessage": "Checking oracle downgrade warnings",
-        "timeout": 30,
-        "sha256": {
-            "ef0eb10e0a67cf6ca3609c51497d25cf98986e09aea5ad75ad12eb058fb3c3ff",
-            "b58fec6c22be3be34e68415ebfc70ecc7544b802e7cc45e9baf2da32939b95c8",
-            # advisory dedupe (escapement #212)
-            "9462736d321688cae99a555273c92cb5fdb043408db7823e9ded2b9c8e65af3c",
-            # dedupe invalidation on the clean path (escapement #213)
-            "515cbe42548206b27566531be91f23f9f080626edd9f8605699eb9a5333f7f2b",
+            # escapement-e9v.12: a truncated fixture scan now records
+            # allow-with-warning, since plain allow rows are not persisted.
+            "a5c11dd22cd3aefa0752b8924433026774cdd37c83aabfe664612ebaa268251a",
         },
     },
     "beads_worktree_guard.py": {

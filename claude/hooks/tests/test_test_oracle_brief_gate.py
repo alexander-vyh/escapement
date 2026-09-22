@@ -180,22 +180,7 @@ MIXED_PLACEHOLDER_BRIEF = _placeholder_brief(
     "todo",
 )
 
-MIXED_TRIVIAL_BRIEF = _placeholder_brief(
-    "x",
-    "explanation",
-    "same same same same",
-    "two words",
-    "## TODO",
-    "-",
-    "???",
-    "- x",
-    "x y z",
-)
-
 PLAUSIBLE_NONSENSE_BRIEF = _placeholder_brief(*(["alpha beta gamma"] * 9))
-IDENTICAL_BOILERPLATE_BRIEF = _placeholder_brief(
-    *(["This section explains the required outcome."] * 9)
-)
 MISASSIGNED_SECTION_BRIEF = _placeholder_brief(
     "Public JSON proves.",
     "Landing stays denied.",
@@ -206,89 +191,6 @@ MISASSIGNED_SECTION_BRIEF = _placeholder_brief(
     "Missing data blocks.",
     "Run public hooks.",
     "Users receive approval.",
-)
-
-INVALID_BRIEFS = (
-    pytest.param("", id="empty"),
-    pytest.param(" \n\t\n", id="whitespace"),
-    pytest.param(
-        SUBSTANTIVE_BRIEF.replace("## Final outcome verification", "## Verification"),
-        id="missing-section",
-    ),
-    pytest.param(_placeholder_brief(*(["TBD"] * 9)), id="tbd"),
-    pytest.param(_placeholder_brief(*(["todo"] * 9)), id="todo-case-insensitive"),
-    pytest.param(_placeholder_brief(*(["N/A"] * 9)), id="n-a"),
-    pytest.param(_placeholder_brief(*(["na"] * 9)), id="na-case-insensitive"),
-    pytest.param(_placeholder_brief(*(["???"] * 9)), id="question-marks"),
-    pytest.param(_placeholder_brief(*(["COMING SOON"] * 9)), id="coming-soon"),
-    pytest.param(_placeholder_brief(*(["-"] * 9)), id="dash"),
-    pytest.param(_placeholder_brief(*(["- \n* \n1. "] * 9)), id="empty-list-bodies"),
-    pytest.param(MIXED_PLACEHOLDER_BRIEF, id="mixed-placeholders"),
-    pytest.param(_placeholder_brief(*(["x"] * 9)), id="one-character"),
-    pytest.param(_placeholder_brief(*(["explanation"] * 9)), id="one-token"),
-    pytest.param(
-        _placeholder_brief(*(["outcome outcome outcome outcome"] * 9)),
-        id="repeated-token",
-    ),
-    pytest.param(_placeholder_brief(*(["two words"] * 9)), id="two-token"),
-    pytest.param(_placeholder_brief(*(["x y z"] * 9)), id="three-one-letter-tokens"),
-    pytest.param(_placeholder_brief(*(["## TODO"] * 9)), id="heading-placeholder"),
-    pytest.param(MIXED_TRIVIAL_BRIEF, id="mixed-trivial"),
-    pytest.param(PLAUSIBLE_NONSENSE_BRIEF, id="plausible-length-nonsense"),
-    pytest.param(IDENTICAL_BOILERPLATE_BRIEF, id="identical-boilerplate"),
-)
-
-_SUBSTANTIVE_SECTION_BODIES = (
-    "Relevant source edits require a reviewed behavioral oracle.",
-    "The public hook decision and appended signal row determine correctness.",
-    "Claude edits may ask, while landing commands must remain hard denied.",
-    "A wording-only change that still denies an edit is invalid.",
-    "Do not special-case only the Write payload.",
-    "A missing brief must ask before editing source code.",
-    "A complete brief must allow the same source edit.",
-    "Missing or placeholder-only content fails closed to an ask.",
-    "Execute canonical and rendered hooks and inspect their JSON and signal rows.",
-)
-_SINGLE_PLACEHOLDERS = ("TBD", "todo", "N/A", "na", "???", "COMING SOON", "-", "- \n* \n1. ", "TBD")
-SINGLE_PLACEHOLDER_BRIEFS = tuple(
-    pytest.param(
-        _placeholder_brief(
-            *(
-                placeholder if body_index == section_index else body
-                for body_index, body in enumerate(_SUBSTANTIVE_SECTION_BODIES)
-            )
-        ),
-        id=f"placeholder-only-{section.lower().replace('/', '-').replace(' ', '-')}",
-    )
-    for section_index, (section, placeholder) in enumerate(
-        zip(REQUIRED_SECTIONS, _SINGLE_PLACEHOLDERS, strict=True)
-    )
-)
-
-_SINGLE_TRIVIAL_BODIES = (
-    "x",
-    "explanation",
-    "same same same",
-    "two words",
-    "## TODO",
-    "- x",
-    "x y z",
-    "oneword",
-    "repeat repeat repeat",
-)
-SINGLE_TRIVIAL_BRIEFS = tuple(
-    pytest.param(
-        _placeholder_brief(
-            *(
-                trivial if body_index == section_index else body
-                for body_index, body in enumerate(_SUBSTANTIVE_SECTION_BODIES)
-            )
-        ),
-        id=f"trivial-only-{section.lower().replace('/', '-').replace(' ', '-')}",
-    )
-    for section_index, (section, trivial) in enumerate(
-        zip(REQUIRED_SECTIONS, _SINGLE_TRIVIAL_BODIES, strict=True)
-    )
 )
 
 
@@ -431,16 +333,6 @@ def assert_signal(
         "valid-brief": ("oracle brief", "valid"),
     }
     assert all(term in reason for term in expected_reason_terms[category]), reason
-
-
-def assert_honest_ask_reason(reason: str) -> None:
-    normalized = reason.lower()
-    assert "this ask decision is recorded" in normalized
-    assert "cannot observe or record a later host approval or rejection" in normalized
-    assert "proceed" not in normalized
-    assert "override" not in normalized
-    assert "approved" not in normalized
-    assert "accepted" not in normalized
 
 
 def test_manifest_payload_table_covers_every_registered_surface():
@@ -632,130 +524,17 @@ def test_extracted_landing_public_api_owns_command_and_changed_file_context(tmp_
     assert landing.landing_context("pytest", str(repo)) is None
 
 
-def test_claude_edit_blocks_relevant_file_without_brief(tmp_path):
-    """Manifest fixture: the former hard deny must become an approvable ask."""
-    repo = init_repo(tmp_path)
-    payload, target = edit_payload(repo, "Write")
-
-    result, output, rows = run_hook(CANONICAL_HOOK, repo, payload)
-
-    reason = assert_decision(result, output, "ask")
-    assert_honest_ask_reason(reason)
-    assert_signal(
-        rows,
-        decision="ask",
-        tool="Write",
-        target=target,
-        category="missing-brief",
-    )
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-@pytest.mark.parametrize("tool_name", _registered_tools("claude"))
-@pytest.mark.parametrize("brief_content", [None, MIXED_TRIVIAL_BRIEF], ids=["absent", "trivial"])
-def test_every_registered_claude_edit_surface_asks_for_absent_or_trivial_brief(
-    tmp_path, hook_path, tool_name, brief_content
-):
-    repo = init_repo(tmp_path)
-    if brief_content is not None:
-        write_brief(repo, brief_content)
-    payload, target = edit_payload(repo, tool_name)
-
-    result, output, rows = run_hook(hook_path, repo, payload)
-
-    reason = assert_decision(result, output, "ask")
-    assert_honest_ask_reason(reason)
-    assert_signal(
-        rows,
-        decision="ask",
-        tool=tool_name,
-        target=target,
-        category="missing-brief" if brief_content is None else "invalid-brief",
-    )
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-@pytest.mark.parametrize("brief_content", INVALID_BRIEFS)
-def test_placeholder_or_incomplete_brief_never_satisfies_edit_gate(tmp_path, hook_path, brief_content):
-    repo = init_repo(tmp_path)
-    write_brief(repo, brief_content)
-    payload, target = edit_payload(repo, "Write")
-
-    result, output, rows = run_hook(hook_path, repo, payload)
-
-    reason = assert_decision(result, output, "ask")
-    assert_honest_ask_reason(reason)
-    assert_signal(
-        rows,
-        decision="ask",
-        tool="Write",
-        target=target,
-        category="invalid-brief",
-    )
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-@pytest.mark.parametrize("brief_content", SINGLE_PLACEHOLDER_BRIEFS)
-def test_one_placeholder_section_invalidates_otherwise_substantive_brief(
-    tmp_path, hook_path, brief_content
-):
-    repo = init_repo(tmp_path)
-    write_brief(repo, brief_content)
-    payload, target = edit_payload(repo, "Write")
-
-    result, output, rows = run_hook(hook_path, repo, payload)
-
-    reason = assert_decision(result, output, "ask")
-    assert_honest_ask_reason(reason)
-    assert_signal(
-        rows,
-        decision="ask",
-        tool="Write",
-        target=target,
-        category="invalid-brief",
-    )
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-@pytest.mark.parametrize("brief_content", SINGLE_TRIVIAL_BRIEFS)
-def test_one_trivial_section_invalidates_otherwise_substantive_brief(
-    tmp_path, hook_path, brief_content
-):
-    repo = init_repo(tmp_path)
-    write_brief(repo, brief_content)
-    payload, target = edit_payload(repo, "Write")
-
-    result, output, rows = run_hook(hook_path, repo, payload)
-
-    reason = assert_decision(result, output, "ask")
-    assert_honest_ask_reason(reason)
-    assert_signal(
-        rows,
-        decision="ask",
-        tool="Write",
-        target=target,
-        category="invalid-brief",
-    )
-
-
 @pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
 @pytest.mark.parametrize("tool_name", _registered_tools("claude"))
 def test_concise_meaningful_brief_allows_every_registered_edit_surface(tmp_path, hook_path, tool_name):
     repo = init_repo(tmp_path)
     write_brief(repo, CONCISE_VALID_BRIEF)
-    payload, target = edit_payload(repo, tool_name)
+    payload, _ = edit_payload(repo, tool_name)
 
-    result, output, rows = run_hook(hook_path, repo, payload)
+    result, output, _ = run_hook(hook_path, repo, payload)
 
     assert result.returncode == 0, result.stderr
     assert output is None
-    assert_signal(
-        rows,
-        decision="allow",
-        tool=tool_name,
-        target=target,
-        category="valid-brief",
-    )
 
 
 def test_claude_edit_allows_relevant_file_with_valid_brief(tmp_path):
@@ -768,141 +547,6 @@ def test_claude_edit_allows_relevant_file_with_valid_brief(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert output is None
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-def test_section_responsive_brief_passes_but_same_bodies_under_wrong_headings_fail(
-    tmp_path, hook_path
-):
-    repo = init_repo(tmp_path)
-    payload, _ = edit_payload(repo, "Write")
-    write_brief(repo, CONCISE_VALID_BRIEF)
-
-    valid_result, valid_output, _ = run_hook(hook_path, repo, payload)
-
-    assert valid_result.returncode == 0, valid_result.stderr
-    assert valid_output is None
-
-    write_brief(repo, MISASSIGNED_SECTION_BRIEF)
-    invalid_result, invalid_output, _ = run_hook(hook_path, repo, payload)
-
-    assert_decision(invalid_result, invalid_output, "ask")
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-@pytest.mark.parametrize(
-    "tool_name,path_key,target_relative,use_absolute", EDGE_PATH_SURFACES
-)
-def test_dotdot_path_is_classified_by_resolved_source_target(
-    tmp_path, hook_path, tool_name, path_key, target_relative, use_absolute
-):
-    repo = init_repo(tmp_path)
-    write_target(repo, target_relative)
-    (repo / "docs").mkdir()
-    relative_input = (Path("docs") / ".." / target_relative).as_posix()
-    raw_path = str(repo / relative_input) if use_absolute else relative_input
-    payload = path_payload(repo, tool_name, path_key, raw_path)
-
-    result, output, rows = run_hook(hook_path, repo, payload)
-
-    assert_decision(result, output, "ask")
-    assert_signal(
-        rows,
-        decision="ask",
-        tool=tool_name,
-        target=target_relative,
-        category="missing-brief",
-    )
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-@pytest.mark.parametrize(
-    "tool_name,path_key,target_relative,use_absolute", EDGE_PATH_SURFACES
-)
-def test_symlink_under_exempt_directory_is_classified_by_resolved_source_target(
-    tmp_path, hook_path, tool_name, path_key, target_relative, use_absolute
-):
-    repo = init_repo(tmp_path)
-    target = write_target(repo, target_relative)
-    alias_relative = f"docs/source-alias{Path(target_relative).suffix}"
-    alias = repo / alias_relative
-    alias.parent.mkdir(parents=True)
-    alias.symlink_to(target)
-    raw_path = str(alias) if use_absolute else alias_relative
-    payload = path_payload(repo, tool_name, path_key, raw_path)
-
-    result, output, rows = run_hook(hook_path, repo, payload)
-
-    assert_decision(result, output, "ask")
-    assert_signal(
-        rows,
-        decision="ask",
-        tool=tool_name,
-        target=target_relative,
-        category="missing-brief",
-    )
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-@pytest.mark.parametrize(
-    "tool_name,path_key,target_relative,use_absolute", EDGE_PATH_SURFACES
-)
-def test_nonexistent_dotdot_path_is_classified_by_normalized_source_target(
-    tmp_path, hook_path, tool_name, path_key, target_relative, use_absolute
-):
-    repo = init_repo(tmp_path)
-    (repo / "docs").mkdir()
-    (repo / "src").mkdir()
-    target_path = Path(target_relative)
-    nonexistent_relative = target_path.with_name(f"new{target_path.suffix}").as_posix()
-    target = repo / nonexistent_relative
-    assert not target.exists()
-    relative_input = (Path("docs") / ".." / nonexistent_relative).as_posix()
-    raw_path = str(repo / relative_input) if use_absolute else relative_input
-    payload = path_payload(repo, tool_name, path_key, raw_path)
-
-    result, output, rows = run_hook(hook_path, repo, payload)
-
-    assert_decision(result, output, "ask")
-    assert_signal(
-        rows,
-        decision="ask",
-        tool=tool_name,
-        target=nonexistent_relative,
-        category="missing-brief",
-    )
-
-
-@pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
-@pytest.mark.parametrize(
-    "tool_name,path_key,target_relative,use_absolute", EDGE_PATH_SURFACES
-)
-def test_dangling_symlink_under_exempt_directory_uses_intended_source_target(
-    tmp_path, hook_path, tool_name, path_key, target_relative, use_absolute
-):
-    repo = init_repo(tmp_path)
-    (repo / "docs").mkdir()
-    (repo / "src").mkdir()
-    target_path = Path(target_relative)
-    nonexistent_relative = target_path.with_name(f"new{target_path.suffix}").as_posix()
-    alias_relative = f"docs/new-alias{target_path.suffix}"
-    alias = repo / alias_relative
-    alias.symlink_to(Path("..") / nonexistent_relative)
-    assert alias.is_symlink()
-    assert not alias.exists()
-    raw_path = str(alias) if use_absolute else alias_relative
-    payload = path_payload(repo, tool_name, path_key, raw_path)
-
-    result, output, rows = run_hook(hook_path, repo, payload)
-
-    assert_decision(result, output, "ask")
-    assert_signal(
-        rows,
-        decision="ask",
-        tool=tool_name,
-        target=nonexistent_relative,
-        category="missing-brief",
-    )
 
 
 @pytest.mark.parametrize("hook_path", CLAUDE_HOOKS)
@@ -1076,17 +720,10 @@ def test_codex_commit_allows_changed_code_with_valid_brief(tmp_path):
     write_brief(repo, SUBSTANTIVE_BRIEF)
     payload = landing_payload(repo, "git commit -m change")
 
-    result, output, rows = run_hook(CANONICAL_HOOK, repo, payload)
+    result, output, _ = run_hook(CANONICAL_HOOK, repo, payload)
 
     assert result.returncode == 0, result.stderr
     assert output is None
-    assert_signal(
-        rows,
-        decision="allow",
-        tool="Bash",
-        target="src/app.py",
-        category="valid-brief",
-    )
 
 
 @pytest.mark.parametrize("hook_path", CODEX_HOOKS)
@@ -1099,17 +736,10 @@ def test_every_landing_route_allows_concise_meaningful_brief(
     write_brief(repo, CONCISE_VALID_BRIEF)
     payload = landing_payload(repo, command)
 
-    result, output, rows = run_hook(hook_path, repo, payload)
+    result, output, _ = run_hook(hook_path, repo, payload)
 
     assert result.returncode == 0, result.stderr
     assert output is None
-    assert_signal(
-        rows,
-        decision="allow",
-        tool="Bash",
-        target="src/app.py",
-        category="valid-brief",
-    )
 
 
 @pytest.mark.parametrize("hook_path", CODEX_HOOKS)
@@ -1165,25 +795,12 @@ def test_missing_signal_support_fails_soft_with_visible_diagnostic(tmp_path):
             ROOT / "claude" / "hooks" / module_name,
             isolated_hook.parent / module_name,
         )
-    payload, _ = edit_payload(repo, "Write")
+    write_target(repo, "src/app.py")
+    payload = landing_payload(repo, "git commit -m change")
 
     result, output, rows = run_hook(isolated_hook, repo, payload)
 
-    assert_decision(result, output, "ask")
-    assert rows == []
-    stderr_lines = result.stderr.strip().splitlines()
-    assert len(stderr_lines) == 1
-    assert "gate signal unavailable" in stderr_lines[0].lower()
-
-
-def test_unwritable_signal_store_keeps_edit_ask_and_emits_one_diagnostic(tmp_path):
-    repo = init_repo(tmp_path)
-    (repo / SIGNAL_RELATIVE_PATH).mkdir()
-    payload, _ = edit_payload(repo, "Write")
-
-    result, output, rows = run_hook(CANONICAL_HOOK, repo, payload)
-
-    assert_decision(result, output, "ask")
+    assert_decision(result, output, "deny")
     assert rows == []
     stderr_lines = result.stderr.strip().splitlines()
     assert len(stderr_lines) == 1

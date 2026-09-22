@@ -179,15 +179,6 @@
       {
         "hooks": [
           {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/discovery-close-gate.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash(bd close:*)"
-      },
-      {
-        "hooks": [
-          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/discovery-gate.py\"",
             "type": "command"
           }
@@ -314,24 +305,6 @@
       {
         "hooks": [
           {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/oracle_downgrade_warning_gate.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash"
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/outcome_assertion_gate.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash"
-      },
-      {
-        "hooks": [
-          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/merge_authorization_gate.py\"",
             "type": "command"
           }
@@ -382,33 +355,6 @@
           }
         ],
         "matcher": "Bash(bd create:*)"
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/tdd-gate.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": "Write"
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/tdd-gate.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": "Edit"
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/tdd-gate.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": "NotebookEdit"
       },
       {
         "hooks": [
@@ -535,15 +481,6 @@
       {
         "hooks": [
           {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/oracle_downgrade_stop.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/validate_no_shirking.py\"",
             "type": "command"
           }
@@ -552,15 +489,6 @@
       }
     ],
     "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/discovery-nudge.py\"",
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
       {
         "hooks": [
           {

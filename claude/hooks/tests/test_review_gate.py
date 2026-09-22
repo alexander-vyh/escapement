@@ -364,11 +364,11 @@ class TestReadStateKeyError:
 
 
 # ===========================================================================
-# Ask-decision on no-review-on-close
+# Advisory context on no-review-on-close
 # ===========================================================================
 
-class TestAskDecisionOnNoReview:
-    """The no-review-on-close path should emit permissionDecision: ask."""
+class TestAdvisoryContextOnNoReview:
+    """The no-review-on-close path surfaces context without any decision."""
 
     def _run_close_no_review(self, session_id="test-no-review") -> dict:
         import review_gate as rg
@@ -388,10 +388,6 @@ class TestAskDecisionOnNoReview:
         text = out.getvalue().strip()
         return json.loads(text) if text else {}
 
-    def test_emits_ask_decision(self):
-        output = self._run_close_no_review()
-        assert output.get("hookSpecificOutput", {}).get("permissionDecision") == "ask"
-
     def test_emits_system_message_for_user(self):
         output = self._run_close_no_review()
         assert "systemMessage" in output
@@ -400,29 +396,6 @@ class TestAskDecisionOnNoReview:
         output = self._run_close_no_review()
         ctx = output.get("hookSpecificOutput", {}).get("additionalContext", "")
         assert "review" in ctx.lower()
-
-    def test_reason_mentions_remedy(self):
-        output = self._run_close_no_review()
-        reason = output.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
-        assert "adversarial-reviewer" in reason or "code-reviewer" in reason
-
-    def test_decision_honored_exactly_once(self):
-        """CANONICAL DECISION CONTRACT: the gate signals its decision with a
-        single mechanism — one permissionDecision JSON document on stdout AND
-        exit 0 (NOT exit 2). A JSON decision *plus* a non-zero exit is a
-        contradictory double-signal; asserting exit 0 rejects that shape, and
-        ``json.loads`` raises on two stacked documents, rejecting a doubled
-        signal. This is the regression guard for fxh.7.
-        """
-        code, out = _run_bash_hook("bd close bd-once", session_id="sess-once")
-        assert code == 0, (
-            "decision is carried by the stdout JSON, not exit 2 — "
-            "a permissionDecision JSON plus a non-zero exit is a double-signal"
-        )
-        stripped = out.strip()
-        # exactly one JSON document: json.loads raises on two stacked documents
-        data = json.loads(stripped)
-        assert data["hookSpecificOutput"]["permissionDecision"] == "ask"
 
 
 # ===========================================================================

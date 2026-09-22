@@ -11,6 +11,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL = ROOT / "tests" / "evals" / "gate_decision_replay"
@@ -21,12 +23,27 @@ RECEIPT = EVAL / "reviewer-receipt.json"
 RUNNER = EVAL / "replay.py"
 DECISIONS = ("allow", "ask", "deny")
 SUPPORTED_CELLS = {
-    ("tdd_gate", "claude"),
     ("test_oracle_brief_gate", "claude"),
     ("test_oracle_brief_gate", "codex"),
+}
+# escapement-e9v.12 (2026-09-21) deleted tdd-gate.py and outcome_assertion_gate.py,
+# so those cells have no surface left to execute. Their rows stay in the corpus:
+# the reviewer receipt attests the labels as written, and deleting recorded
+# evidence to make a suite green is the failure this change exists to remove.
+RETIRED_CELLS = {
+    ("tdd_gate", "claude"),
     ("outcome_assertion_gate", "claude"),
     ("outcome_assertion_gate", "codex"),
 }
+KNOWN_CELLS = SUPPORTED_CELLS | RETIRED_CELLS
+# Cases the surviving gates can still be held to, after e9v.12 also retired the
+# `ask` decision class that test_oracle_brief_gate used to emit on a missing brief.
+EXECUTED_PER_CELL = {
+    "test_oracle_brief_gate/claude": 29,
+    "test_oracle_brief_gate/codex": 36,
+}
+RETIRED_CELL_CASES = 108
+RETIRED_ASK_CASES = 7
 
 
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
@@ -77,7 +94,7 @@ def test_corpus_is_stable_production_derived_and_independently_labeled() -> None
     assert len(sources) == len(cases)
     assert set(labels) == {row["case_id"] for row in cases}
     assert Counter((row["gate"], row["host"]) for row in cases) == {
-        cell: 36 for cell in SUPPORTED_CELLS
+        cell: 36 for cell in KNOWN_CELLS
     }
     assert {row["expected_decision"] for row in labels.values()} == set(DECISIONS)
     assert all(row["source_event_id"] in sources for row in cases)
@@ -111,15 +128,27 @@ def test_corpus_is_stable_production_derived_and_independently_labeled() -> None
             assert cost["evidence"]
 
 
-def test_replay_executes_all_cases_and_reports_exact_matrices(tmp_path: Path) -> None:
+def test_replay_executes_every_supported_case_and_reports_exact_matrices(
+    tmp_path: Path,
+) -> None:
     output = tmp_path / "report.json"
     completed = _run_replay(output)
     assert completed.returncode == 0, completed.stderr
     report = json.loads(output.read_text())
 
-    assert report["case_count"] == 180
+    executed = sum(EXECUTED_PER_CELL.values())
+    # Executed and skipped are both reported, so a silent drop to zero executed
+    # cases cannot pass as green.
+    assert report["executed_count"] == executed
+    assert report["skipped_count"] == RETIRED_CELL_CASES + RETIRED_ASK_CASES
+    assert report["executed_count"] + report["skipped_count"] == 180
+    assert report["skipped_reasons"] == {
+        "retired cell: hook deleted in escapement-e9v.12": RETIRED_CELL_CASES,
+        "retired decision class: ask, escapement-e9v.12": RETIRED_ASK_CASES,
+    }
+    assert report["case_count"] == executed
     assert report["mismatch_count"] == 0
-    assert len(report["cases"]) == 180
+    assert len(report["cases"]) == executed
     assert set(report["decision_matrices"]) == {
         f"{gate}/{host}" for gate, host in SUPPORTED_CELLS
     }
@@ -134,15 +163,50 @@ def test_replay_executes_all_cases_and_reports_exact_matrices(tmp_path: Path) ->
             for expected in DECISIONS
             for observed in DECISIONS
         )
-        assert sum(sum(row.values()) for row in matrix.values()) == 36
+        assert (
+            sum(sum(row.values()) for row in matrix.values())
+            == EXECUTED_PER_CELL[name]
+        )
 
         binary = report["binary_confusion_matrices"][name]
         assert set(("TP", "TN", "FP", "FN", "case_count")) <= set(binary)
-        assert binary["case_count"] == 36
-        assert binary["TP"] + binary["TN"] + binary["FP"] + binary["FN"] == 36
+        assert binary["case_count"] == EXECUTED_PER_CELL[name]
+        assert (
+            binary["TP"] + binary["TN"] + binary["FP"] + binary["FN"]
+            == EXECUTED_PER_CELL[name]
+        )
 
     assert report["repair_cost"]["evidenced_cases"] > 0
     assert report["repair_cost"]["missing_cases"] > 0
+
+
+@pytest.mark.parametrize("gate,host", sorted(RETIRED_CELLS))
+def test_retired_cell_rows_are_kept_but_no_longer_replayable(gate, host) -> None:
+    cases = [
+        row for row in _read_jsonl(CORPUS) if (row["gate"], row["host"]) == (gate, host)
+    ]
+    labels = {row["case_id"]: row for row in _read_jsonl(LABELS)}
+    assert len(cases) == 36
+    assert all(row["case_id"] in labels for row in cases)
+    pytest.skip(f"retired cell: hook deleted in escapement-e9v.12 ({gate}/{host})")
+
+
+def test_retired_ask_cases_are_kept_but_no_longer_replayable() -> None:
+    labels = {row["case_id"]: row for row in _read_jsonl(LABELS)}
+    ask_cases = [
+        row
+        for row in _read_jsonl(CORPUS)
+        if (row["gate"], row["host"]) in SUPPORTED_CELLS
+        and labels[row["case_id"]]["expected_decision"] == "ask"
+    ]
+    assert len(ask_cases) == RETIRED_ASK_CASES
+    assert {(row["gate"], row["host"]) for row in ask_cases} == {
+        ("test_oracle_brief_gate", "claude")
+    }
+    pytest.skip(
+        "retired decision class: ask, escapement-e9v.12 "
+        f"({RETIRED_ASK_CASES} test_oracle_brief_gate/claude cases)"
+    )
 
 
 def test_all_allow_surface_mutant_is_observed_and_fails(tmp_path: Path) -> None:
@@ -152,7 +216,7 @@ def test_all_allow_surface_mutant_is_observed_and_fails(tmp_path: Path) -> None:
 
     completed = _run_replay(
         output,
-        surface=f"tdd_gate/claude={hook}",
+        surface=f"test_oracle_brief_gate/claude={hook}",
     )
 
     assert completed.returncode != 0
@@ -162,7 +226,7 @@ def test_all_allow_surface_mutant_is_observed_and_fails(tmp_path: Path) -> None:
     rows = [
         row
         for row in report["cases"]
-        if row["gate"] == "tdd_gate" and row["host"] == "claude"
+        if row["gate"] == "test_oracle_brief_gate" and row["host"] == "claude"
     ]
     assert {row["observed_decision"] for row in rows} == {"allow"}
 

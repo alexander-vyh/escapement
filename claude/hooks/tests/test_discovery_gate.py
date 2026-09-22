@@ -206,18 +206,25 @@ class TestPassThrough:
         code, _, _ = _run_hook(mod, "", raw_stdin="not json at all")
         assert code == 0
 
+    def test_partial_design_doc_allows(self):
+        """A design doc missing required sections allows: the ask tier this
+        branch used to emit was retired (escapement-e9v.12) and must NOT have
+        been escalated into a deny."""
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            project = _make_change(
+                tmp, design="# Design\n\n## Problem Statement\nOnly one section.\n")
+            code, out, _ = _run_hook(
+                mod, 'bd create "new thing" --type=feature', cwd=project)
+        assert code == 0
+        assert out == ""
 
-# ===========================================================================
-# Ask path is preserved (must not regress to deny or double-block)
-# ===========================================================================
-
-class TestAskPathPreserved:
-    def test_standalone_task_asks(self):
-        """A standalone task (no --parent) triggers an 'ask', exit 0."""
+    def test_standalone_task_allows(self):
+        """A standalone task (no --parent) is not gated at all."""
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
             project = _make_change(tmp, design=None)
             code, out, _ = _run_hook(
                 mod, 'bd create "loose task" --type=task', cwd=project)
         assert code == 0
-        assert _decision(out) == "ask"
+        assert out == ""

@@ -64,7 +64,6 @@ def test_updater_refreshes_plugin_migrates_legacy_and_preserves_siblings(
     for directory, name in (
         (codex_home / "hooks", "test_oracle_brief_gate.py"),
         (codex_home / "hooks", "implementation_echo_test_gate.py"),
-        (codex_home / "hooks", "oracle_downgrade_warning_gate.py"),
         (home / ".claude" / "hooks", "beads_worktree_guard.py"),
     ):
         directory.mkdir(parents=True, exist_ok=True)
@@ -84,12 +83,6 @@ def test_updater_refreshes_plugin_migrates_legacy_and_preserves_siblings(
                         {
                             "command": f"python3 {codex_home}/hooks/implementation_echo_test_gate.py",
                             "statusMessage": "Checking implementation-echo tests",
-                            "timeout": 30,
-                            "type": "command",
-                        },
-                        {
-                            "command": f"python3 {codex_home}/hooks/oracle_downgrade_warning_gate.py",
-                            "statusMessage": "Checking oracle downgrade warnings",
                             "timeout": 30,
                             "type": "command",
                         },

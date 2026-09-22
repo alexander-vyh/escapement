@@ -26,6 +26,16 @@ Each call appends one JSON line to `.beads/.gate-signal.jsonl`:
      "session_id": "67b9768d-...",
      "extras": {"command": "bd create ..."}}
 
+With one exception: a row whose `decision` is exactly `"allow"` is NOT
+persisted. An allow is the gate's null result — it records that a gate ran and
+found nothing, which no reader consumes and no review acts on. In the live
+corpus 59,457 of 106,724 rows were allow rows, so more than half the store was
+noise that every query had to filter past. Every other decision (`deny`,
+`warn`, `nudge`, `waiver-accepted`, `waiver-rejected`, `override-applied`,
+`override-rejected`, and any gate-specific string) is written exactly as
+before. `record()` still returns ``True`` for a skipped allow: the write was
+not attempted, not failed, and no gate's decision may turn on it.
+
 ## Failure behavior
 
 The gate's primary job is enforcement; logging is secondary. If persistence
@@ -180,8 +190,11 @@ def record(
         gate_name: stable identifier for the gate (e.g.
             'spec_id_enforcement'). Used by query tools to group
             decisions per gate.
-        decision: one of 'allow', 'deny', 'ask', 'allow-with-warning',
-            'waiver-accepted', or any other shape the gate uses.
+        decision: 'deny', 'warn', 'nudge', 'waiver-accepted', or any other
+            shape the gate uses. The exact string 'allow' is accepted and
+            silently NOT persisted — see the module docstring's storage
+            shape; the return value is unchanged so no gate behaves
+            differently.
         reason: human-readable rationale. For waivers, the user's
             captured reason text — this is the labeled training data
             future revisions read.
@@ -191,9 +204,15 @@ def record(
             preserve (command excerpt, matched-pattern, target file,
             etc.). Stored under the 'extras' key.
 
-    Returns ``True`` when every available target was written and ``False``
-    when no target was available or persistence failed. Never raises.
+    Returns ``True`` when every available target was written (or when the row
+    was an intentionally-unpersisted allow) and ``False`` when no target was
+    available or persistence failed. Never raises.
     """
+    # An allow is a gate reporting that it found nothing. No reader consumes
+    # those rows; they were over half the live corpus. Skipping the write is
+    # not a failure, so the caller still sees success.
+    if decision == "allow":
+        return True
     try:
         entry: dict[str, Any] = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),

@@ -13,8 +13,8 @@ Wiring note (why a broad `Bash` matcher, not `Bash(gh pr merge:*)`):
   incident used (transcript record 602). So this hook is wired on the broad `Bash`
   matcher (like validate_no_shirking) and self-filters via `_is_ship_command`, matching
   the command TOKENS anywhere they appear rather than at a leading anchor. Same design on
-  the codex surface. (The prefix-matcher blindspot also affects merge_authorization_gate
-  and outcome_assertion_gate — tracked separately.)
+  the codex surface. (The prefix-matcher blindspot also affects
+  merge_authorization_gate — tracked separately.)
 
 Why this exists (binding failure, not doctrine gap):
   In cake session cc2d7508 (2026-07-16) the FULL outcome-ownership doctrine — including

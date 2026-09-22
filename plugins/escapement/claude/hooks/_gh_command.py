@@ -1,7 +1,7 @@
 """Shared detector: does a Bash command actually INVOKE `gh pr <verb>`?
 
-One authority for "is this a PR-ship command", used by the blocking/asking ship gates
-(merge_authorization_gate, outcome_assertion_gate) so codex and claude can't drift on the
+One authority for "is this a PR-ship command", used by the blocking ship gate
+(merge_authorization_gate) so codex and claude can't drift on the
 question — the exact divergence an adversarial review of PR #119 flagged, and the reason
 the deployed merge-authorization gate silently missed the cake-incident command
 (`cd /wt\ngh pr merge 1750`, session cc2d7508 record 602: not a prefix of `gh pr merge`,

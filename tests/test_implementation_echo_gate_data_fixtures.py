@@ -437,9 +437,7 @@ def test_unrelated_explicit_declarative_test_stays_silent(
     output, signals = _run_hook(repo)
 
     assert output is None
-    assert len(signals) == 1
-    assert signals[0]["decision"] == "allow"
-    assert signals[0].get("extras", {}).get("data_fixture_files", []) == []
+    assert signals == []  # a clean allow persists no row (escapement-e9v.12)
 
 
 @pytest.mark.parametrize(
@@ -771,7 +769,7 @@ def test_late_only_oversized_fixture_is_silent_but_reports_truncation(
 
     assert output is None
     assert len(signals) == 1
-    assert signals[0]["decision"] == "allow"
+    assert signals[0]["decision"] == "allow-with-warning"
     assert signals[0]["extras"]["fixture_scan_truncated_files"] == [
         fixture_path
     ]
@@ -845,8 +843,7 @@ def test_unrelated_text_fixture_stays_silent(tmp_path: Path) -> None:
     output, signals = _run_hook(repo)
 
     assert output is None
-    assert len(signals) == 1
-    assert signals[0]["decision"] == "allow"
+    assert signals == []
 
 
 def test_unrelated_unquoted_fixture_scalar_stays_silent(tmp_path: Path) -> None:
@@ -869,8 +866,7 @@ def test_unrelated_unquoted_fixture_scalar_stays_silent(tmp_path: Path) -> None:
     output, signals = _run_hook(repo)
 
     assert output is None
-    assert len(signals) == 1
-    assert signals[0]["decision"] == "allow"
+    assert signals == []
 
 
 def test_two_fixtures_never_treat_each_other_as_production_source(
@@ -895,8 +891,7 @@ def test_two_fixtures_never_treat_each_other_as_production_source(
     output, signals = _run_hook(repo)
 
     assert output is None
-    assert len(signals) == 1
-    assert signals[0]["decision"] == "allow"
+    assert signals == []
 
 
 def test_signal_write_failure_does_not_turn_fixture_warning_into_a_block(

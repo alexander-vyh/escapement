@@ -15,9 +15,10 @@ There is intentionally NO BLOCK tier. The 2026-06-20 corpus replay proved that
 the one signal we hoped was block-safe — a negative-control assertion removed
 without re-add — false-fires on legitimate red->green TDD (a placeholder
 negative control is correctly dropped once the feature it placeheld is built),
-mechanically indistinguishable from a genuine restriction-coverage drop. The
-consuming gate therefore emits `ask`, never `deny`; the human/agent adjudicates
-the feature-built-vs-coverage-dropped question this module cannot.
+mechanically indistinguishable from a genuine restriction-coverage drop. No
+gate consumes this module: it is an explicitly-invoked CLI, and the human or
+agent who runs it adjudicates the feature-built-vs-coverage-dropped question
+this module cannot.
 
 Two properties are load-bearing:
 

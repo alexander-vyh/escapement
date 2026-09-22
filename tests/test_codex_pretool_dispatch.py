@@ -78,8 +78,8 @@ def test_dispatcher_preserves_context_and_strongest_public_decision(tmp_path: Pa
     first = _gate(
         plugin_root / "first.py",
         "print(json.dumps({'hookSpecificOutput': {"
-        "'hookEventName': 'PreToolUse', 'permissionDecision': 'ask', "
-        "'permissionDecisionReason': 'ask reason', "
+        "'hookEventName': 'PreToolUse', 'permissionDecision': 'allow', "
+        "'permissionDecisionReason': 'allow reason', "
         "'additionalContext': 'first context: ' + payload['tool_input']['command']}}))",
     )
     second = _gate(
@@ -96,8 +96,35 @@ def test_dispatcher_preserves_context_and_strongest_public_decision(tmp_path: Pa
     output = json.loads(result.stdout)
     hook = output["hookSpecificOutput"]
     assert hook["permissionDecision"] == "deny"
-    assert hook["permissionDecisionReason"] == "[ask] ask reason\n\n[deny] deny reason"
+    assert hook["permissionDecisionReason"] == "[allow] allow reason\n\n[deny] deny reason"
     assert_reaches_codex(output, "first context: pwd", "second context")
+
+
+def test_dispatcher_drops_a_retired_decision_class(tmp_path: Path) -> None:
+    """'ask' is retired. A stale gate still emitting it must not crash the
+    dispatcher or leak an unrankable decision to the host — the row is
+    dropped, and the gates that do speak the ladder still decide."""
+    plugin_root = tmp_path / "plugin"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    stale = _gate(
+        plugin_root / "stale.py",
+        "print(json.dumps({'hookSpecificOutput': {"
+        "'hookEventName': 'PreToolUse', 'permissionDecision': 'ask', "
+        "'permissionDecisionReason': 'retired class'}}))",
+    )
+    allower = _gate(
+        plugin_root / "allower.py",
+        "print(json.dumps({'hookSpecificOutput': {"
+        "'hookEventName': 'PreToolUse', 'permissionDecision': 'allow'}}))",
+    )
+
+    result = _run(plugin_root, workspace, stale, allower)
+
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert "retired class" not in result.stdout
 
 
 def test_dispatcher_preserves_healthy_messages_and_equal_precedence_reasons(
@@ -109,14 +136,14 @@ def test_dispatcher_preserves_healthy_messages_and_equal_precedence_reasons(
     first = _gate(
         plugin_root / "first.py",
         "print(json.dumps({'systemMessage': 'first message', 'hookSpecificOutput': {"
-        "'hookEventName': 'PreToolUse', 'permissionDecision': 'ask', "
-        "'permissionDecisionReason': 'first ask'}}))",
+        "'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', "
+        "'permissionDecisionReason': 'first deny'}}))",
     )
     second = _gate(
         plugin_root / "second.py",
         "print(json.dumps({'systemMessage': 'second message', 'hookSpecificOutput': {"
-        "'hookEventName': 'PreToolUse', 'permissionDecision': 'ask', "
-        "'permissionDecisionReason': 'second ask'}}))",
+        "'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', "
+        "'permissionDecisionReason': 'second deny'}}))",
     )
     duplicate = _gate(
         plugin_root / "duplicate.py",
@@ -130,9 +157,9 @@ def test_dispatcher_preserves_healthy_messages_and_equal_precedence_reasons(
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)
     hook = output["hookSpecificOutput"]
-    assert hook["permissionDecision"] == "ask"
+    assert hook["permissionDecision"] == "deny"
     assert hook["permissionDecisionReason"] == (
-        "[ask] first ask\n\n[ask] second ask\n\n[allow] weaker allow"
+        "[deny] first deny\n\n[deny] second deny\n\n[allow] weaker allow"
     )
     assert output["systemMessage"] == "first message\n\nsecond message"
     # The same advisories must also ride additionalContext, which is the only

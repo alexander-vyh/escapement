@@ -648,11 +648,9 @@ def test_public_hooks_apply_rapid_edit_durable_review_and_final_stages(tmp_path,
     write_brief(repo, rapid_brief())
     output, rows = run_hook(hook_path, repo, edit_payload)
     assert output is None
-    assert_signal(rows, "valid-rapid-brief", "edit")
     durable = {**edit_payload, "tool_name": "Bash", "tool_input": {"command": "git commit -m rapid"}}
     output, rows = run_hook(hook_path, repo, durable)
     assert output is None
-    assert_signal(rows, "valid-rapid-brief", "durable")
 
     review = {**durable, "tool_input": {"command": "gh pr create --title rapid"}}
     output, rows = run_hook(hook_path, repo, review)
@@ -662,7 +660,6 @@ def test_public_hooks_apply_rapid_edit_durable_review_and_final_stages(tmp_path,
     write_brief(repo, rapid_brief(review_ready=True))
     output, rows = run_hook(hook_path, repo, review)
     assert output is None
-    assert_signal(rows, "valid-rapid-brief", "review")
 
     final = {**durable, "tool_input": {"command": "bd close escapement-123"}}
     output, rows = run_hook(hook_path, repo, final)
@@ -678,7 +675,6 @@ def test_public_hooks_apply_rapid_edit_durable_review_and_final_stages(tmp_path,
     )
     output, rows = run_hook(hook_path, repo, final)
     assert output is None
-    assert_signal(rows, "valid-rapid-brief", "final")
 
 
 @pytest.mark.parametrize(

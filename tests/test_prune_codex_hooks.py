@@ -16,7 +16,6 @@ PRUNER = ROOT / "scripts" / "prune_codex_hooks.py"
 LEGACY_STATUS = {
     "test_oracle_brief_gate.py": "Checking Test Oracle Brief gate",
     "implementation_echo_test_gate.py": "Checking implementation-echo tests",
-    "oracle_downgrade_warning_gate.py": "Checking oracle downgrade warnings",
     "beads_worktree_guard.py": "Checking bd worktree location (.worktrees/)",
 }
 
@@ -35,7 +34,6 @@ def _plugin_hooks() -> dict:
         'python3 -B "${PLUGIN_ROOT}/claude/hooks/codex_pretool_dispatch.py" '
         "--gate claude/hooks/test_oracle_brief_gate.py "
         "--gate claude/hooks/implementation_echo_test_gate.py "
-        "--gate claude/hooks/oracle_downgrade_warning_gate.py "
         "--gate claude/hooks/beads_worktree_guard.py"
     )
     return {
@@ -58,7 +56,6 @@ def _live_hooks(codex_home: Path, home: Path) -> dict:
     for name in (
         "test_oracle_brief_gate.py",
         "implementation_echo_test_gate.py",
-        "oracle_downgrade_warning_gate.py",
     ):
         _install_known_legacy_gate(codex_home / "hooks", name)
     _install_known_legacy_gate(
@@ -94,14 +91,6 @@ def _live_hooks(codex_home: Path, home: Path) -> dict:
                             "command": f'python3 "{codex_home}/hooks/implementation_echo_test_gate.py"',
                             "statusMessage": LEGACY_STATUS[
                                 "implementation_echo_test_gate.py"
-                            ],
-                            "timeout": 30,
-                            "type": "command",
-                        },
-                        {
-                            "command": f'python3 "{codex_home}/hooks/oracle_downgrade_warning_gate.py"',
-                            "statusMessage": LEGACY_STATUS[
-                                "oracle_downgrade_warning_gate.py"
                             ],
                             "timeout": 30,
                             "type": "command",
@@ -272,8 +261,12 @@ def test_fingerprinted_hooks_with_wrong_registration_metadata_survive(
     wrong_matcher = _install_known_legacy_gate(
         codex_home / "hooks", "implementation_echo_test_gate.py"
     )
+    # Same registered gate as wrong_status but installed under the Codex root,
+    # so this is a distinct registration with a mismatched timeout (31 vs the
+    # registered 10). A fourth distinct gate is no longer available: the
+    # oracle-downgrade gate was retired in escapement-e9v.12.
     wrong_timeout = _install_known_legacy_gate(
-        codex_home / "hooks", "oracle_downgrade_warning_gate.py"
+        codex_home / "hooks", "beads_worktree_guard.py"
     )
     wrong_status = _install_known_legacy_gate(
         home / ".claude" / "hooks", "beads_worktree_guard.py"

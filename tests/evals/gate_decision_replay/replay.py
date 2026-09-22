@@ -15,7 +15,14 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from validate_corpus import DECISIONS, EVAL_DIR, ROOT, ValidationError, validate
+from validate_corpus import (
+    DECISIONS,
+    EVAL_DIR,
+    ROOT,
+    ValidationError,
+    skip_reason,
+    validate,
+)
 
 
 VALID_BRIEF = """# Replay brief
@@ -199,6 +206,7 @@ def replay(
     matrices: defaultdict[str, dict[str, dict[str, int]]] = defaultdict(_empty_matrix)
     errors = {"false_positive": Counter(), "false_negative": Counter()}
     rows: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     metrics = ("repair_turns", "model_tokens", "wall_ms", "human_interventions")
     cost_counts = Counter()
     cost_totals = Counter()
@@ -211,12 +219,23 @@ def replay(
         signal_dir = temp / "signals"
 
         for index, case in enumerate(cases):
+            label = labels[case["case_id"]]
+            reason = skip_reason(case, label)
+            if reason is not None:
+                skipped.append(
+                    {
+                        "case_id": case["case_id"],
+                        "gate": case["gate"],
+                        "host": case["host"],
+                        "reason": reason,
+                    }
+                )
+                continue
             case_repo = temp / f"case-{index:04d}"
             _prepare_case(base, case_repo, case["fixture"])
             name = f"{case['gate']}/{case['host']}"
             surface = overrides.get(name, ROOT / case["surface"])
             observed, execution = _observe(case, case_repo, surface, signal_dir)
-            label = labels[case["case_id"]]
             expected = label["expected_decision"]
             matrices[name][expected][observed] += 1
 
@@ -252,8 +271,14 @@ def replay(
     return {
         "schema_version": 1,
         "case_count": len(rows),
+        "executed_count": len(rows),
+        "skipped_count": len(skipped),
+        "skipped_reasons": dict(
+            sorted(Counter(row["reason"] for row in skipped).items())
+        ),
         "mismatch_count": mismatch_count,
         "cases": rows,
+        "skipped": skipped,
         "decision_matrices": ordered_matrices,
         "binary_confusion_matrices": {
             name: _binary(matrix) for name, matrix in ordered_matrices.items()
@@ -297,7 +322,8 @@ def main() -> int:
     args.result.parent.mkdir(parents=True, exist_ok=True)
     args.result.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(
-        f"replayed {report['case_count']} cases; "
+        f"replayed {report['executed_count']} cases; "
+        f"skipped={report['skipped_count']}; "
         f"mismatches={report['mismatch_count']}; report={args.result}"
     )
     return 1 if report["mismatch_count"] else 0
