@@ -325,6 +325,23 @@ def _file_bead(
     return None
 
 
+def _record_filing(
+    actions: list[dict[str, Any]], title: str, new_id: str | None,
+) -> None:
+    """Append a truthful filing record.
+
+    ``_file_bead`` returns ``None`` when ``bd create`` fails or its output
+    cannot be parsed. Reporting those as ``filed`` renders the whole channel
+    dark: the caller prints success, no bead reaches the queue, and because
+    dedup matches against open beads, every later run re-files instead of
+    deduping. A run of ``filed`` with no ``deduped`` is that failure.
+    """
+    if new_id is None:
+        actions.append({"title": title, "action": "file-failed"})
+    else:
+        actions.append({"title": title, "action": "filed", "id": new_id})
+
+
 def file_concerning_patterns(
     summary: dict[str, Any], repo: Path, window_text: str,
 ) -> list[dict[str, Any]]:
@@ -377,7 +394,7 @@ def file_concerning_patterns(
                 f"subsequent weeks dedup against this open issue."
             )
             new_id = _file_bead(repo, title, description, priority=1)
-            actions.append({"title": title, "action": "filed", "id": new_id})
+            _record_filing(actions, title, new_id)
 
     # Mock-bureaucracy risk per gate
     for m in summary.get("mock_bureaucracy_risk", []):
@@ -409,7 +426,7 @@ def file_concerning_patterns(
             f"open issue. Close after acting on the finding."
         )
         new_id = _file_bead(repo, title, description, priority=2)
-        actions.append({"title": title, "action": "filed", "id": new_id})
+        _record_filing(actions, title, new_id)
 
     # validate_no_shirking FP-heavy categories
     for c in summary.get("shirking_fp_heavy", []):
@@ -444,7 +461,7 @@ def file_concerning_patterns(
             f"Filed by the weekly gate-signal monitor."
         )
         new_id = _file_bead(repo, title, description, priority=2)
-        actions.append({"title": title, "action": "filed", "id": new_id})
+        _record_filing(actions, title, new_id)
 
     return actions
 
@@ -593,6 +610,15 @@ def main() -> int:
                 tag = a["action"].upper()
                 bid = f" → {a['id']}" if a.get("id") else ""
                 print(f"  [{tag}] {a['title']}{bid}")
+
+    failed = [a for a in bead_actions if a["action"] == "file-failed"]
+    if failed:
+        print(
+            f"\nERROR: {len(failed)} finding(s) could not be filed as beads; "
+            f"they have NOT reached the queue.",
+            file=sys.stderr,
+        )
+        return 1
 
     return 0
 
