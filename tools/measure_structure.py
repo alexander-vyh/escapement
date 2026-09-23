@@ -26,12 +26,26 @@ Why architecture is measured alongside complexity
 -------------------------------------------------
 Complexity per file is not a structural measure on its own. Splitting one large
 module into many small ones reduces it whether or not the pieces became
-independent. In the motivating repository, per-file complexity fell 44% while the
-largest import cycle grew from 2 modules to 14 — the decomposed pieces still
-imported their parent at runtime, so none could be read, tested or reused alone.
-A measurement that reports only size and complexity scores that as a clean win.
+independent. In the motivating repository, per-file complexity fell 44% while a
+114-module import cycle — containing the package root itself — went unreported by
+every instrument in use, including a complexity baseline, 81 decomposition pins,
+architecture tests and four months of gate events. It costs 0.62s on every single
+invocation, because a root package inside a cycle means importing any part loads
+all of it.
+
+A measurement that reports only size and complexity cannot see that, and reports
+the repository as improving throughout.
 
 This tool reports both, and never stores either.
+
+Accuracy
+--------
+The import graph is validated against a real interpreter, not against its own
+rules: its transitive reach equals actual `sys.modules` on the repository it was
+built for. That check exists because an earlier version of this file was wrong in
+two directions at once — counting deferred function-body imports while dropping
+relative imports in `__init__.py` — and the errors partly cancelled, producing a
+plausible number and a confidently wrong architectural conclusion.
 """
 
 from __future__ import annotations
@@ -109,30 +123,56 @@ def _import_targets(node: ast.AST, package_parts: list[str]) -> list[str]:
     return []
 
 
-def _type_checking_nodes(tree: ast.AST) -> set[int]:
-    """ids of nodes guarded by `if TYPE_CHECKING:`.
+def _deferred_nodes(tree: ast.AST) -> set[int]:
+    """ids of import nodes that do not execute when the module is imported.
 
-    These imports do not execute, so they cannot create a runtime cycle. Counting
-    them would report tangles that do not exist — a false positive that would
-    discredit the measurement the first time someone checked it by hand.
+    Two cases, one rule: an import runs at import time only if control reaches it
+    at import time.
+
+    - `if TYPE_CHECKING:` bodies never execute at all.
+    - Function and method bodies execute at call time, not import time.
+
+    Both are the standard ways to break an import cycle deliberately. A tool that
+    counted them would tell an owner who correctly deferred an import that nothing
+    had changed, which is the fastest way to make a measurement ignored.
     """
-    guarded: set[int] = set()
+    deferred: set[int] = set()
+
+    def mark(node: ast.AST) -> None:
+        for child in ast.walk(node):
+            deferred.add(id(child))
+
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.dump(node.test):
-            for child in ast.walk(node):
-                guarded.add(id(child))
-    return guarded
+            mark(node)
+        elif isinstance(node, _FUNC):
+            mark(node)
+    return deferred
 
 
-def build_import_graph(root: pathlib.Path, package: str) -> dict[str, set[str]]:
-    """Runtime import edges between modules inside `package`.
+def build_import_graph(
+    root: pathlib.Path, package: str, *, deferred: bool = False
+) -> dict[str, set[str]]:
+    """Import edges between modules inside `package`.
+
+    By default returns *import-time* edges: those that execute when the module is
+    loaded, and so are the ones that form real runtime cycles and real load cost.
+    With `deferred=True`, returns the edges that execute only when a function runs.
+
+    Measured against the repository that motivated this tool, counting deferred
+    imports as import-time edges overstated what one module pulls in by 93% — 505
+    modules predicted against 262 actually loaded.
 
     External imports are ignored: this measures the shape of the code under
     review, not its dependency footprint.
     """
     modules: dict[str, pathlib.Path] = {}
+    packages: set[str] = set()
     for path in (root / package).rglob("*.py"):
-        modules[_module_name(path.relative_to(root))] = path
+        name = _module_name(path.relative_to(root))
+        modules[name] = path
+        if path.name == "__init__.py":
+            packages.add(name)
 
     graph: dict[str, set[str]] = {name: set() for name in modules}
     for name, path in modules.items():
@@ -140,21 +180,43 @@ def build_import_graph(root: pathlib.Path, package: str) -> dict[str, set[str]]:
             tree = ast.parse(path.read_text(errors="replace"))
         except (SyntaxError, OSError):
             continue
-        guarded = _type_checking_nodes(tree)
-        package_parts = name.split(".")[:-1]
+        is_deferred = _deferred_nodes(tree)
+        # `from . import x` anchors on the containing package. For a regular
+        # module that is its parent; for a package's own __init__ it is the
+        # package itself. Using the parent for both silently drops every
+        # relative import in every __init__.py -- which is exactly where the
+        # convenience re-exports that drive eager loading live.
+        parts = name.split(".")
+        package_parts = parts if name in packages else parts[:-1]
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 continue
-            if id(node) in guarded:
+            if (id(node) in is_deferred) != deferred:
                 continue
             for target in _import_targets(node, package_parts):
-                if target in modules and target != name:
-                    graph[name].add(target)
-                else:
+                resolved = target
+                if resolved not in modules:
                     # `from pkg.mod import symbol` names the symbol, not a module
-                    parent = target.rsplit(".", 1)[0]
-                    if parent in modules and parent != name:
-                        graph[name].add(parent)
+                    resolved = target.rsplit(".", 1)[0]
+                if resolved not in modules and "." not in target:
+                    # Flat script directories put their own directory on sys.path
+                    # and import siblings by bare name (`from would_block_stop
+                    # import x`). Package-rooted naming never matches those, and
+                    # the failure is silent: a tree of 92 interdependent scripts
+                    # reports zero edges and therefore a clean architecture.
+                    sibling = f"{name.rsplit('.', 1)[0]}.{target}" if "." in name else target
+                    if sibling in modules:
+                        resolved = sibling
+                if resolved not in modules:
+                    continue
+                # Importing `a.b.c` executes `a`, then `a.b`, then `a.b.c`, so
+                # every ancestor package is loaded too. Omitting them understates
+                # what one import actually pulls in.
+                segments = resolved.split(".")
+                for i in range(1, len(segments) + 1):
+                    ancestor = ".".join(segments[:i])
+                    if ancestor in modules and ancestor != name:
+                        graph[name].add(ancestor)
     return graph
 
 
@@ -264,6 +326,7 @@ class Structure:
     unparsable: list[str] = field(default_factory=list)
     modules: int = 0
     edges: int = 0
+    deferred_edges: int = 0
     propagation_cost: float = 0.0
     cycles: int = 0
     modules_in_cycles: int = 0
@@ -309,6 +372,8 @@ def measure_tree(root: str | pathlib.Path, package: str) -> Structure:
     components = strongly_connected(graph)
     result.modules = len(graph)
     result.edges = sum(len(v) for v in graph.values())
+    deferred = build_import_graph(root, package, deferred=True)
+    result.deferred_edges = sum(len(v) for v in deferred.values())
     result.propagation_cost = propagation_cost(graph)
     result.cycles = len(components)
     result.modules_in_cycles = sum(len(c) for c in components)
@@ -410,8 +475,17 @@ def render(series: list[Structure]) -> str:
         ]
     if series:
         last = series[-1]
+        lines.append(
+            f"\n  import-time edges: {last.edges:,}   "
+            f"deferred (function-body) edges: {last.deferred_edges:,}"
+        )
+        lines.append(
+            "  Only import-time edges are counted as coupling. Deferred imports do "
+            "not\n  execute on import, so they neither load code nor form runtime "
+            "cycles."
+        )
         if last.worst_file:
-            lines.append(f"\n  worst file: {last.worst_file} ({last.worst_file_complexity} CC)")
+            lines.append(f"  worst file: {last.worst_file} ({last.worst_file_complexity} CC)")
         if last.largest_cycle_members:
             lines.append(f"  largest cycle ({last.largest_cycle} modules):")
             lines += [f"    {m}" for m in last.largest_cycle_members]

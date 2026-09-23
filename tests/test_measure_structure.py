@@ -89,16 +89,17 @@ def test_unparsable_file_is_reported_not_scored_zero(tmp_path):
 
 
 def test_symbol_import_resolves_to_its_module(tmp_path):
-    """`from pkg.mod import name` is an edge to pkg.mod.
+    """`from pkg.mod import name` is an edge to pkg.mod, and to pkg.
 
     Resolving it to the non-existent module `pkg.mod.name` drops the edge and
-    silently reports a system as less connected than it is.
+    silently reports a system as less connected than it is. The package edge is
+    there because importing `pkg.mod` executes `pkg/__init__.py` first.
     """
     write(tmp_path, "pkg/__init__.py", "")
     write(tmp_path, "pkg/mod.py", "VALUE = 1\n")
     write(tmp_path, "pkg/user.py", "from pkg.mod import VALUE\n")
     graph = build_import_graph(tmp_path, "pkg")
-    assert graph["pkg.user"] == {"pkg.mod"}
+    assert graph["pkg.user"] == {"pkg", "pkg.mod"}
 
 
 def test_relative_import_resolves(tmp_path):
@@ -148,6 +149,126 @@ def test_runtime_back_import_is_a_cycle(tmp_path):
     assert result.cycles == 1
     assert result.largest_cycle == 2
     assert result.largest_cycle_members == ["pkg.a", "pkg.b"]
+
+
+def test_function_body_import_is_not_an_import_time_edge(tmp_path):
+    """Deferring an import into a function is a real fix and must register as one.
+
+    Python executes a function-body import at call time, so it neither loads the
+    target on import nor forms a runtime cycle. Counting it would tell an owner who
+    correctly broke a cycle that nothing changed — the same error the TYPE_CHECKING
+    guard already avoids. Against the motivating repository, counting deferred
+    imports overstated what one module pulls in by 93%.
+    """
+    write(tmp_path, "pkg/__init__.py", "")
+    write(tmp_path, "pkg/heavy.py", "VALUE = 1\n")
+    write(
+        tmp_path,
+        "pkg/user.py",
+        "def run():\n    from pkg import heavy\n    return heavy.VALUE\n",
+    )
+    assert build_import_graph(tmp_path, "pkg")["pkg.user"] == set()
+    assert build_import_graph(tmp_path, "pkg", deferred=True)["pkg.user"] == {"pkg", "pkg.heavy"}
+
+    result = measure_tree(tmp_path, "pkg")
+    assert result.edges == 0
+    assert result.deferred_edges == 2
+
+
+def test_moving_an_import_into_a_function_breaks_the_cycle(tmp_path):
+    """The canonical cycle fix, measured end to end."""
+    write(tmp_path, "pkg/__init__.py", "")
+    write(tmp_path, "pkg/a.py", "from pkg import b\n")
+    write(tmp_path, "pkg/b.py", "from pkg import a\n")
+    assert measure_tree(tmp_path, "pkg").largest_cycle == 2
+
+    write(tmp_path, "pkg/b.py", "def go():\n    from pkg import a\n    return a\n")
+    fixed = measure_tree(tmp_path, "pkg")
+    assert fixed.cycles == 0
+    assert fixed.deferred_edges == 2  # the coupling is still reported, just not as import-time
+
+
+def test_method_body_import_is_also_deferred(tmp_path):
+    """A method is a function: the rule must not be defeated by a class wrapper."""
+    write(tmp_path, "pkg/__init__.py", "")
+    write(tmp_path, "pkg/heavy.py", "VALUE = 1\n")
+    write(
+        tmp_path,
+        "pkg/user.py",
+        "class C:\n    def run(self):\n        from pkg import heavy\n        return heavy\n",
+    )
+    assert build_import_graph(tmp_path, "pkg")["pkg.user"] == set()
+
+
+def test_module_level_import_inside_a_try_is_still_import_time(tmp_path):
+    """An optional-dependency guard still executes on import.
+
+    Only functions and TYPE_CHECKING defer. Treating any nested import as deferred
+    would silently drop real edges.
+    """
+    write(tmp_path, "pkg/__init__.py", "")
+    write(tmp_path, "pkg/heavy.py", "VALUE = 1\n")
+    write(
+        tmp_path,
+        "pkg/user.py",
+        "try:\n    from pkg import heavy\nexcept ImportError:\n    heavy = None\n",
+    )
+    assert "pkg.heavy" in build_import_graph(tmp_path, "pkg")["pkg.user"]
+
+
+def test_predicted_load_matches_what_python_actually_imports(tmp_path):
+    """The graph's transitive reach must equal real sys.modules, not approximate it.
+
+    This is the property that makes propagation cost meaningful. Two bugs broke it
+    in opposite directions and cancelled each other's symptoms: function-body
+    imports were counted (overstating), while relative imports in `__init__.py`
+    and implicitly-loaded ancestor packages were dropped (understating). Verified
+    here against a real interpreter rather than against the graph's own rules.
+    """
+    write(tmp_path, "pkg/__init__.py", "from .core import engine\n")
+    write(tmp_path, "pkg/core/__init__.py", "")
+    write(tmp_path, "pkg/core/engine.py", "from pkg.util import helper\n")
+    write(tmp_path, "pkg/util/__init__.py", "")
+    write(tmp_path, "pkg/util/helper.py", "VALUE = 1\n")
+    write(tmp_path, "pkg/lazy.py", "def go():\n    from pkg.util import helper\n    return helper\n")
+
+    graph = build_import_graph(tmp_path, "pkg")
+    reached = {"pkg"}
+    stack = ["pkg"]
+    while stack:
+        for target in graph.get(stack.pop(), ()):
+            if target not in reached:
+                reached.add(target)
+                stack.append(target)
+
+    actual = subprocess.run(
+        [sys.executable, "-c",
+         "import sys, pkg; print(len([m for m in sys.modules if m == 'pkg' or m.startswith('pkg.')]))"],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    assert len(reached) == int(actual.stdout.strip())
+    assert "pkg.lazy" not in reached  # deferred, and never imported by anything
+
+
+def test_flat_script_directory_siblings_are_edges(tmp_path):
+    """Scripts that sys.path their own directory import siblings by bare name.
+
+    This is escapement's own primary Python style: `from would_block_stop import x`
+    rather than `from harness.bin.would_block_stop import x`. Package-rooted naming
+    never matches those, and the failure mode is silent rather than loud — 92
+    interdependent scripts reported zero edges and therefore a flawless
+    architecture, which is worse than an error because it looks like good news.
+    """
+    write(tmp_path, "bin/helper.py", "VALUE = 1\n")
+    write(tmp_path, "bin/main.py", "import sys\nsys.path.insert(0, '.')\nfrom helper import VALUE\n")
+    graph = build_import_graph(tmp_path, "bin")
+    assert graph["bin.main"] == {"bin.helper"}
+
+
+def test_bare_import_without_a_sibling_is_not_an_edge(tmp_path):
+    """Sibling resolution must not invent edges for stdlib or third-party names."""
+    write(tmp_path, "bin/main.py", "import json\nimport requests\n")
+    assert build_import_graph(tmp_path, "bin")["bin.main"] == set()
 
 
 def test_acyclic_chain_has_no_cycles():
