@@ -3,36 +3,54 @@
 Escapement has no mechanism that causes a repository to get structurally smaller,
 and the estate has first-party evidence about what happens without one.
 
-**A correction is load-bearing here.** An earlier form of this proposal claimed
-`cake`'s ratchet moved total cyclomatic complexity −14%, removed 585 functions, and
-cut the worst file −62%. All three are artifacts of `78c8ddb62` (2026-06-23), a
-correct fix deduplicating radon output that "emits each class method twice." Three
-commits account for 97.5% of all recorded decrease. Measured on the consistent side
-of that fix, 2026-06-23 → 2026-09-18: total CC **+33.5%** (19,317 → 25,793),
-functions **+1,573**, and the worst file's complexity **doubled**, 271 → 545.
+**The evidence here was measured, not read off a stored artifact**, because two
+earlier attempts to state it were both wrong in opposite directions. `cake`'s stored
+complexity baseline splices two metric definitions across `78c8ddb62` (2026-06-23),
+which deduplicated radon output that "emits each class method twice." Reading across
+that splice produced a claimed −14% complexity and −585 functions. Measuring only
+after it produced the opposite error, because that window begins at the trough.
 
-What survives is narrower and still worth acting on. Complexity *per file* and *per
-function* held flat — 42.7 → 41.8 and 4.26 → 4.22 — while the repository grew 36% in
-files. Dead code went 23 → 0 with the vulture whitelist itself *shrinking* 20 → 15
-lines. Quality per unit held under substantial growth; nothing shrank in aggregate.
+The figures below come from checking out `cake` at nine points between 2026-05-26
+and 2026-09-15 and measuring every point with one dependency-free tool. This is the
+method this change mandates: derive, never store.
 
-The sharper evidence is about scope, and it is unaffected by the artifact. `cake`
-added 4,024 source files and deleted 119 (34:1); 98% of its commits delete nothing.
-Its measurement covers 617 of 1,951 Python files, all under `cake/`. `tests/` has
-zero entries — and `tests/` now holds 58% of all rework, all three files touched by
-20 or more distinct work items, and a 5,541-line test file. `dashboards` measured
-nothing and grew a 7,701-line `App.test.jsx`.
+| measure | 2026-05-26 | 2026-09-15 | |
+| --- | --- | --- | --- |
+| files | 279 | 697 | +149.8% |
+| total CC | 17,370 | 24,200 | +39.3% |
+| functions | 3,791 | 5,629 | +48.5% |
+| **CC per file** | 62.3 | 34.7 | **−44.2%** |
+| CC per function | 4.58 | 4.30 | −6.2% |
+| **max single file** | 811 | 515 | **−36.5%** |
 
-That is the natural experiment, and it is about exclusion rather than reduction:
-where measurement applied, quality per unit held; where it did not, god objects
-formed. Both exclusions predicted their own defect site.
+The ratchet worked on the measures a ratchet targets. Complexity per file nearly
+halved while the repository grew 150% in files, and the worst single file fell by
+over a third. Aggregate complexity rose because the codebase grew; a per-unit
+ratchet does not constrain that and was never claimed to. Dead code went 23 → 0 with
+the vulture whitelist itself *shrinking* 20 → 15 lines.
 
-A second correction: the ratchet has not gone quiet because all 81 pins are
-satisfied. The pins file grew **62 → 81** across the window, so targets were being
-added — and the worst file doubled during the same period. Pin satisfaction and
-structural improvement came apart, which is a stronger argument for a renewal signal
-than idleness would have been: satisfying every declared target was compatible with
-the repository's worst artifact getting twice as bad.
+**The trajectory is the finding, and it is what this change exists to fix.**
+Max single-file complexity ran:
+
+```
+811 → 742 → 264 → 159 → 281 → 281 → 501 → 512 → 515
+                   ↑ trough 2026-07-07      ↑ +224% off the floor
+```
+
+Decomposition drove the worst file from 811 to 159 by early July. It then climbed
+back to 515 — **while every one of the 81 declared pins remained satisfied**. The
+ratchet reported success throughout the regression. That is the warrant for a
+renewal signal, and it is far stronger than the earlier claim that the ratchet had
+gone idle: pins grew 62 → 81 across the window, so targets were being added the whole
+time. Satisfying every declared target was compatible with the repository's worst
+artifact tripling off its floor.
+
+The scope evidence is independent of all of the above. `cake` added 4,024 source
+files and deleted 119 (34:1); 98% of its commits delete nothing. Its measurement
+covers 617 of 1,951 Python files, all under `cake/`. `tests/` has zero entries — and
+`tests/` holds 58% of all rework, all three files touched by 20 or more distinct work
+items, and a 5,541-line test file. `dashboards` measured nothing and grew a
+7,701-line `App.test.jsx`. Both exclusions predicted their own defect site.
 
 The mechanism exists as bespoke scripts in one repository. Escapement should own the
 loop so every repository under it inherits the capability rather than re-deriving it.

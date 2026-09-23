@@ -1,14 +1,15 @@
 ## Problem Statement
 
-Nothing in escapement causes a repository to get structurally smaller. Across the
-estate, `cake` added 4,024 source files and deleted 119 in five months (34:1) with
-98% of commits deleting nothing, and `dashboards` ran 7:1 with 88%. Where
-measurement, declared decomposition pins and a ratchet were applied, complexity
-*per file* and *per function* held flat while the repository grew 36% in files, and
-dead code went to zero with its exemption list shrinking — but nothing shrank in
-aggregate, and that machinery is bespoke to one repository, covers 617 of its 1,951
-Python files, excludes `tests/` where 58% of rework lands, and has no way to
-propose the next targets once the declared ones are met.
+Nothing in escapement holds a structural gain once it is won. Across the estate,
+`cake` added 4,024 source files and deleted 119 in five months (34:1) with 98% of
+commits deleting nothing, and `dashboards` ran 7:1 with 88%. Where measurement,
+declared decomposition pins and a ratchet were applied, they worked — complexity per
+file fell 44% and the worst single file fell 36% while the repository grew 150% in
+files — and then the worst file climbed 224% back off its floor with every declared
+pin still satisfied. The machinery is bespoke to one repository, covers 617 of its
+1,951 Python files, excludes `tests/` where 58% of rework lands, and has no way to
+propose the next targets once the declared ones are met, so a regression after
+success is invisible to it.
 
 ## Context
 
@@ -17,14 +18,28 @@ and one repository that wrote down the intent three times without building it.
 
 `cake` runs a complexity baseline (`metrics/complexity-baseline.json`), 81 declared
 decomposition pins (`metrics/complexity-baseline-pins.json`), architecture tests
-that verify them, and a maintained vulture whitelist. Between 2026-06-23 (the first
-date on which its complexity series is internally consistent) and 2026-09-18 its
-measured totals moved: complexity 19,317 → 25,793 (+33.5%), functions 4,536 → 6,109
-(+1,573), worst-file complexity 271 → 545 (doubled), complexity per file 42.7 → 41.8
-and per function 4.26 → 4.22 (both flat), dead-code count 23 → 0 with the whitelist
-shrinking 20 → 15 lines. Figures spanning 2026-05-26 are not comparable: commit
-`78c8ddb62` corrected a radon double-count mid-series, and the apparent −14%
-improvement widely quoted from that window is that correction, not a code change.
+that verify them, and a maintained vulture whitelist.
+
+Its stored baseline cannot be read as a series: `78c8ddb62` (2026-06-23)
+deduplicated radon output that "emits each class method twice," so figures spanning
+that commit compare two different definitions. The figures below were instead
+obtained by checking out the repository at nine points from 2026-05-26 to 2026-09-15
+and measuring each with one dependency-free tool.
+
+| measure | 2026-05-26 | 2026-09-15 | |
+| --- | --- | --- | --- |
+| files | 279 | 697 | +149.8% |
+| total CC | 17,370 | 24,200 | +39.3% |
+| functions | 3,791 | 5,629 | +48.5% |
+| CC per file | 62.3 | 34.7 | **−44.2%** |
+| CC per function | 4.58 | 4.30 | −6.2% |
+| max single file | 811 | 515 | **−36.5%** |
+
+Max single-file complexity ran `811 → 742 → 264 → 159 → 281 → 281 → 501 → 512 → 515`
+— a trough of 159 on 2026-07-07, then +224% back off the floor, throughout which all
+81 pins remained satisfied and the pin count grew 62 → 81. Dead-code count went
+23 → 0 with the whitelist shrinking 20 → 15 lines.
+
 Over the same period the repository added 4,024 source files and deleted 119, and
 98% of its commits deleted nothing. The measurement covers 617 of 1,951 Python files
 and contains zero entries under `tests/`; `tests/` holds 58% of rework, all three
@@ -116,9 +131,28 @@ smaller by moving its contents somewhere unmeasured.
 - If measured complexity falls while the count of files outside declared scope
   rises, the capability is relocating complexity rather than removing it.
 - If the capability's own files enter the top ranks of the choke-point measurement
-  it produces, it has become the thing it was built to prevent — the failure
-  already visible in `cake`, whose ratchet policy test is that repository's
-  second-most-coupled file at 24 distinct work items.
+  it produces, it has become the thing it was built to prevent. **This anti-metric
+  is already satisfied in the reference repository and is recorded here as an
+  observed instance, not a hypothetical**: measured at 2026-09-15, the
+  highest-complexity file in `cake/` is `cake/lineage/ratchet.py`, and its ratchet
+  policy test is the repository's second-most-coupled file at 24 distinct work
+  items. A ratchet is both the most complex artifact and one of the most coupled
+  artifacts in the repository whose complexity it governs.
+- **And it is satisfied more severely in this repository than in the reference
+  one.** Measured 2026-09-18 with the same tool, `escapement` excluding generated
+  `plugins/` copies is 317 files at **54.2 CC per file**, against `cake`'s 34.7 —
+  the governing repository is **56% worse per file than the repository whose
+  ratchet this change generalises**. Eight files exceed 1,000 lines, six of them
+  tests; the largest artifact in the repository is the test of the worktree
+  mechanism at 3,812 lines, and three of the top six are tests of gates.
+  Separately, 109 files exist in 2–4 byte-identical generated copies carrying
+  12,230 CC — **42% of escapement's measured total** — which is the mechanical
+  reason every gate fix here is a four-copy edit. That last figure is a scope
+  question the first run must answer explicitly rather than a defect: either
+  generated surfaces are excluded with the exclusion recorded as a forecast, or
+  they are in scope and every plugin gate is counted up to four times. Counting
+  both ways silently is precisely how `cake`'s baseline turned a 39% rise into an
+  apparent 14% fall.
 
 ## Decisions
 
@@ -134,9 +168,11 @@ comparison are measured from git in the same run, by the same adapter.
 
 The evidence is that a stored measurement is the common cause of both instrument
 failures found in this estate. `cake`'s complexity baseline absorbed a radon
-double-count correction (78c8ddb62) silently across 212 revisions, turning a
-+33.5% trend into an apparent −14% improvement that stood unchallenged for three
-months. `duplication-baseline.json` was hand-edited inside an unrelated feature
+double-count correction (78c8ddb62) silently across 212 revisions, so a series in
+which aggregate complexity rose 39.3% read as a −14% improvement, and stood
+unchallenged for three months. It then produced a second, opposite error for anyone
+reading only the post-correction window, which begins at the series trough.
+`duplication-baseline.json` was hand-edited inside an unrelated feature
 commit (56251934b) and still reports `generated_at` of 2026-07-06 through three
 later commits. Neither failure is possible when nothing is persisted.
 
