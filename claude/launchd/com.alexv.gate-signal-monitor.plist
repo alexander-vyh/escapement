@@ -48,6 +48,15 @@
     <key>Label</key>
     <string>com.alexv.gate-signal-monitor</string>
 
+    <key>EnvironmentVariables</key>
+    <dict>
+    	<!-- launchd's default PATH is /usr/bin:/bin:/usr/sbin:/sbin, which does not
+    	     contain bd (/opt/homebrew/bin/bd). Without this every issue creation
+    	     raised FileNotFoundError, _file_bead() returned None, and the monitor
+    	     reported [FILED] while delivering nothing for four months. -->
+    	<key>PATH</key>
+    	<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/env</string>
