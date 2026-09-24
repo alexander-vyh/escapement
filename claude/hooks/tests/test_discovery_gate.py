@@ -221,3 +221,80 @@ class TestAskPathPreserved:
                 mod, 'bd create "loose task" --type=task', cwd=project)
         assert code == 0
         assert _decision(out) == "ask"
+
+
+# ===========================================================================
+# The trigger must be an invocation, not a mention.
+#
+# Reproduced four times against the substring trigger, three from the filed
+# bead and one live while fixing it. Every case is a READ: a grep whose PATTERN
+# is the command, a commit message that narrates it, and a shell literal
+# containing it. None of them creates anything. A gate that interrupts reads
+# teaches the operator to override it by reflex, which is how the estate's
+# waiver share climbed 50% -> 91% while encounter volume tripled.
+# ===========================================================================
+
+
+class TestTriggerIsInvocationNotMention:
+    """Deliberately constructs the trigger text at runtime.
+
+    Writing it literally here would make this very file trip the gate it
+    tests -- which is the defect, demonstrated.
+    """
+
+    TOKEN = "bd" + " " + "create"
+
+    def _fires(self, mod, command, cwd=""):
+        code, out, _ = _run_hook(mod, command, cwd=cwd)
+        return bool(out.strip())
+
+    def test_grep_for_the_command_does_not_fire(self):
+        mod = _load_module()
+        cmd = f"grep -n '{self.TOKEN}' claude/bin/gate_signal_monitor.py"
+        assert not self._fires(mod, cmd), "a read-only grep triggered the gate"
+
+    def test_grep_alternation_pattern_does_not_fire(self):
+        mod = _load_module()
+        cmd = f"grep -nE 'return None|def _file_bead|{self.TOKEN}' monitor.py"
+        assert not self._fires(mod, cmd), "a grep alternation triggered the gate"
+
+    def test_heredoc_commit_message_does_not_fire(self):
+        mod = _load_module()
+        cmd = (
+            "git commit -F - <<'EOF'\n"
+            f"fix: _file_bead() returns None when {self.TOKEN} fails\n"
+            "EOF"
+        )
+        assert not self._fires(mod, cmd), "a commit message triggered the gate"
+
+    def test_inline_commit_message_does_not_fire(self):
+        mod = _load_module()
+        cmd = f"git commit -m 'document how {self.TOKEN} behaves on failure'"
+        assert not self._fires(mod, cmd), "a -m message triggered the gate"
+
+    def test_sed_rewriting_the_string_does_not_fire(self):
+        mod = _load_module()
+        cmd = f"sed -i '' 's/{self.TOKEN}/bd new/' script.sh"
+        assert not self._fires(mod, cmd), "a sed over source triggered the gate"
+
+    def test_a_different_subcommand_does_not_fire(self):
+        mod = _load_module()
+        assert not self._fires(mod, "bd update abc-123 --claim")
+
+    # --- and the gate must still fire on the real thing ---
+
+    def test_real_invocation_still_fires(self):
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            project = _make_change(tmp, design=None)
+            fired = self._fires(
+                mod, f'{self.TOKEN} "a loose task" --type=task', cwd=project)
+        assert fired, "the gate stopped firing on an actual creation"
+
+    def test_invocation_after_cd_still_fires(self):
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            project = _make_change(tmp, design=None)
+            fired = self._fires(
+                mod, f'cd /repo && {self.TOKEN} "t" --type=task', cwd=project)
+        assert fired, "the gate missed a creation after a shell separator"
