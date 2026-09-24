@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import os
 import socket
+from urllib.error import URLError
 import subprocess
 import sys
 import tempfile
@@ -434,7 +435,13 @@ def test_unresolved_auth_file_fails_closed(monkeypatch, tmp_path, kind):
     assert _observed_auth(monkeypatch, key_file=key_file) is None
 
 
-def test_http_401_reports_optional_judge_unavailable_without_raising(monkeypatch):
+def test_http_401_reports_auth_not_a_generic_outage(monkeypatch):
+    """A 401 and a dead server need opposite repairs.
+
+    Both used to report `unavailable`, so 4,834 recorded fail-opens sent every
+    reader to the same "restart the server" checklist — useless when the server
+    is healthy and the key is wrong. The call still must not raise.
+    """
     monkeypatch.setenv("ESCAPEMENT_LOCAL_JUDGE_API_KEY", "wrong-secret")
     _UnauthorizedHandler.authorization = None
     _UnauthorizedHandler.request_count = 0
@@ -451,7 +458,8 @@ def test_http_401_reports_optional_judge_unavailable_without_raising(monkeypatch
     assert result["ok"] is False
     assert result["base_url"].startswith("http://127.0.0.1:")
     assert result["model"] == "fake-local-model"
-    assert result["reason"] == "unavailable"
+    assert result["reason"] == lj.CAUSE_AUTH
+    assert result["reason"] != lj.CAUSE_UNREACHABLE, "auth misread as an outage"
 
 
 @pytest.mark.parametrize("entrypoint", ["wakeup_waker.py"])
@@ -470,7 +478,8 @@ def test_deterministic_reconcilers_do_not_import_optional_local_judge(entrypoint
     assert "_local_judge_client" not in source
 
 
-def test_health_check_reports_unavailable_without_raising():
+def test_health_check_reports_unreachable_without_raising():
+    """Connection refused is a real outage — and must be named as one."""
     def boom(url, payload, timeout):
         raise ConnectionRefusedError("no listener")
 
@@ -479,4 +488,101 @@ def test_health_check_reports_unavailable_without_raising():
     assert result["ok"] is False
     assert result["base_url"] == lj.DEFAULT_BASE_URL
     assert result["model"] == lj.DEFAULT_MODEL
-    assert result["reason"] == "unavailable"
+    assert result["reason"] == lj.CAUSE_UNREACHABLE
+
+
+# --- cause taxonomy (escapement-3dbt) -------------------------------------
+#
+# 4,834 recorded fail-opens all said "unavailable". Three of the causes below
+# occur while the server is running perfectly, so a single word sent every
+# reader to the same useless restart.
+
+
+@pytest.mark.parametrize(
+    "raised,expected",
+    [
+        (ConnectionRefusedError("no listener"), lj.CAUSE_UNREACHABLE),
+        (socket.timeout("timed out"), lj.CAUSE_TIMEOUT),
+        (URLError(socket.timeout("timed out")), lj.CAUSE_TIMEOUT),
+        (URLError("name resolution failed"), lj.CAUSE_UNREACHABLE),
+    ],
+)
+def test_transport_failures_are_named_individually(raised, expected):
+    def boom(url, payload, timeout):
+        raise raised
+
+    verdict, cause = lj.verdict_with_cause(
+        "text", system_prompt="s", positive_labels=("a",), negative_labels=("b",),
+        post=lj._default_post if False else boom,
+    )
+    assert verdict is None, "a failed call must still fail open"
+    assert cause == expected
+
+
+def test_a_timeout_is_not_reported_as_an_outage():
+    """These need opposite repairs: raise the timeout vs restart the server."""
+    def slow(url, payload, timeout):
+        raise socket.timeout("timed out")
+
+    _, cause = lj.verdict_with_cause(
+        "text", system_prompt="s", positive_labels=("a",), negative_labels=("b",),
+        post=slow,
+    )
+    assert cause == lj.CAUSE_TIMEOUT
+    assert cause != lj.CAUSE_UNREACHABLE
+
+
+def test_healthy_server_with_off_contract_label_is_not_an_outage():
+    """The defect that made the weekly bead actively misleading.
+
+    The transport worked, the server answered 200, and the model emitted a label
+    the prompt does not define. Reporting that as `unavailable` sent operators to
+    restart a process that was never down.
+    """
+    def off_contract(url, payload, timeout):
+        return "maybe?"
+
+    verdict, cause = lj.verdict_with_cause(
+        "text", system_prompt="s", positive_labels=("winddown",),
+        negative_labels=("not_winddown",), post=off_contract,
+    )
+    assert verdict is None, "an unusable label must still fail open"
+    assert cause == lj.CAUSE_UNRECOGNISED
+    assert cause not in (lj.CAUSE_UNREACHABLE, lj.CAUSE_AUTH, lj.CAUSE_TIMEOUT)
+
+
+def test_malformed_body_is_distinguished_from_a_dead_server():
+    """A 200 that is not OpenAI-compatible means the base_url points somewhere else."""
+    def wrong_shape(url, payload, timeout):
+        raise lj.JudgeCallFailed(lj.CAUSE_MALFORMED, "no choices key")
+
+    _, cause = lj.verdict_with_cause(
+        "text", system_prompt="s", positive_labels=("a",), negative_labels=("b",),
+        post=wrong_shape,
+    )
+    assert cause == lj.CAUSE_MALFORMED
+
+
+def test_a_successful_verdict_reports_ok_for_both_polarities():
+    for reply, expected in (("winddown", True), ("not_winddown", False)):
+        verdict, cause = lj.verdict_with_cause(
+            "text", system_prompt="s", positive_labels=("winddown",),
+            negative_labels=("not_winddown",),
+            post=lambda url, payload, timeout, r=reply: r,
+        )
+        assert verdict is expected
+        assert cause == lj.CAUSE_OK
+
+
+def test_boolean_verdict_behaviour_is_unchanged_by_the_taxonomy():
+    """The fail-open contract every caller depends on must not have moved."""
+    def boom(url, payload, timeout):
+        raise ConnectionRefusedError("no listener")
+
+    assert lj.boolean_verdict(
+        "text", system_prompt="s", positive_labels=("a",),
+        negative_labels=("b",), post=boom,
+    ) is None
+    assert lj.boolean_verdict(
+        "", system_prompt="s", positive_labels=("a",), negative_labels=("b",),
+    ) is None

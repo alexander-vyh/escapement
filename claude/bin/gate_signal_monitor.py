@@ -74,6 +74,20 @@ _DEFAULT_KNOWN_GATES = [
 # semantic judge is unreachable. It is the only signal that the continuation
 # gate has silently degraded to a no-op (escapement-lf8l).
 JUDGE_UNAVAILABLE_REASON = "winddown_judge_unavailable"
+
+# What actually fixes each cause. Kept beside the filing because a bead that
+# reports a symptom and prescribes one generic remedy trains its reader to skim:
+# three of these are repaired on a server that is running perfectly.
+_CAUSE_REPAIR = {
+    "unreachable": "server down or wrong base_url — restart / check the LaunchAgent",
+    "auth": "key wrong, missing, or unreadable — server is HEALTHY, restarting it will not help",
+    "timeout": "server alive but too slow — check load, or raise ESCAPEMENT_LOCAL_JUDGE_TIMEOUT",
+    "unrecognised_label": "server HEALTHY, model answered off-contract — fix the prompt or the model",
+    "malformed_response": "endpoint is not OpenAI-compatible — check base_url points at the right service",
+    "empty_input": "no transcript text to classify — a hook wiring bug, not a judge problem",
+    "judge_raised": "the injected judge raised — a code defect in the caller",
+    "unrecorded": "row predates cause recording",
+}
 JUDGE_GATE = "continuation-harness"
 # Below this share of winddown allows, treat failures as transient blips rather
 # than an outage: a warning that fires on noise gets ignored like the 3,165
@@ -84,14 +98,21 @@ JUDGE_OUTAGE_RATE = 0.05
 def summarize_judge_availability(
     entries_by_repo: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    """Count winddown fail-opens against all winddown allows, per repo.
+    """Count winddown fail-opens against all winddown allows, per repo and per cause.
 
     The denominator is the winddown rung's own allows, not every gate event —
     an unrelated deny elsewhere says nothing about judge health.
+
+    The cause breakdown is what makes the filed bead actionable. "35 unreachable"
+    means restart the server; "35 auth" means the key is wrong and restarting
+    fixes nothing; "35 unrecognised_label" means the server is healthy and the
+    model is off-contract. Rows written before causes existed carry none, and are
+    counted as `unrecorded` rather than silently folded into a real cause.
     """
     unavailable = 0
     stop_events = 0
     by_repo: Counter[str] = Counter()
+    by_cause: Counter[str] = Counter()
     for repo, entries in entries_by_repo.items():
         for e in entries:
             if e.get("gate") != JUDGE_GATE or e.get("decision") != "allow":
@@ -100,12 +121,14 @@ def summarize_judge_availability(
             if e.get("reason") == JUDGE_UNAVAILABLE_REASON:
                 unavailable += 1
                 by_repo[repo] += 1
+                by_cause[e.get("cause") or "unrecorded"] += 1
     rate = round(unavailable / stop_events, 2) if stop_events else 0.0
     return {
         "unavailable": unavailable,
         "stop_events": stop_events,
         "rate": rate,
         "by_repo": dict(by_repo),
+        "by_cause": dict(by_cause),
         "is_outage": rate >= JUDGE_OUTAGE_RATE and unavailable > 0,
     }
 
@@ -367,16 +390,26 @@ def file_concerning_patterns(
                     judge.get("by_repo", {}).items(), key=lambda x: -x[1]
                 )
             )
+            by_cause = judge.get("by_cause", {}) or {}
+            cause_lines = "\n".join(
+                f"- {cause}: {n}   {_CAUSE_REPAIR.get(cause, 'cause not recognised')}"
+                for cause, n in sorted(by_cause.items(), key=lambda x: -x[1])
+            )
             description = (
-                f"The local semantic judge was unreachable for "
+                f"The local semantic judge produced no verdict for "
                 f"{judge['unavailable']} of {judge['stop_events']} winddown "
                 f"allows ({judge['rate']:.0%}) in the last {window_text}.\n\n"
                 f"{per_repo}\n\n"
+                f"## Cause\n\n"
+                f"{cause_lines or '- unrecorded: (rows predate cause recording)'}\n\n"
                 f"A `{JUDGE_UNAVAILABLE_REASON}` allow is a stop that nothing "
                 f"checked: the Stop hook's judge call fails open by design so a "
                 f"judge problem can never block or crash the hook. That is "
                 f"correct behaviour and it is also invisible — the gate stays "
                 f"wired, reports nothing, and enforces nothing.\n\n"
+                f"Act on the cause above rather than working the list below in "
+                f"order. `auth` and `unrecognised_label` both happen while the "
+                f"server is healthy, so restarting it fixes neither.\n\n"
                 f"## What to check\n\n"
                 f"1. Probe the endpoint (000 means down):\n"
                 f"   `curl -s -o /dev/null -w '%{{http_code}}\\n' "
@@ -388,8 +421,7 @@ def file_concerning_patterns(
                 f"~/Library/LaunchAgents/com.user.rapid-mlx.plist`\n"
                 f"3. Confirm auth resolves — the client reads "
                 f"`~/.claude/harness/local-judge-api-key` (mode 0600) unless "
-                f"`ESCAPEMENT_LOCAL_JUDGE_API_KEY[_FILE]` overrides it. A 401 "
-                f"fails open exactly like an outage.\n\n"
+                f"`ESCAPEMENT_LOCAL_JUDGE_API_KEY[_FILE]` overrides it.\n\n"
                 f"Filed automatically by the weekly gate-signal monitor; "
                 f"subsequent weeks dedup against this open issue."
             )

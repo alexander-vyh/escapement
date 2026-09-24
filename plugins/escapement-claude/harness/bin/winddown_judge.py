@@ -146,6 +146,43 @@ _SYSTEM = (
 )
 
 
+def model_verdict_with_cause(
+    text: str,
+    *,
+    user_request: Optional[str] = None,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+    timeout: Optional[float] = None,
+    post: Optional[Callable[[str, dict, float], str]] = None,
+) -> Tuple[Optional[bool], str]:
+    """As `model_verdict`, but also reports WHY there is no verdict.
+
+    A None verdict fails open, which is correct. What was missing is the cause:
+    `unreachable` needs the server restarted, `auth` needs a key, and
+    `unrecognised_label` means the server is healthy and the model is
+    off-contract. All three were recorded as the single word "unavailable",
+    which is why 4,834 fail-opens could not be triaged.
+    """
+    trajectory = text
+    if user_request:
+        trajectory = (
+            "LAST HUMAN REQUEST:\n"
+            f"{user_request}\n\n"
+            "TERMINAL ASSISTANT RESPONSE:\n"
+            f"{text}"
+        )
+    return _lj.verdict_with_cause(
+        trajectory,
+        system_prompt=_SYSTEM,
+        positive_labels=("winddown",),
+        negative_labels=("not_winddown",),
+        base_url=base_url,
+        model=model,
+        timeout=timeout,
+        post=post,
+    )
+
+
 def model_verdict(
     text: str,
     *,
@@ -160,25 +197,16 @@ def model_verdict(
     Returns True (winddown) / False (not_winddown) / None (unclear, error, down, or
     unparseable). FAIL-OPEN: never raises — a model problem yields None and the caller
     treats it as allow (no classifier fired, judge-only architecture).
-"""
-    trajectory = text
-    if user_request:
-        trajectory = (
-            "LAST HUMAN REQUEST:\n"
-            f"{user_request}\n\n"
-            "TERMINAL ASSISTANT RESPONSE:\n"
-            f"{text}"
-        )
-    return _lj.boolean_verdict(
-        trajectory,
-        system_prompt=_SYSTEM,
-        positive_labels=("winddown",),
-        negative_labels=("not_winddown",),
+    """
+    verdict, _cause = model_verdict_with_cause(
+        text,
+        user_request=user_request,
         base_url=base_url,
         model=model,
         timeout=timeout,
         post=post,
     )
+    return verdict
 
 
 def decide(

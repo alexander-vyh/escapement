@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1272 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1288 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -424,15 +424,19 @@ def _write_winddown_verdict(
 
 def _compute_winddown_verdict_inline(
     text, thread_dir, *, user_request=None, judge=None, now=None,
-) -> Optional[bool]:
+) -> Tuple[Optional[bool], str]:
     """Run the local-LLM judge INLINE (bounded timeout, fail-open) and cache its result.
 
     This is what makes the model layer LIVE without a daemon: the SWE-PRM judge that was
     wired-but-dormant (nothing wrote the verdict file) now runs on demand, in the narrow
-    slice where it runs the judge as the sole classifier. Returns the bool verdict or None on
-    any error/unclear — a judge problem must NEVER block or crash the hook.
+    slice where it runs the judge as the sole classifier.
+
+    Returns `(verdict, cause)`. The verdict is the bool or None on any error/unclear —
+    a judge problem must NEVER block or crash the hook. The cause says WHY a None
+    happened, because "the judge did not answer" and "the judge is not running" demand
+    different repairs and were previously the same recorded word.
     """
-    fn = judge or _wj.model_verdict
+    fn = judge or _wj.model_verdict_with_cause
     try:
         try:
             v = fn(text, user_request=user_request)
@@ -442,13 +446,19 @@ def _compute_winddown_verdict_inline(
             # request keyword.
             v = fn(text)
     except Exception:
-        return None  # fail-open
+        return (None, "judge_raised")  # fail-open
+    # An injected judge returns a bare verdict; the production one returns a pair.
+    # Both are supported so the test seam does not have to know about causes.
+    if isinstance(v, tuple):
+        v, cause = v
+    else:
+        cause = "injected_judge"
     if isinstance(v, bool):
         _write_winddown_verdict(
             thread_dir, v, text=text, user_request=user_request, now=now,
         )
-        return v
-    return None
+        return (v, cause)
+    return (None, cause)
 
 
 # Derived/churny beads telemetry: rewritten as a side-effect of ordinary `bd`
@@ -696,10 +706,11 @@ def _winddown_override(
     model_offer = _read_cached_winddown_verdict(
         thread_dir, text=text, user_request=user_request,
     )
+    judge_cause = "cache_hit"
     if model_offer is None:
         # Cache cold — consult the judge inline. There is no general regex floor in the
         # judge/rung path; only the narrow outage sentinel below can act after a None.
-        model_offer = _compute_winddown_verdict_inline(
+        model_offer, judge_cause = _compute_winddown_verdict_inline(
             text, thread_dir, user_request=user_request, judge=judge,
         )
     if model_offer is None:
@@ -714,6 +725,11 @@ def _winddown_override(
             "session_id": session_id,
             "decision": "allow",
             "reason": "winddown_judge_unavailable",
+            # ...and say WHY (escapement-3dbt). `unavailable` covered a dead server,
+            # a 401, a timeout, and a healthy server whose model answered off-contract.
+            # The operator checklist for those is different in every case, so a corpus
+            # that cannot separate them cannot drive a repair.
+            "cause": judge_cause,
             "was_correct": None,
             "notes": "winddown_rung",
         })
