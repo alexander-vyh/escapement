@@ -11,8 +11,9 @@ from __future__ import annotations
 import os
 import json
 import pathlib
+import socket
 import stat
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from typing import Callable, Iterable
 
@@ -98,6 +99,55 @@ def configured_auth_header() -> str | None:
     return f"Bearer {lines[0]}"
 
 
+# Why a judge call produced no verdict. Every one of these used to surface as the
+# single reason `judge_unavailable`, which made 4,834 recorded fail-opens
+# unactionable: the operator checklist says "restart the server" while the actual
+# cause may be a 401, a timeout, or a perfectly healthy server whose model
+# answered with a label the prompt does not recognise. A gate that cannot say WHY
+# it failed open cannot drive its own repair.
+CAUSE_OK = "ok"
+CAUSE_EMPTY_INPUT = "empty_input"
+CAUSE_UNREACHABLE = "unreachable"          # connection refused / DNS / socket
+CAUSE_AUTH = "auth"                        # 401/403 — key missing, stale, unreadable
+CAUSE_TIMEOUT = "timeout"
+CAUSE_MALFORMED = "malformed_response"     # 200, but not the documented JSON shape
+CAUSE_UNRECOGNISED = "unrecognised_label"  # 200 and well formed, label off-contract
+
+
+class JudgeCallFailed(RuntimeError):
+    """A judge call that failed with an identified cause."""
+
+    def __init__(self, cause: str, detail: str = "") -> None:
+        super().__init__(detail or cause)
+        self.cause = cause
+        self.detail = detail
+
+
+def classify_exception(exc: BaseException, timeout: float | None = None) -> str:
+    """Map a transport failure onto a cause.
+
+    Shared by the default transport and by the verdict path so that an injected
+    `post` is diagnosed exactly like the real one. Classifying in only one place
+    made the reported cause depend on WHICH transport ran, which is the same
+    class of defect as the conflation this taxonomy removes.
+    """
+    if isinstance(exc, JudgeCallFailed):
+        return exc.cause
+    if isinstance(exc, HTTPError):
+        # 401/403 is a configuration defect, not an outage, and the two need
+        # opposite repairs. Separating them is the whole point of this taxonomy.
+        return CAUSE_AUTH if exc.code in (401, 403) else f"http_{exc.code}"
+    if isinstance(exc, socket.timeout):
+        return CAUSE_TIMEOUT
+    if isinstance(exc, URLError):
+        # URLError wraps a timeout on some Python builds, so check before
+        # declaring the server unreachable and sending someone to restart it.
+        return CAUSE_TIMEOUT if isinstance(exc.reason, socket.timeout) else CAUSE_UNREACHABLE
+    if isinstance(exc, OSError):
+        return CAUSE_UNREACHABLE
+    return CAUSE_UNREACHABLE
+
+
 def _default_post(url: str, payload: dict, timeout: float) -> str:
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -113,9 +163,14 @@ def _default_post(url: str, payload: dict, timeout: float) -> str:
     try:
         with urlopen(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
-    except HTTPError as exc:
-        raise RuntimeError(f"judge server returned HTTP {exc.code}") from exc
-    return json.loads(raw)["choices"][0]["message"]["content"]
+    except (HTTPError, URLError, OSError) as exc:
+        raise JudgeCallFailed(classify_exception(exc, timeout), str(exc)) from exc
+    try:
+        return json.loads(raw)["choices"][0]["message"]["content"]
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        raise JudgeCallFailed(
+            CAUSE_MALFORMED, f"judge response was not the documented shape: {exc}"
+        ) from exc
 
 
 def _label_present(content: str, labels: Iterable[str]) -> bool:
@@ -126,7 +181,7 @@ def _label_present(content: str, labels: Iterable[str]) -> bool:
     )
 
 
-def boolean_verdict(
+def verdict_with_cause(
     text: str,
     *,
     system_prompt: str,
@@ -137,10 +192,17 @@ def boolean_verdict(
     timeout: float | None = None,
     max_tokens: int = 32,
     post: Callable[[str, dict, float], str] | None = None,
-) -> bool | None:
-    """Return True/False from a label-only local judge, or None on any uncertainty."""
+) -> tuple[bool | None, str]:
+    """Return (verdict, cause). Verdict is None whenever the judge did not decide.
+
+    The cause is the whole point. Callers fail open on a None verdict — that is
+    correct and unchanged — but a fail-open that cannot name its cause produces a
+    corpus nobody can act on. `unreachable` needs a restart, `auth` needs a key,
+    and `unrecognised_label` needs a prompt fix on a server that is perfectly
+    healthy. They were all one word before.
+    """
     if not text or not isinstance(text, str):
-        return None
+        return (None, CAUSE_EMPTY_INPUT)
     payload = {
         "model": model or configured_model(),
         "messages": [
@@ -165,17 +227,49 @@ def boolean_verdict(
             payload,
             configured_timeout() if timeout is None else timeout,
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        # Classified HERE as well as in the default transport, so an injected
+        # `post` is diagnosed identically to the real one. A cause that depends
+        # on which transport ran is not a diagnosis.
+        return (None, classify_exception(exc))
 
     content = content or ""
     # Negative labels often contain the positive label as a substring
     # (`not_stop_solicitation`), so they must win.
     if _label_present(content, negative_labels):
-        return False
+        return (False, CAUSE_OK)
     if _label_present(content, positive_labels):
-        return True
-    return None
+        return (True, CAUSE_OK)
+    # The server answered and the transport worked; the MODEL is off-contract.
+    # Recording this as an outage sent operators to restart a healthy process.
+    return (None, CAUSE_UNRECOGNISED)
+
+
+def boolean_verdict(
+    text: str,
+    *,
+    system_prompt: str,
+    positive_labels: tuple[str, ...],
+    negative_labels: tuple[str, ...],
+    model: str | None = None,
+    base_url: str | None = None,
+    timeout: float | None = None,
+    max_tokens: int = 32,
+    post: Callable[[str, dict, float], str] | None = None,
+) -> bool | None:
+    """Return True/False from a label-only local judge, or None on any uncertainty."""
+    verdict, _cause = verdict_with_cause(
+        text,
+        system_prompt=system_prompt,
+        positive_labels=positive_labels,
+        negative_labels=negative_labels,
+        model=model,
+        base_url=base_url,
+        timeout=timeout,
+        max_tokens=max_tokens,
+        post=post,
+    )
+    return verdict
 
 
 def health_check(
@@ -185,8 +279,12 @@ def health_check(
     timeout: float | None = None,
     post: Callable[[str, dict, float], str] | None = None,
 ) -> dict:
-    """Probe the configured judge endpoint without raising."""
-    verdict = boolean_verdict(
+    """Probe the configured judge endpoint without raising.
+
+    Reports the specific cause, so operator output distinguishes "restart the
+    server" from "fix the key" from "the model is off-contract".
+    """
+    verdict, cause = verdict_with_cause(
         "ready",
         system_prompt="Classify. Answer only ready or broken.",
         positive_labels=("ready",),
@@ -201,5 +299,5 @@ def health_check(
         "ok": verdict is True,
         "base_url": (base_url or configured_base_url()).rstrip("/"),
         "model": model or configured_model(),
-        "reason": "ok" if verdict is True else "unavailable",
+        "reason": CAUSE_OK if verdict is True else cause,
     }
