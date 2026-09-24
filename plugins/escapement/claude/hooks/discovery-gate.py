@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Claude Code hook: enforce discovery (design doc) before feature/epic creation.
 
-Fires as PreToolUse on Bash commands containing `bd create`.
+Fires as PreToolUse on Bash commands that actually invoke the tracker's
+create subcommand -- an argv-shaped match, not a substring of the text.
 
 For features and epics, requires a design doc at
 openspec/changes/{name}/design.md (excluding archive/) with:
@@ -27,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -156,6 +158,66 @@ def deny(hook_event: str, message: str) -> NoReturn:
 # Entry point
 # ---------------------------------------------------------------------------
 
+_SEGMENT_SPLIT = re.compile(r"(?:\|\||&&|[;\n|&])")
+
+
+def _strip_heredoc_bodies(command: str) -> str:
+    """Drop heredoc bodies, which are data the shell never executes.
+
+    A commit message describing issue creation is not issue creation. Reading
+    the body as command text is what blocked a commit whose message merely
+    narrated the defect being fixed.
+    """
+    lines = command.split("\n")
+    out: list[str] = []
+    pending: list[str] = []
+    skipping: str | None = None
+    for line in lines:
+        if skipping is not None:
+            if line.strip() == skipping:
+                skipping = None
+            continue
+        out.append(line)
+        for m in re.finditer(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line):
+            pending.append(m.group(1))
+        if pending:
+            skipping = pending.pop(0)
+    return "\n".join(out)
+
+
+def invokes_issue_create(command: str) -> bool:
+    """True only when the command actually runs the tracker's create subcommand.
+
+    Substring matching cannot tell discussing a command from running one. It
+    fired on a grep whose PATTERN was the command, and on a commit message that
+    described it. Both are reads; neither creates anything.
+
+    So: strip heredoc bodies, split on shell separators, and require the binary
+    at a command position with `create` as its first word — a quoted argument
+    can no longer trigger the gate because it is never token zero.
+    """
+    for segment in _SEGMENT_SPLIT.split(_strip_heredoc_bodies(command)):
+        segment = segment.strip()
+        if not segment:
+            continue
+        try:
+            tokens = shlex.split(segment, comments=True)
+        except ValueError:
+            continue  # unbalanced quotes — not a runnable invocation
+        # Skip leading VAR=value assignments and common wrappers.
+        idx = 0
+        while idx < len(tokens) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[idx]):
+            idx += 1
+        while idx < len(tokens) and tokens[idx] in ("command", "exec", "time", "nohup"):
+            idx += 1
+        if idx + 1 >= len(tokens):
+            continue
+        binary = os.path.basename(tokens[idx])
+        if binary == "bd" and tokens[idx + 1] == "create":
+            return True
+    return False
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
@@ -167,12 +229,13 @@ def main() -> int:
     tool_input = data.get("tool_input", {})
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
 
-    # Only fire on PreToolUse for Bash commands containing "bd create"
+    # Fire only on a command that actually creates an issue, never on one that
+    # merely mentions the words.
     if hook_event != "PreToolUse":
         return 0
     if tool_name != "Bash":
         return 0
-    if "bd create" not in command:
+    if not invokes_issue_create(command):
         return 0
 
     # Parse the story type
