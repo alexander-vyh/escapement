@@ -449,3 +449,167 @@ def test_series_leaves_no_worktree_behind(tmp_path):
         capture_output=True, text=True, check=True,
     ).stdout.strip().splitlines()
     assert len(listed) == 1  # the main checkout only
+
+
+# ------------------------------------------------- provenance and the payer
+#
+# These cover the two properties that make a number usable by someone who did
+# not run it: that it can be re-derived, and that it has been joined to
+# somebody's cost. Both are failures this repository actually had.
+
+
+from tools import structure_payer as payer  # noqa: E402
+from tools import structure_provenance as provenance  # noqa: E402
+
+
+def test_measurements_under_different_config_are_not_comparable():
+    """The splice guard: two definitions must never be differenced silently.
+
+    A radon de-duplication fix changed what 'complexity' meant mid-series here,
+    and a 39% rise read as a 14% fall for three months because nothing recorded
+    which definition produced which number.
+    """
+    first = provenance.build(repo=".", input_sha="a" * 40, recipe="x",
+                             config={"package": "pkg", "counts": "import-time"})
+    same = provenance.build(repo=".", input_sha="b" * 40, recipe="x",
+                            config={"package": "pkg", "counts": "import-time"})
+    other = provenance.build(repo=".", input_sha="b" * 40, recipe="x",
+                             config={"package": "pkg", "counts": "all edges"})
+    assert first.comparable_to(same), "same definition should be comparable"
+    assert not first.comparable_to(other), "a changed definition compared as if identical"
+
+
+def test_config_digest_changes_when_any_input_to_the_answer_changes():
+    base = provenance.config_digest({"package": "pkg", "exclude": []})
+    assert base != provenance.config_digest({"package": "other", "exclude": []})
+    assert base != provenance.config_digest({"package": "pkg", "exclude": ["tests/"]})
+
+
+def test_dirty_measuring_code_is_announced_not_silently_stamped():
+    """A sha that names something other than what ran is worse than no sha."""
+    clean = provenance.Provenance(tool_sha="abc123", tool_dirty=False)
+    dirty = provenance.Provenance(tool_sha="abc123", tool_dirty=True)
+    assert clean.warning() == ""
+    assert "uncommitted" in dirty.warning()
+
+
+def test_the_tool_offers_no_way_to_supply_a_stored_baseline():
+    """Deriving both sides is structural here, not a convention.
+
+    If a --baseline flag ever appears, a change can pass by editing a file
+    instead of by improving the code. Keeping the tool unable to accept one is
+    the guarantee; this test is what makes adding one a deliberate act.
+    """
+    from tools.measure_structure import main
+
+    for flag in ("--baseline", "--known-violations", "--against"):
+        with pytest.raises(SystemExit) as raised:
+            main(["tree", ".", "pkg", flag, "somefile.json"])
+        assert raised.value.code != 0, f"{flag} was accepted"
+
+
+def _row(module, *, reached_by, changes, fixes=0):
+    return payer.ModulePayer(module=module, reached_by=reached_by,
+                             changes=changes, fixes=fixes)
+
+
+def test_exposed_but_unpaid_module_is_monitor_not_refactor():
+    """The rule the literature and our own data both insist on.
+
+    cake's 114-module tangle holds 34% of change activity but only 20% of fix
+    activity, and its commits are smaller than average. Structure alone would
+    have called it debt; it is not a refactor candidate.
+    """
+    rows = [
+        _row("exposed.idle", reached_by=500, changes=0),
+        _row("exposed.busy", reached_by=500, changes=40),
+        _row("local.busy", reached_by=1, changes=40),
+        _row("local.idle", reached_by=1, changes=0),
+    ]
+    buckets = payer.quadrants(rows)
+    names = {k: {r.module for r in v} for k, v in buckets.items()}
+    assert "exposed.idle" in names["monitor"], "unpaid structure offered as a refactor"
+    assert "exposed.busy" in names["refactor"]
+    assert "local.busy" in names["churn"], "contained cost mislabelled as exposure"
+
+
+def test_ranking_uses_change_count_not_the_sparse_fix_signal():
+    """Fix detection is message matching and finds ~1% of commits.
+
+    Ordering by it puts noise at the top. The rank must use the better-powered
+    observation, with fixes reported beside it.
+    """
+    noisy = _row("rarely.touched", reached_by=10, changes=1, fixes=3)
+    real = _row("hot.and.exposed", reached_by=400, changes=50, fixes=0)
+    assert real.score > noisy.score
+    ordered = payer.quadrants([noisy, real])
+    top = (ordered["refactor"] or ordered["churn"] or ordered["monitor"])[0]
+    assert top.module == "hot.and.exposed"
+
+
+def test_zero_complexity_module_can_still_be_a_refactor_candidate():
+    """The finding that justifies this whole join.
+
+    cake's top candidate is `cake/__init__.py`: 258 changes, reached by 396
+    modules, cyclomatic complexity 0. A complexity-only ratchet cannot see it
+    at any threshold.
+    """
+    rows = [
+        payer.ModulePayer(module="pkg", complexity=0, reached_by=396, changes=258),
+        payer.ModulePayer(module="pkg.leaf", complexity=200, reached_by=0, changes=1),
+    ]
+    buckets = payer.quadrants(rows)
+    assert "pkg" in {r.module for r in buckets["refactor"]}
+
+
+def test_underpowered_defect_oracle_says_so():
+    rows = [_row("a", reached_by=5, changes=2)]
+    stats = {"commits": 1000, "commits_touching_package": 100,
+             "fix_commits": 3, "fix_share": 0.003, "fix_pattern": "fix"}
+    assert "UNDERPOWERED" in payer.render(rows, stats)
+
+
+def test_transitive_reach_follows_chains_and_cycles():
+    graph = {"a": {"b"}, "b": {"c"}, "c": set(), "x": {"y"}, "y": {"x"}}
+    reach = payer.transitive_reach(graph)
+    assert reach["a"] == 2, "chain reach not transitive"
+    assert reach["c"] == 0
+    assert reach["x"] == 2, "cycle members must reach themselves and each other"
+
+
+def test_reverse_graph_gives_who_depends_on_me():
+    graph = {"core": set(), "one": {"core"}, "two": {"core"}}
+    assert payer.transitive_reach(payer.reverse(graph))["core"] == 2
+
+
+def test_falling_ratio_over_a_growing_denominator_is_flagged():
+    """A ratio can improve while the thing it measures gets worse.
+
+    Real numbers from cake between 2026-07-01 and HEAD: propagation cost went
+    19.08% -> 18.10%, which reads as an improvement, while reachable pairs went
+    57,922 -> 88,926. Reporting only the ratio hides a 53% growth in blast
+    radius, and that is precisely how it went unremarked here.
+    """
+    from tools.measure_structure import Structure, render_compare
+
+    before = Structure(commit="aaa", modules=551, propagation_cost=0.1908)
+    after = Structure(commit="bbb", modules=701, propagation_cost=0.1810)
+
+    report = render_compare(before, after)
+
+    pairs_before = f"{0.1908 * 551 ** 2:,.0f}"
+    pairs_after = f"{0.1810 * 701 ** 2:,.0f}"
+    assert pairs_before in report and pairs_after in report, \
+        "the quantity was not reported beside the ratio"
+    assert "NOTE" in report, "a falling ratio over a growing base was not flagged"
+    # The ratio fell; the quantity rose by more than half. Both must be visible.
+    assert float(pairs_after.replace(",", "")) > float(pairs_before.replace(",", ""))
+
+
+def test_growing_file_count_is_not_scored_as_better_or_worse():
+    """Rewarding fewer files rewards deletion, and punishing growth punishes work."""
+    from tools.measure_structure import Structure, render_compare
+
+    report = render_compare(Structure(commit="a", files=10), Structure(commit="b", files=99))
+    files_line = next(l for l in report.splitlines() if l.strip().startswith("files"))
+    assert "better" not in files_line and "worse" not in files_line
