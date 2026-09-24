@@ -318,3 +318,125 @@ def test_edit_missing_file_fails_open(tmp_path):
     }
     code, _ = run_hook(payload)
     assert code == 0
+
+
+# --- The recorded reason must be the author's argument, not the gate's input ---
+#
+# Measured 2026-09-23 across cake, dashboards and escapement: 1,419 of 1,419
+# file-complexity waiver-accepted events recorded a reason of the form
+# "<path>: projected N lines (limit M)" -- the gate restating what it already
+# knew. Every presence check passed; the learning corpus held zero rationales.
+
+
+def _captured_signal(payload: dict) -> dict:
+    """Run the gate and return what it recorded, instead of suppressing it."""
+    seen: dict = {}
+
+    def capture(decision, file_path, projected, reason=None):
+        seen.update(
+            decision=decision, file_path=file_path, projected=projected, reason=reason
+        )
+
+    out = io.StringIO()
+    with patch.object(gate, "_emit_signal", capture), \
+            patch("sys.stdin", io.StringIO(json.dumps(payload))), \
+            patch("sys.stdout", out):
+        gate.main()
+    return seen
+
+
+def test_waiver_reason_is_not_a_path():
+    """The rationale the author wrote is what gets recorded."""
+    rationale = "single cohesive state machine; splitting it hides the transitions"
+    seen = _captured_signal(
+        _write_payload(
+            "/repo/src/big.py", 1200,
+            first_line=f"# file-complexity-waiver: {rationale}",
+        )
+    )
+    assert seen["decision"] == "waiver-accepted"
+    recorded = seen["reason"] or ""
+    assert recorded == rationale, f"recorded {recorded!r}, not the author's reason"
+    assert "/repo/src/big.py" not in recorded, "reason echoes the file path"
+    assert "projected" not in recorded, "reason echoes the gate's own measurement"
+
+
+def test_path_shaped_waiver_reason_does_not_waive():
+    """A path is not a rationale, so it must not buy an exemption.
+
+    This is the fragile implementation the corpus proves we shipped: a reason
+    field populated with an identifier the gate already had.
+    """
+    code, decision = run_hook(
+        _write_payload(
+            "/repo/src/big.py", 1200,
+            first_line="# file-complexity-waiver: /repo/src/big.py",
+        )
+    )
+    assert _is_hard(code, decision), "a path-shaped reason waived the hard block"
+
+
+def test_filename_echo_waiver_does_not_waive():
+    code, decision = run_hook(
+        _write_payload(
+            "/repo/src/big.py", 1200,
+            first_line="# file-complexity-waiver: big.py",
+        )
+    )
+    assert _is_hard(code, decision), "a bare filename waived the hard block"
+
+
+def test_prose_reason_mentioning_a_path_still_waives():
+    """Rejecting echoes must not reject a real argument that cites a file."""
+    code, decision = run_hook(
+        _write_payload(
+            "/repo/src/big.py", 1200,
+            first_line=(
+                "# file-complexity-waiver: mirrors the generated layout in "
+                "tools/render.py and must stay one unit"
+            ),
+        )
+    )
+    assert code == 0 and decision is None, "a substantive reason was refused"
+
+
+# --- A waiver the gate cannot see is worse than no waiver ---
+#
+# Found 2026-09-23 by running the matcher over every tracked file in cake,
+# dashboards and escapement: 5 of 101 waiver comments were never matched, because
+# their authors stacked a comment marker in front of the `#` — `-- #` in dbt SQL,
+# `{#` in a Jinja model, `// #` in a Playwright spec. Each carried an argued
+# rationale. Each was silently ignored, and the author had no way to tell.
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        "-- # file-complexity-waiver: fail-closed lineage and exact ad-grain diagnostics",
+        "{# file-complexity-waiver: fourteen source-specific arms kept together #}",
+        "// # file-complexity-waiver: cohesive navigation matrix, one per breakpoint",
+        "/* file-complexity-waiver: generated parser table, edited upstream */",
+        "<!-- file-complexity-waiver: single rendered document, split breaks anchors -->",
+        "-- file-complexity-waiver: one warehouse contract, split duplicates the join",
+    ],
+)
+def test_stacked_comment_markers_are_honoured(comment):
+    """Any comment syntax the estate actually uses must reach the matcher."""
+    code, decision = run_hook(
+        _write_payload("/repo/src/big.py", 1200, first_line=comment)
+    )
+    assert code == 0 and decision is None, f"waiver ignored for syntax: {comment!r}"
+
+
+def test_marker_stripping_does_not_invent_a_waiver():
+    """Peeling markers must not turn an ordinary comment into an exemption."""
+    code, decision = run_hook(
+        _write_payload(
+            "/repo/src/big.py", 1200,
+            first_line="-- # this file is long because it lists every region",
+        )
+    )
+    assert _is_hard(code, decision), "a non-waiver comment bought an exemption"
