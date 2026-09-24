@@ -64,6 +64,9 @@ from dataclasses import dataclass, field, asdict
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import structure_payer as _payer  # noqa: E402
 import structure_provenance as _prov  # noqa: E402
+import structure_declaration as _declaration  # noqa: E402
+import structure_adapters as _adapters  # noqa: E402
+import structure_bootstrap as _bootstrap  # noqa: E402
 
 
 def _render_provenance(prov: "_prov.Provenance") -> str:
@@ -631,8 +634,44 @@ def main(argv: list[str] | None = None) -> int:
     pay.add_argument("--top", type=int, default=12)
     pay.add_argument("--fix-pattern", default=_payer.DEFAULT_FIX_PATTERN)
 
+    cov = sub.add_parser("coverage", help="what fraction of a repo is actually measured")
+    cov.add_argument("repo")
+    cov.add_argument("--scope", nargs="*", default=None,
+                     help="override declared scope; defaults to .escapement/structure.json")
+
+    dec = sub.add_parser("declare", help="validate a repository's declared intent")
+    dec.add_argument("repo")
+
+    boot = sub.add_parser("bootstrap", help="propose a declaration for a repo that has none")
+    boot.add_argument("repo")
+    boot.add_argument("--write", action="store_true",
+                      help="write the skeleton to .escapement/structure.json")
+
     args = parser.parse_args(argv)
     recipe = "python3 tools/measure_structure.py " + " ".join(sys.argv[1:])
+
+    if args.mode == "bootstrap":
+        scope = _bootstrap.candidate_scope(args.repo)
+        print(_bootstrap.render(args.repo, scope, _adapters.coverage(args.repo, scope)))
+        if args.write:
+            path = _bootstrap.write(args.repo, _bootstrap.skeleton(args.repo, scope))
+            print(f"\nwrote {path}")
+        return 0
+
+    if args.mode in ("coverage", "declare"):
+        decl = _declaration.load(args.repo)
+        if args.mode == "declare":
+            if decl is None:
+                print(f"no {_declaration.DECLARATION_PATH}; run bootstrap", file=sys.stderr)
+                return 1
+            print(_declaration.render(decl, _dt.date.today().isoformat()))
+            return 0 if decl.valid else 1
+        scope = args.scope if args.scope is not None else (decl.scope if decl else [])
+        if not scope:
+            print("no scope declared and none given; run bootstrap", file=sys.stderr)
+            return 1
+        print(_adapters.render(_adapters.coverage(args.repo, scope), args.repo))
+        return 0
 
     if args.mode == "payer":
         graph = build_import_graph(pathlib.Path(args.repo), args.package)
