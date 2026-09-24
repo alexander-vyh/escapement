@@ -98,13 +98,15 @@ _EXEMPT_SUFFIXES = (
     ".rst",
 )
 
-_WAIVER_PREFIXES = (
-    "# file-complexity-waiver:",
-    "// file-complexity-waiver:",
-    "/* file-complexity-waiver:",
-    "-- file-complexity-waiver:",
-    "<!-- file-complexity-waiver:",
-)
+_WAIVER_TOKEN = "file-complexity-waiver:"
+
+# Leading comment syntax, stripped repeatedly so stacked markers are recognised.
+# Enumerating whole prefixes instead missed `-- # `, `{# ` and `// # `, which is
+# how five waivers in this estate (four dbt models, one Playwright spec) carried
+# an argued rationale the gate never saw. An author cannot tell an ignored
+# waiver from an honoured one, so the matcher must be forgiving about syntax and
+# strict only about substance.
+_COMMENT_MARKERS = ("<!--", "/*", "{#", "//", "--", "#")
 
 
 def _is_exempt(file_path: str) -> bool:
@@ -115,17 +117,60 @@ def _is_exempt(file_path: str) -> bool:
     return any(name.endswith(suf) for suf in _EXEMPT_SUFFIXES)
 
 
-def _has_waiver(first_lines: list[str]) -> bool:
-    env_reason = os.environ.get("FILE_COMPLEXITY_WAIVER", "").strip()
-    if env_reason:
+def _is_artifact_echo(reason: str, file_path: str) -> bool:
+    """True when the 'reason' merely restates something the gate already knew.
+
+    gate-design Rule 3: reject reasons that echo the source artifact. A path,
+    a bare filename, or the gate's own measurement carries no rationale — it is
+    the input wearing the output's label, and it passes every presence check
+    while teaching a half-life review nothing.
+    """
+    text = reason.strip()
+    if not text:
         return True
-    for line in first_lines:
-        stripped = line.strip()
-        for prefix in _WAIVER_PREFIXES:
-            if stripped.startswith(prefix):
-                reason = stripped[len(prefix):].strip()
-                return bool(reason)  # value-not-presence: reason must be non-empty
+    norm = text.replace(os.sep, "/")
+    target = file_path.replace(os.sep, "/")
+    if norm == target or norm == os.path.basename(target):
+        return True
+    # A lone path-shaped token: slashes and no prose around them.
+    if "/" in norm and len(norm.split()) == 1:
+        return True
     return False
+
+
+def waiver_reason(first_lines: list[str], file_path: str = "") -> str | None:
+    """The declared rationale for exceeding the limit, or None.
+
+    Returns the text so the decision and the signal record the SAME string the
+    human wrote. The previous form returned a bool, which is why every one of
+    1,419 recorded waivers carried a synthesised path instead of the argument
+    the author actually made in the file.
+    """
+    env_reason = os.environ.get("FILE_COMPLEXITY_WAIVER", "").strip()
+    if env_reason and not _is_artifact_echo(env_reason, file_path):
+        return env_reason
+    for line in first_lines:
+        text = line.strip()
+        # Peel any stack of leading comment markers: `-- # `, `{# `, `// # `.
+        changed = True
+        while changed:
+            changed = False
+            for marker in _COMMENT_MARKERS:
+                if text.startswith(marker):
+                    text = text[len(marker):].lstrip()
+                    changed = True
+                    break
+        if not text.startswith(_WAIVER_TOKEN):
+            continue
+        reason = text[len(_WAIVER_TOKEN):].strip()
+        # Trim a trailing block/HTML/Jinja comment terminator.
+        for close in ("*/", "-->", "#}"):
+            if reason.endswith(close):
+                reason = reason[: -len(close)].strip()
+        # value-not-presence: a reason that echoes the artifact is no reason
+        if reason and not _is_artifact_echo(reason, file_path):
+            return reason
+    return None
 
 
 def decide(projected: int, file_path: str, first_lines: list[str]) -> str:
@@ -139,26 +184,43 @@ def decide(projected: int, file_path: str, first_lines: list[str]) -> str:
         return "exempt"
     if projected <= SOFT_LIMIT:
         return "pass"
-    if _has_waiver(first_lines):
+    if waiver_reason(first_lines, file_path) is not None:
         return "waiver"
     if projected <= HARD_LIMIT:
         return "soft"
     return "hard"
 
 
-def _emit_signal(decision: str, file_path: str, projected: int) -> None:
+def _emit_signal(
+    decision: str,
+    file_path: str,
+    projected: int,
+    reason: str | None = None,
+) -> None:
+    """Record the decision.
+
+    `reason` is the author's rationale when one exists. Only when there is none
+    does this fall back to the measurement, and that fallback is labelled so a
+    consumer can tell an argument from an observation. Recording the
+    measurement under the name 'reason' is what emptied this gate's learning
+    corpus: 1,419 of 1,419 waivers carried a path.
+    """
     try:
         hooks_dir = os.path.dirname(os.path.abspath(__file__))
         if hooks_dir not in sys.path:
             sys.path.insert(0, hooks_dir)
         from _gate_signal import record  # type: ignore
+        measurement = (
+            f"projected {projected} lines (soft {SOFT_LIMIT} / hard {HARD_LIMIT})"
+        )
         record(
             gate_name="file-complexity",
             decision=decision,
-            reason=f"{file_path}: projected {projected} lines "
-                   f"(soft {SOFT_LIMIT} / hard {HARD_LIMIT})",
+            reason=reason if reason else measurement,
             file=file_path,
             projected_lines=projected,
+            rationale_present=bool(reason),
+            measurement=measurement,
         )
     except Exception:
         pass  # signal capture must never block the gate
@@ -239,12 +301,17 @@ def soft_envelope(file_path: str, projected: int) -> dict:
     return shared.advisory(message)
 
 
-def _respond(decision: str, file_path: str, projected: int) -> int:
+def _respond(
+    decision: str,
+    file_path: str,
+    projected: int,
+    reason: str | None = None,
+) -> int:
     """Emit the decision. One shape for every host, so a verdict cannot drift."""
     if decision in ("exempt", "pass"):
         return 0
     if decision == "waiver":
-        _emit_signal("waiver-accepted", file_path, projected)
+        _emit_signal("waiver-accepted", file_path, projected, reason)
         return 0
     if decision == "soft":
         _emit_signal("soft-nudge", file_path, projected)
@@ -316,7 +383,10 @@ def main() -> int:
         if _is_exempt(file_path):
             return 0
         return _respond(
-            decide(projected, file_path, first_lines), file_path, projected
+            decide(projected, file_path, first_lines),
+            file_path,
+            projected,
+            waiver_reason(first_lines, file_path),
         )
 
     file_path = tool_input.get("file_path", "")
@@ -344,7 +414,12 @@ def main() -> int:
     except Exception:
         return 0  # fail-open on any unexpected error
 
-    return _respond(decide(projected, file_path, first_lines), file_path, projected)
+    return _respond(
+        decide(projected, file_path, first_lines),
+        file_path,
+        projected,
+        waiver_reason(first_lines, file_path),
+    )
 
 
 if __name__ == "__main__":
