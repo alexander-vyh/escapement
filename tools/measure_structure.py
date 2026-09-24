@@ -60,6 +60,31 @@ import sys
 import tempfile
 from dataclasses import dataclass, field, asdict
 
+# Sibling modules, imported by path so the tool runs as a script from anywhere.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import structure_payer as _payer  # noqa: E402
+import structure_provenance as _prov  # noqa: E402
+
+
+def _render_provenance(prov: "_prov.Provenance") -> str:
+    """Print the recipe beside the number, so a quoted figure carries its source.
+
+    A number copied into a bead or a PR body is a stored measurement with no
+    version stamp. That is how a P1 in this repository came to argue from
+    figures the tool stopped producing six hours later.
+    """
+    lines = [
+        "",
+        f"  measured  {prov.input_repo} @ {prov.input_sha[:10]}",
+        f"  tool      {prov.tool_sha[:10]}"
+        + ("  DIRTY" if prov.tool_dirty else "")
+        + f"  content {prov.tool_content}  config {prov.config_digest}",
+        f"  re-derive {prov.recipe}",
+    ]
+    if prov.warning():
+        lines.append(f"  WARNING   {prov.warning()}")
+    return "\n".join(lines)
+
 # Nodes that introduce a branch. Held here, and not imported, so that the
 # definition of "complexity" in this repository is reviewable in one place.
 _BRANCHING = (
@@ -494,6 +519,89 @@ def render(series: list[Structure]) -> str:
     return "\n".join(lines)
 
 
+def module_complexity(root: str | pathlib.Path, package: str) -> dict[str, int]:
+    """Complexity keyed by module name, for joining against the import graph."""
+    root = pathlib.Path(root)
+    out: dict[str, int] = {}
+    for path in (root / package).rglob("*.py"):
+        try:
+            complexity, _ = file_complexity(path.read_text(errors="replace"))
+        except OSError:
+            continue
+        if complexity is not None:
+            out[_module_name(path.relative_to(root))] = complexity
+    return out
+
+
+def _provenance(repo, package: str, sha: str, recipe: str) -> _prov.Provenance:
+    return _prov.build(
+        repo=repo,
+        input_sha=sha,
+        config={"package": package, "counts": "import-time edges only"},
+        recipe=recipe,
+        sources=[pathlib.Path(__file__).resolve(),
+                 pathlib.Path(__file__).resolve().parent / "structure_payer.py"],
+    )
+
+
+def compare(repo, package: str, base: str, head: str) -> tuple[Structure, Structure]:
+    """Measure two refs with one implementation, in one process.
+
+    Both sides are derived here and now. There is no baseline to read and none
+    to write, so a change cannot pass by editing a stored number, and the two
+    values cannot have been produced by different versions of this tool.
+    """
+    base_sha = _git(repo, "rev-parse", base, timeout=60)
+    head_sha = _git(repo, "rev-parse", head, timeout=60)
+    return (measure_at(repo, package, base_sha), measure_at(repo, package, head_sha))
+
+
+def render_compare(before: Structure, after: Structure) -> str:
+    lines = [f"{before.commit} -> {after.commit}", ""]
+    # `files` carries no verdict: growing is what a living repository does, and
+    # scoring it rewards deletion for its own sake. It is context for the rest.
+    for label, x, y, worse_when_up in (
+        ("files", before.files, after.files, None),
+        ("total cc", before.complexity, after.complexity, True),
+        ("cc per function", before.complexity_per_function, after.complexity_per_function, True),
+        ("worst file", before.worst_file_complexity, after.worst_file_complexity, True),
+        ("modules in cycles", before.modules_in_cycles, after.modules_in_cycles, True),
+        ("largest cycle", before.largest_cycle, after.largest_cycle, True),
+    ):
+        if worse_when_up is None or x == y:
+            arrow = ""
+        else:
+            arrow = "  worse" if (y > x) == worse_when_up else "  better"
+        lines.append(f"  {label:20} {x:10,.2f} -> {y:<10,.2f} {_delta(x, y)}{arrow}")
+
+    # Report the quantity beside its denominator. Propagation cost is a ratio,
+    # and a ratio over a growing denominator can fall while the thing it
+    # measures grows. Saying only "propagation cost improved" is how a 7x rise
+    # in blast radius went unremarked in this estate.
+    pairs_before = before.propagation_cost * before.modules ** 2
+    pairs_after = after.propagation_cost * after.modules ** 2
+    for label, s, pairs in (("before", before, pairs_before), ("after", after, pairs_after)):
+        lines.append(
+            f"  reach {label:6}         {pairs:10,.0f} pairs over {s.modules:,} modules "
+            f"({100 * s.propagation_cost:.2f}%)"
+        )
+    if pairs_before and (pairs_after > pairs_before) and (
+        after.propagation_cost < before.propagation_cost
+    ):
+        growth = 100 * (pairs_after - pairs_before) / pairs_before
+        lines.append(
+            f"  NOTE  propagation cost fell, but reachable pairs grew {growth:+.0f}%. "
+            "The ratio\n        improved only because the denominator grew faster. "
+            "Read the quantity."
+        )
+    lines += [
+        "",
+        "  Reported, not enforced. A metric movement is evidence for a human",
+        "  decision; only a declared boundary should block.",
+    ]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--json", action="store_true", help="emit JSON instead of a table")
@@ -510,19 +618,73 @@ def main(argv: list[str] | None = None) -> int:
     series.add_argument("end")
     series.add_argument("--step-days", type=int, default=14)
 
+    cmp_ = sub.add_parser("compare", help="measure two refs and diff them, storing nothing")
+    cmp_.add_argument("repo")
+    cmp_.add_argument("package")
+    cmp_.add_argument("base")
+    cmp_.add_argument("head")
+
+    pay = sub.add_parser("payer", help="join structural exposure to observed payment")
+    pay.add_argument("repo")
+    pay.add_argument("package")
+    pay.add_argument("--since", default="6 months ago")
+    pay.add_argument("--top", type=int, default=12)
+    pay.add_argument("--fix-pattern", default=_payer.DEFAULT_FIX_PATTERN)
+
     args = parser.parse_args(argv)
+    recipe = "python3 tools/measure_structure.py " + " ".join(sys.argv[1:])
+
+    if args.mode == "payer":
+        graph = build_import_graph(pathlib.Path(args.repo), args.package)
+        if not graph:
+            print(f"no modules found under {args.package}/", file=sys.stderr)
+            return 1
+        complexity = module_complexity(args.repo, args.package)
+        changes, fixes, stats = _payer.change_history(
+            args.repo, args.package, args.since, set(graph), args.fix_pattern
+        )
+        rows = _payer.join(graph, complexity, changes, fixes)
+        prov = _provenance(args.repo, args.package,
+                           _git(args.repo, "rev-parse", "HEAD", timeout=60), recipe)
+        if args.json:
+            print(json.dumps({
+                "provenance": prov.to_dict(),
+                "history": stats,
+                "modules": [asdict(r) for r in rows],
+            }, indent=2))
+        else:
+            print(_payer.render(rows, stats, top=args.top))
+            print(_render_provenance(prov))
+        return 0
+
+    if args.mode == "compare":
+        before, after = compare(args.repo, args.package, args.base, args.head)
+        prov = _provenance(args.repo, args.package, after.commit, recipe)
+        if args.json:
+            print(json.dumps({"provenance": prov.to_dict(),
+                              "base": asdict(before), "head": asdict(after)}, indent=2))
+        else:
+            print(render_compare(before, after))
+            print(_render_provenance(prov))
+        return 0
+
     if args.mode == "tree":
         results = [measure_tree(args.repo, args.package)]
+        sha = _git(args.repo, "rev-parse", "HEAD", timeout=60)
     else:
         results = measure_series(args.repo, args.package, args.start, args.end, args.step_days)
         if not results:
             print("no commits in range", file=sys.stderr)
             return 1
+        sha = results[-1].commit
 
+    prov = _provenance(args.repo, args.package, sha, recipe)
     if args.json:
-        print(json.dumps([asdict(r) for r in results], indent=2))
+        print(json.dumps({"provenance": prov.to_dict(),
+                          "measurements": [asdict(r) for r in results]}, indent=2))
     else:
         print(render(results))
+        print(_render_provenance(prov))
     return 0
 
 
