@@ -156,7 +156,7 @@ def render_gate_inventory(manifest: dict[str, Any]) -> str:
 def render_package(identity: dict[str, Any]) -> str:
     payload = {
         "name": "escapement",
-        "version": "1.0.0",
+        "version": "0.1.0",
         "description": identity["mission"],
         "license": "GPL-3.0-or-later",
         "repository": "https://github.com/alexander-vyh/escapement",
