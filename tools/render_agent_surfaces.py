@@ -155,6 +155,15 @@ SHARED_RUNTIME_SUPPORT = {
     # validates the targets it knows, not the ones it forgot), it silently PRUNES the
     # module from every plugin tree and breaks the importer at runtime.
     "bin/escapement_worktree_root_health.py",
+    # The neutral capability runtime is the policy source for every selected
+    # client; host packages only carry these modules as generated copies.
+    "harness/bin/neutral_adapters.py",
+    "harness/bin/neutral_contract.py",
+    "harness/bin/neutral_oracle.py",
+    "harness/bin/neutral_registry.py",
+    "harness/bin/neutral_runtime.py",
+    "harness/bin/neutral_supervisor.py",
+    "harness/schemas/neutral-capabilities.json",
 }
 CODEX_HOOK_SUPPORT = {
     # Codex Bash policy gates execute through one in-process dispatcher to avoid
@@ -434,7 +443,7 @@ def _render_codex_plugin_manifest(identity: dict[str, Any], manifest: dict[str, 
     product = identity["product_interface"]
     payload = {
         "name": "escapement",
-        "version": "1.0.0",
+        "version": "0.1.0",
         "description": mission,
         "author": {
             "name": "alexander-vyh",

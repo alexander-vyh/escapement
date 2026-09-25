@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "capability_id": "outcome-oracle-continuation",
+      "required_event_fields": ["outcome_status"],
+      "actions": ["allow", "ask", "deny", "continue", "record"],
+      "evidence_requirements": [
+        "installed_client_version",
+        "fixture_hash",
+        "native_event_ref",
+        "point_of_effect"
+      ],
+      "owner": "neutral-runtime"
+    }
+  ],
+  "adapters": [
+    {
+      "capability_id": "outcome-oracle-continuation",
+      "client": "pi",
+      "client_version": "not-proven",
+      "realization": "unavailable",
+      "fixture_hash": "not-proven",
+      "native_event_ref": "not-proven",
+      "point_of_effect": "not-proven"
+    },
+    {
+      "capability_id": "outcome-oracle-continuation",
+      "client": "codex",
+      "client_version": "not-proven",
+      "realization": "unavailable",
+      "fixture_hash": "not-proven",
+      "native_event_ref": "not-proven",
+      "point_of_effect": "not-proven"
+    },
+    {
+      "capability_id": "outcome-oracle-continuation",
+      "client": "claude",
+      "client_version": "not-proven",
+      "realization": "unavailable",
+      "fixture_hash": "not-proven",
+      "native_event_ref": "not-proven",
+      "point_of_effect": "not-proven"
+    }
+  ]
+}
