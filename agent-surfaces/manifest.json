@@ -665,7 +665,7 @@
       "hosts": {
         "codex": {
           "status": "unsupported",
-          "unsupported_reason": "Translates a Claude Stop payload (Claude transcript layout, ScheduleWakeup, task-mode rungs) into thread state; Codex Stop is served by the separate hook codex_stop_hook (harness/bin/codex_stop_hook.py), which owns the same would_block_stop decision core. The scheduled-wakeup, task-mode and local-judge rungs belong to the continuation-harness family and are not ported to this host."
+          "unsupported_reason": "Translates a Claude Stop payload (Claude transcript layout, ScheduleWakeup, task-mode rungs) into thread state; Codex Stop is served by the plugin-owned hook codex_stop_hook (harness/bin/codex_stop_hook.py), which owns the same would_block_stop decision core. The scheduled-wakeup, task-mode and local-judge rungs belong to the continuation-harness family and are not ported to this host."
         },
         "claude": {
           "status": "ready",
