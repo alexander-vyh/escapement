@@ -18,6 +18,7 @@ dispatch + the Codex forbidden-token wall + interleaved overlay at once.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -247,6 +248,93 @@ def test_unresolved_placeholder_fails_closed():
     )
     with pytest.raises(ProjectionError):
         project_op(bad, "claude")
+
+
+# --- multi-line slot variants: literal block scalars ---------------------------
+def test_block_scalar_slot_projects_multiline_variant_verbatim():
+    canon = (
+        "---\n"
+        "op: demo\n"
+        "slots:\n"
+        "  dispatch:\n"
+        "    claude: |-\n"
+        "      ```\n"
+        "      Agent(\n"
+        '        name="x",\n'
+        "      )\n"
+        "      ```\n"
+        "\n"
+        "      ---\n"
+        "      after rule\n"
+        '    codex: "one line"\n'
+        "targets:\n"
+        "  claude: out/claude.md\n"
+        "frontmatter:\n"
+        "  claude:\n"
+        '    name: "demo"\n'
+        "  codex:\n"
+        '    name: "demo"\n'
+        "---\n"
+        "Before\n"
+        "{{slot:dispatch}}\n"
+        "After\n"
+    )
+    claude = project_op(canon, "claude")
+    # Relative indentation, the blank line, and an indented `---` (which must
+    # not be mistaken for the frontmatter fence) all survive; the base indent
+    # is removed and `|-` adds no trailing blank line before "After".
+    assert claude.endswith(
+        'Before\n```\nAgent(\n  name="x",\n)\n```\n\n---\nafter rule\nAfter\n'
+    )
+    assert project_op(canon, "codex").endswith("Before\none line\nAfter\n")
+
+
+# --- frontmatter values with quotes must emit valid double-quoted scalars ------
+def test_frontmatter_value_with_embedded_quotes_stays_a_valid_scalar():
+    canon = (
+        "---\n"
+        "op: demo\n"
+        "targets:\n"
+        "  claude: out/claude.md\n"
+        "frontmatter:\n"
+        "  claude:\n"
+        '    description: "The user says \\"build X\\" and C:\\\\dir"\n'
+        "---\n"
+        "Body\n"
+    )
+    line = next(
+        ln for ln in project_op(canon, "claude").splitlines() if ln.startswith("description:")
+    )
+    scalar = line.partition(": ")[2]
+    # A YAML double-quoted scalar using only \" and \\ escapes is valid JSON.
+    assert json.loads(scalar) == 'The user says "build X" and C:\\dir'
+
+
+# --- hosts without frontmatter (rule files) project to the body alone ----------
+_NO_FM_CANON = (
+    "---\n"
+    "op: demo-rule\n"
+    "targets:\n"
+    "  claude: out/claude.md\n"
+    "  pi: out/pi.md\n"
+    "frontmatter:\n"
+    "  claude:\n"
+    "  pi:\n"
+    "---\n"
+    "\n"
+    "# Rule Title\n"
+    "Rule body.\n"
+)
+
+
+def test_empty_frontmatter_map_projects_body_only():
+    assert project_op(_NO_FM_CANON, "claude") == "# Rule Title\nRule body.\n"
+    assert project_op(_NO_FM_CANON, "pi") == "# Rule Title\nRule body.\n"
+
+
+def test_host_absent_from_frontmatter_still_fails_closed():
+    with pytest.raises(ProjectionError):
+        project_op(_NO_FM_CANON, "codex")
 
 
 # --- SC6 #orphan-governance: committed surfaces must be canon-governed -----------

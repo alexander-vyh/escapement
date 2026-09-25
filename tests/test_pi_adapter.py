@@ -89,6 +89,8 @@ def test_root_package_resources_resolve_inside_the_package() -> None:
     assert any((ROOT / entry).glob("*/SKILL.md") for entry in pi["skills"]), "Pi skills dir holds no skills"
     assert "serena" in json.loads((ROOT / pi["mcp"]).read_text(encoding="utf-8"))["mcpServers"]
     assert (PI_ROOT / "PI.md").is_file()
+    assert any((ROOT / entry).glob("*.md") for entry in pi["prompts"]), "Pi prompts dir holds no commands"
+    assert any((ROOT / entry).glob("*.md") for entry in pi["subagents"]["agents"]), "Pi agents dir holds no agents"
 
 
 def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> None:
@@ -103,6 +105,7 @@ def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> N
         "file_gates": _pi_ready_file_gates(manifest),
         "read_gates": _pi_gates(manifest, {adapter["read_target_matcher"]}, None, adapter["source_event"]),
         "context_gates": _pi_gates(manifest, None, None, adapter["context_source_event"]),
+        "session_gates": _pi_gates(manifest, None, None, adapter["session_source_event"]),
     }
     assert inventory["file_gates"], (
         "Pi must ship the file-write gates; an empty list means Pi has no brake "
@@ -112,7 +115,7 @@ def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> N
     # Every gate named must also be SHIPPED. gates.json names a gate by path and
     # the dispatcher opens it from the plugin root, so a gate listed but not
     # vendored reads as a healthy inventory with the brake missing.
-    for key in ("gates", "file_gates", "read_gates", "context_gates"):
+    for key in ("gates", "file_gates", "read_gates", "context_gates", "session_gates"):
         sources = [gate["source"] for gate in inventory[key]]
         assert len(sources) == len(set(sources)), f"Pi {key} must not duplicate gates"
         missing = [s for s in sources if not (PI_ROOT / s).is_file()]
@@ -186,23 +189,28 @@ def _assert_thin_pi_extension(source: str) -> None:
     assert source.count("spawn(") == 1, "one tool event must start one dispatcher"
     assert source.count('pi.on("tool_call"') == 1
 
-    # The prompt handler composes host text, PI.md and gate context. A string
-    # literal of its own beyond the two failure notices is prose policy that
-    # lives only in Pi.
-    prompt_handler = source.split('pi.on("before_agent_start"', 1)[1].split("\n  });\n", 1)[0]
-    allowed_prompt_literals = {
+    # The prompt and session handlers compose host text, PI.md and gate
+    # context. A string literal of their own beyond the failure notices and
+    # payload plumbing is prose policy that lives only in Pi.
+    allowed_literals = {
         "`${event.systemPrompt}\\n\\nEscapement Pi configuration error: ${runtime.message}`",
         "`Escapement Pi prompt-context hooks failed: ${error}`",
+        "`Escapement Pi session-start hooks failed: ${error}`",
         '"UserPromptSubmit"',
+        '"SessionStart"',
+        '"startup"',
+        '"info"',
         '"string"',
         '""',
         '"\\n\\n"',
     }
-    for literal in re.findall(r'`[^`]*`|"(?:[^"\\\\]|\\\\.)*"', prompt_handler):
-        assert literal in allowed_prompt_literals, (
-            f"prompt handler adds text of its own: {literal}. "
-            "Prompt policy belongs in PI.md or a context gate."
-        )
+    for event in ("before_agent_start", "session_start"):
+        handler = source.split(f'pi.on("{event}"', 1)[1].split("\n  });\n", 1)[0]
+        for literal in re.findall(r'`[^`]*`|"(?:[^"\\\\]|\\\\.)*"', handler):
+            assert literal in allowed_literals, (
+                f"{event} handler adds text of its own: {literal}. "
+                "Prompt policy belongs in PI.md or a context gate."
+            )
 
     # The extension must not read what the tool is doing. Every mutation that
     # smuggles policy into TypeScript has to look at the payload to decide.
@@ -259,7 +267,7 @@ def _assert_thin_pi_extension(source: str) -> None:
             f"{name} selects among gates; it must run the inventory as given"
         )
     inventory = json.loads((PI_ROOT / "gates.json").read_text(encoding="utf-8"))
-    for key in ("gates", "file_gates", "read_gates", "context_gates"):
+    for key in ("gates", "file_gates", "read_gates", "context_gates", "session_gates"):
         for gate in inventory.get(key, []):
             assert gate["id"] not in source, (
                 f"extension names {gate['id']}; the bridge must not know a gate by id"

@@ -4,6 +4,16 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/escapement_session_context.py\"",
             "type": "command"
           }
@@ -44,6 +54,16 @@
       }
     ],
     "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
       {
         "hooks": [
           {

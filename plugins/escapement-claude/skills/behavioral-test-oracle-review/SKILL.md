@@ -1,6 +1,6 @@
 ---
-name: behavioral-test-oracle-review
-description: Use when implementing, writing tests, modifying tests, reviewing tests, fixing bugs, or changing business logic, reports, data models, APIs, auth, UI flows, jobs, or integrations where tests must prove user or business behavior rather than implementation details.
+name: "behavioral-test-oracle-review"
+description: "Use when implementing, writing tests, modifying tests, reviewing tests, fixing bugs, or changing business logic, reports, data models, APIs, auth, UI flows, jobs, or integrations where tests must prove user or business behavior rather than implementation details."
 ---
 
 # Behavioral Test Oracle Review

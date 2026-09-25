@@ -1,6 +1,6 @@
 ---
-name: gate-design
-description: Use when adding or modifying a hook, gate, denial/permission message, or waiver/exemption/override path; when deciding whether to keep, revise, or retire a rule or gate; or when auditing a gate or triaging a complaint that a gate causes friction. The implementation manual for building gates that are enabling not coercive — escape paths, persistent signal, value-not-presence validation, with audit-validated reference designs and anti-patterns.
+name: "gate-design"
+description: "Use when adding or modifying a hook, gate, denial/permission message, or waiver/exemption/override path; when deciding whether to keep, revise, or retire a rule or gate; or when auditing a gate or triaging a complaint that a gate causes friction. The implementation manual for building gates that are enabling not coercive — escape paths, persistent signal, value-not-presence validation, with audit-validated reference designs and anti-patterns."
 ---
 
 > This is the full gate-design manual, loaded on demand. The always-on stub

@@ -1,6 +1,6 @@
 ---
-name: beads-worktree
-description: Use when creating an isolated worktree or checking Beads task-state resolution inside one. Escapement owns creation policy; Beads remains tracker state.
+name: "beads-worktree"
+description: "Use when creating an isolated worktree or checking Beads task-state resolution inside one. Escapement owns creation policy; Beads remains tracker state."
 ---
 
 # Beads + Git Worktrees

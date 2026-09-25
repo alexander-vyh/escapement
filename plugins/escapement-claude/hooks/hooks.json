@@ -451,6 +451,15 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_rules.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|clear|compact"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/escapement_session_context.py\"",
             "type": "command"
           }
@@ -511,15 +520,6 @@
           }
         ],
         "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/inject-rules.sh\"",
-            "type": "command"
-          }
-        ],
-        "matcher": "startup|clear|compact"
       }
     ],
     "Stop": [

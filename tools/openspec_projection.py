@@ -5,7 +5,8 @@ The canonical bodies live at ``agent-surfaces/openspec/<op>.md`` (read-only
 input; no host reads them, the renderer never writes them). Each canon file
 carries a YAML frontmatter block declaring, per op:
 
-- ``slots``    — slot name -> per-host variant text
+- ``slots``    — slot name -> per-host variant text (a one-line scalar, or a
+  ``|`` / ``|-`` literal block scalar for multi-line variants)
 - ``targets``  — host -> output path (write-only; never an input dir)
 - ``frontmatter`` — host -> ordered key/value pairs emitted as the surface's
   own YAML frontmatter
@@ -50,7 +51,9 @@ def _split_frontmatter(text: str) -> tuple[str, str]:
     if not lines or lines[0].strip() != "---":
         raise ProjectionError("canon file missing leading '---' frontmatter fence")
     for idx in range(1, len(lines)):
-        if lines[idx].strip() == "---":
+        # The closing fence must sit at column 0: an indented ``---`` inside a
+        # block-scalar slot (e.g. a markdown rule) is slot content, not a fence.
+        if lines[idx].rstrip() == "---":
             fm = "\n".join(lines[1:idx])
             body = "\n".join(lines[idx + 1 :])
             return fm, body
@@ -79,6 +82,41 @@ def _strip_value(raw: str) -> str:
     return value
 
 
+_BLOCK_INDICATORS = ("|", "|-")
+
+
+def _read_block_scalar(lines: list[str], start: int, parent_indent: int, indicator: str) -> tuple[str, int]:
+    """Read a YAML literal block scalar beginning at ``lines[start]``.
+
+    Content lines are every following line that is blank or indented deeper
+    than ``parent_indent``; they are dedented by the first content line's
+    indent. ``|`` keeps one trailing newline, ``|-`` strips it. Returns
+    (text, index of the first line after the block).
+    """
+    idx = start
+    block: list[str] = []
+    while idx < len(lines):
+        line = lines[idx]
+        if line.strip() and _indent(line) <= parent_indent:
+            break
+        block.append(line)
+        idx += 1
+    while block and not block[-1].strip():
+        block.pop()
+    if not block:
+        raise ProjectionError("empty block scalar in canon frontmatter")
+    base = _indent(block[0])
+    out: list[str] = []
+    for line in block:
+        if line.strip() and _indent(line) < base:
+            raise ProjectionError(f"block scalar line under-indented: {line!r}")
+        out.append(line[base:] if line.strip() else "")
+    text = "\n".join(out)
+    if indicator == "|":
+        text += "\n"
+    return text, idx
+
+
 def parse_canon(text: str) -> dict:
     """Parse a canon document into a structured dict.
 
@@ -97,7 +135,11 @@ def parse_canon(text: str) -> dict:
     cur_host: str | None = None  # within frontmatter: the host (2-indent key)
     cur_nested: list | None = None  # within frontmatter: an open nested map (e.g. metadata)
 
-    for raw in fm_text.splitlines():
+    fm_lines = fm_text.splitlines()
+    pos = 0
+    while pos < len(fm_lines):
+        raw = fm_lines[pos]
+        pos += 1
         if not raw.strip():
             continue
         indent = _indent(raw)
@@ -127,7 +169,10 @@ def parse_canon(text: str) -> dict:
             elif indent == 4:
                 if cur_slot is None:
                     raise ProjectionError("slot host entry before any slot name")
-                slots[cur_slot][key] = _strip_value(val)
+                if val in _BLOCK_INDICATORS:
+                    slots[cur_slot][key], pos = _read_block_scalar(fm_lines, pos, indent, val)
+                else:
+                    slots[cur_slot][key] = _strip_value(val)
             else:
                 raise ProjectionError(f"unexpected indent in slots: {raw!r}")
         elif section == "targets":
@@ -172,6 +217,12 @@ def parse_canon(text: str) -> dict:
     }
 
 
+def _quote(value: str) -> str:
+    """Emit a double-quoted YAML scalar, escaping embedded ``\\`` and ``"``."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _emit_frontmatter(pairs: list[tuple[str, str]]) -> str:
     """Emit an ordered YAML frontmatter block from explicit (key, value) pairs.
 
@@ -184,12 +235,12 @@ def _emit_frontmatter(pairs: list[tuple[str, str]]) -> str:
             # Nested map (e.g. metadata: author/version/generatedBy).
             lines.append(f"{key}:")
             for subkey, subval in value:
-                lines.append(f'  {subkey}: "{subval}"')
+                lines.append(f"  {subkey}: {_quote(subval)}")
         elif value.startswith("[") and value.endswith("]"):
             # tags is an inline list literal in the source surfaces; emit unquoted.
             lines.append(f"{key}: {value}")
         else:
-            lines.append(f'{key}: "{value}"')
+            lines.append(f"{key}: {_quote(value)}")
     lines.append("---")
     return "\n".join(lines)
 
@@ -220,8 +271,13 @@ def project_op(canon_text: str, host: str) -> str:
     if leftover is not None:
         raise ProjectionError(f"unresolved slot after projection: {leftover.group(0)}")
 
-    fm = _emit_frontmatter(parsed["frontmatter"][host])
     body = body.strip("\n")
+    pairs = parsed["frontmatter"][host]
+    if not pairs:
+        # A host declared with an empty frontmatter map (e.g. a rule file,
+        # which has no frontmatter) projects to the body alone.
+        return f"{body}\n"
+    fm = _emit_frontmatter(pairs)
     return f"{fm}\n\n{body}\n"
 
 

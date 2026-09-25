@@ -337,7 +337,7 @@ Checklist:
 - Is the walking skeleton actually minimal, or has scope crept in?
 - Would a lean practitioner cut anything from this list?
 
-Run through the checklist above yourself before presenting the breakdown -- no isolated subagent dispatch is available on this host. Revise the breakdown if the checklist finds waste.
+Dispatch this as an isolated subagent with a fresh context so the review carries no anchoring bias from this conversation. Codex: `spawn_agent` with `task_name: "lean_review"`, `agent_type: "personal-lean-advisor"` (use `default` if that role is not installed), and `fork_turns: "none"`, then `wait_agent` for its verdict. Pi: `subagent({ context: "fresh", workflowScript: "return runs.run('lean-review', { agent: 'personal-lean-advisor', task: PROMPT })" })`, using the builtin `oracle` agent if `personal-lean-advisor` is not defined. Prompt it with the breakdown's tasks (title, acceptance criteria, spec-id) plus the checklist above, and revise the breakdown if it finds waste.
 
 The user never sees the lean review unless it changes something — then note: "Lean review trimmed [N] tasks: [brief explanation]."
 

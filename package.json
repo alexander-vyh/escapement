@@ -18,6 +18,14 @@
     "skills": [
       "./.agents/skills"
     ],
-    "mcp": "./plugins/escapement-pi/mcp.json"
+    "mcp": "./plugins/escapement-pi/mcp.json",
+    "prompts": [
+      "./plugins/escapement-pi/prompts"
+    ],
+    "subagents": {
+      "agents": [
+        "./plugins/escapement-pi/agents"
+      ]
+    }
   }
 }

@@ -1,9 +1,6 @@
 ---
-name: build
-description: >
-  Unified entry point for feature work. Classifies work type, checks for
-  existing state, pours the right molecule. The user says "build X" and
-  the system handles the rest.
+name: "build"
+description: "Unified entry point for feature work. Classifies work type, checks for existing state, pours the right molecule. The user says \"build X\" and the system handles the rest."
 ---
 
 # /build

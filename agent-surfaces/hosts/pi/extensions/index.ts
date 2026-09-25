@@ -23,6 +23,7 @@ type Runtime = {
   fileGates: Gate[];
   readGates: Gate[];
   contextGates: Gate[];
+  sessionGates: Gate[];
   instructions: string;
 };
 
@@ -70,7 +71,8 @@ function loadRuntime(): Runtime {
   const fileGates = optionalGates(parsed.file_gates);
   const readGates = optionalGates(parsed.read_gates);
   const contextGates = optionalGates(parsed.context_gates);
-  for (const gate of [...parsed.gates, ...fileGates, ...readGates, ...contextGates]) {
+  const sessionGates = optionalGates(parsed.session_gates);
+  for (const gate of [...parsed.gates, ...fileGates, ...readGates, ...contextGates, ...sessionGates]) {
     if (
       !gate || typeof gate !== "object" || Array.isArray(gate)
       || typeof gate.id !== "string" || typeof gate.source !== "string"
@@ -86,6 +88,7 @@ function loadRuntime(): Runtime {
     fileGates,
     readGates,
     contextGates,
+    sessionGates,
     instructions: readFileSync(resolve(pluginRoot, "PI.md"), "utf8"),
   };
 }
@@ -261,6 +264,37 @@ export default function escapementPi(pi: PiAPI): void {
     runtime = error instanceof Error ? error : new Error(String(error));
   }
 
+  // SessionStart hooks run once when Pi starts, resumes or forks a session.
+  // Their additionalContext is kept and re-appended to every turn's system
+  // prompt below: Pi rebuilds the system prompt per turn, so this is how the
+  // context stays in force for the whole session (and survives compaction,
+  // which is why PreCompact needs no Pi counterpart). Advisory: a failure is
+  // reported in the prompt rather than blocking the session.
+  let sessionContext: Promise<string> = Promise.resolve("");
+  pi.on("session_start", (event, context) => {
+    if (runtime instanceof Error || runtime.sessionGates.length === 0) return;
+    const loaded = runtime;
+    sessionContext = runDispatcher(
+      loaded,
+      loaded.sessionGates,
+      {
+        session_id: sessionIdOf(context),
+        cwd: context?.cwd,
+        hook_event_name: "SessionStart",
+        source: typeof event?.reason === "string" ? event.reason : "startup",
+      },
+    ).then(
+      (result) => {
+        // Claude and Codex show a hook's systemMessage to the user; Pi's
+        // counterpart is a UI notice. The dispatcher already carries it into
+        // additionalContext for the model.
+        if (result.systemMessage) context?.ui?.notify?.(result.systemMessage, "info");
+        return result.hookSpecificOutput?.additionalContext ?? "";
+      },
+      (error) => `Escapement Pi session-start hooks failed: ${error}`,
+    );
+  });
+
   // Pi has no UserPromptSubmit hook; before_agent_start is the same moment
   // (prompt submitted, agent not yet running) and may extend the system
   // prompt. Context hooks get a UserPromptSubmit payload and their
@@ -271,6 +305,8 @@ export default function escapementPi(pi: PiAPI): void {
       return { systemPrompt: `${event.systemPrompt}\n\nEscapement Pi configuration error: ${runtime.message}` };
     }
     const sections = [event.systemPrompt, runtime.instructions];
+    const session = await sessionContext;
+    if (session) sections.push(session);
     if (runtime.contextGates.length > 0) {
       try {
         const result = await runDispatcher(
