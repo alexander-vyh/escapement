@@ -1,9 +1,6 @@
 ---
-name: brainstorming
-description: >
-  Enhanced brainstorming — challenges whether work should be done at all,
-  rotates creative lenses to fight semantic clustering, and routes to
-  /discovery or work-breakdown based on complexity.
+name: "brainstorming"
+description: "Enhanced brainstorming — challenges whether work should be done at all, rotates creative lenses to fight semantic clustering, and routes to /discovery or work-breakdown based on complexity."
 ---
 
 # Enhanced Brainstorming

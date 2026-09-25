@@ -1187,12 +1187,12 @@ def test_claude_plugin_hooks_include_sessionstart_rules_injection():
 
     Negative control: removing the SessionStart injection would drop escapement's
     rules entirely on Codex-less hosts — this asserts it is present and points at
-    the bundled inject-rules.sh.
+    the bundled inject_rules.py.
     """
     hooks = json.loads((CLAUDE_PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
     session_start = hooks.get("SessionStart", [])
     commands = [h["command"] for item in session_start for h in item["hooks"]]
-    assert any("inject-rules.sh" in c for c in commands), "SessionStart must inject the rules"
+    assert any("inject_rules.py" in c for c in commands), "SessionStart must inject the rules"
 
 
 def test_claude_plugin_hooks_do_not_depend_on_user_local_claude_paths():
@@ -1453,12 +1453,7 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
         (ROOT / src).read_text() for src in _planned_rule_symlink_sources(plan)
     )
 
-    inj = subprocess.run(
-        ["bash", str(CLAUDE_PLUGIN / "hooks" / "inject-rules.sh")],
-        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(CLAUDE_PLUGIN)},
-        capture_output=True,
-        text=True,
-    )
+    inj = _run_claude_rules_injector(CLAUDE_PLUGIN / "hooks" / "inject_rules.py")
     assert inj.returncode == 0, inj.stderr
     channel_b = json.loads(inj.stdout)["hookSpecificOutput"]["additionalContext"]
 
@@ -1542,17 +1537,22 @@ def test_pi_dedup_guard_is_not_vacuous_without_the_manifest_flag(tmp_path):
     )
 
 
-def test_claude_plugin_injects_rules_with_imperative_framing(tmp_path):
-    """Behavioral: running inject-rules.sh emits SessionStart additionalContext
-    carrying the bundled rules AND imperative framing (so injected rules match
-    native CLAUDE.md authority). Positive control for the rules-delivery mechanism.
-    """
-    result = subprocess.run(
-        ["bash", str(CLAUDE_PLUGIN / "hooks" / "inject-rules.sh")],
-        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(CLAUDE_PLUGIN)},
+def _run_claude_rules_injector(hook: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(hook)],
+        input=json.dumps({"hook_event_name": "SessionStart", "source": "startup"}),
         capture_output=True,
         text=True,
     )
+
+
+def test_claude_plugin_injects_rules_with_imperative_framing(tmp_path):
+    """Behavioral: running the plugin's inject_rules.py emits SessionStart
+    additionalContext carrying the bundled rules AND imperative framing (so
+    injected rules match native CLAUDE.md authority). Positive control for the
+    rules-delivery mechanism.
+    """
+    result = _run_claude_rules_injector(CLAUDE_PLUGIN / "hooks" / "inject_rules.py")
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     ctx = payload["hookSpecificOutput"]["additionalContext"]
@@ -1565,12 +1565,10 @@ def test_claude_plugin_inject_rules_fails_loud_on_missing_bundle(tmp_path):
     """Negative control: a missing rules bundle surfaces a WARNING, not a silent
     drop — so a broken install is observable instead of a quiet rules regression.
     """
-    result = subprocess.run(
-        ["bash", str(CLAUDE_PLUGIN / "hooks" / "inject-rules.sh")],
-        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(tmp_path / "empty")},
-        capture_output=True,
-        text=True,
-    )
+    hook = tmp_path / "plugin" / "hooks" / "inject_rules.py"
+    hook.parent.mkdir(parents=True)
+    shutil.copy2(CLAUDE_PLUGIN / "hooks" / "inject_rules.py", hook)
+    result = _run_claude_rules_injector(hook)
     assert result.returncode == 0
     ctx = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
     assert "WARNING" in ctx and "NOT injected" in ctx

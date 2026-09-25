@@ -95,6 +95,11 @@ for directory in (Path("harness/bin"), Path("harness/schemas")):
         for path in (expected_root / directory).iterdir()
         if path.is_file() and path.suffix in {".py", ".json"}
     )
+if (expected_root / "agents").is_dir():
+    relative_paths.update(
+        path.relative_to(expected_root)
+        for path in (expected_root / "agents").glob("*.toml")
+    )
 
 for relative in sorted(relative_paths):
     expected = expected_root / relative
@@ -162,6 +167,12 @@ python3 "$REPO_DIR/scripts/prune_codex_hooks.py" \
   "$CODEX_STATE_HOME/hooks.json" \
   --codex-home "$CODEX_STATE_HOME" \
   --home "$HOME"
+
+# Codex plugins cannot ship agent roles; install them as user roles, moving
+# aside (never deleting) any role file Escapement did not write.
+python3 "$REPO_DIR/scripts/install_codex_agent_roles.py" \
+  "$plugin_root/agents" \
+  "$CODEX_STATE_HOME/agents"
 
 if [[ -f "$GLOBAL_SKILL" ]] && ! cmp -s "$authoritative_skill" "$GLOBAL_SKILL"; then
   echo "FATAL: effective global Beads skill does not match the installed plugin" >&2

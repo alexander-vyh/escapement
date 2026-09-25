@@ -131,6 +131,21 @@ def ready_context_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return gates
 
 
+def ready_session_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Hooks that add model context when a session starts.
+
+    The extension runs them once at Pi's `session_start` with a SessionStart
+    payload and re-appends their additionalContext to every turn's system
+    prompt, which is how Pi keeps session context in force.
+    """
+    adapter = manifest["adapters"]["pi"]
+    gates: list[dict[str, Any]] = []
+    for hook in manifest.get("hooks", []):
+        explicit = _explicit_pi_events(hook, adapter["session_source_event"], None)
+        gates.extend(_gate(hook, event) for event in (explicit or [])[:1])
+    return gates
+
+
 def pi_status(manifest: dict[str, Any], hook: dict[str, Any]) -> str | None:
     """Effective Pi status: the explicit block's, `ready` when derived, else None."""
     explicit = hook.get("hosts", {}).get("pi")
@@ -149,6 +164,7 @@ def render_gate_inventory(manifest: dict[str, Any]) -> str:
         "file_gates": ready_file_gates(manifest),
         "read_gates": ready_read_gates(manifest),
         "context_gates": ready_context_gates(manifest),
+        "session_gates": ready_session_gates(manifest),
     }
     return json.dumps(payload, indent=2) + "\n"
 
@@ -166,6 +182,10 @@ def render_package(identity: dict[str, Any]) -> str:
             "skills": list(PI_SKILL_DIRS),
             # pi-mcp-adapter loads package-declared servers as <package>__<server>.
             "mcp": f"./{PI_PLUGIN_ROOT.as_posix()}/{PI_MCP_CONFIG}",
+            # Escapement's commands, as Pi prompt templates.
+            "prompts": [f"./{PI_PLUGIN_ROOT.as_posix()}/prompts"],
+            # Escapement's agents, loaded by the pi-subagents package.
+            "subagents": {"agents": [f"./{PI_PLUGIN_ROOT.as_posix()}/agents"]},
         },
     }
     return json.dumps(payload, indent=2) + "\n"
@@ -188,6 +208,9 @@ def validate_adapter(manifest: dict[str, Any]) -> list[str]:
         # Prompt-time context: run as UserPromptSubmit hooks at before_agent_start.
         "context_source_event": "UserPromptSubmit",
         "context_target_event": "before_agent_start",
+        # Session context: run as SessionStart hooks at session_start.
+        "session_source_event": "SessionStart",
+        "session_target_event": "session_start",
     }
     errors: list[str] = []
     if manifest.get("adapters", {}).get("pi") != expected:

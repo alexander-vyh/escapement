@@ -1,7 +1,6 @@
 ---
-name: vocab
-description: >-
-  Use whenever you set out to understand or research an UNFAMILIAR external domain — building something is NOT required (also preparing for a decision or meeting, forming a position, an investigation, or designing) — when getting the field's framing right matters and a load-bearing distinction hinges on terminology you don't command (e.g. entitlement vs ownership, queue vs group, per-system vs per-object). A single living "vocab-scout" recovers the field's real terminology FIRST; then narrow research searches USING those terms, DELEGATING the fan-out to the deep-research skill. Invoke it directly (standalone) OR via the brainstorming/discovery/agent-teams pointers — it is a front door, not only a sub-step. Thin wrapper, not a second research route. Do NOT use for familiar domains, codebase/org-internal questions, urgent one-fact lookups, or topics with no established external literature.
+name: "vocab"
+description: "Use whenever you set out to understand or research an UNFAMILIAR external domain — building something is NOT required (also preparing for a decision or meeting, forming a position, an investigation, or designing) — when getting the field's framing right matters and a load-bearing distinction hinges on terminology you don't command (e.g. entitlement vs ownership, queue vs group, per-system vs per-object). A single living \"vocab-scout\" recovers the field's real terminology FIRST; then narrow research searches USING those terms, DELEGATING the fan-out to the deep-research skill. Invoke it directly (standalone) OR via the brainstorming/discovery/agent-teams pointers — it is a front door, not only a sub-step. Thin wrapper, not a second research route. Do NOT use for familiar domains, codebase/org-internal questions, urgent one-fact lookups, or topics with no established external literature."
 ---
 
 # Vocabulary-First Research (`/vocab`)

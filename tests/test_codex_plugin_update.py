@@ -7,6 +7,7 @@ import os
 import plistlib
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,10 @@ def test_updater_refreshes_plugin_migrates_legacy_and_preserves_siblings(
     sibling = tmp_path / ".agents" / "skills" / "user-skill" / "notes.txt"
     shutil.copytree(ROOT / "plugins" / "escapement", plugin_root)
     shutil.copytree(ROOT / "plugins" / "escapement", plugin_source)
+    agent_role = b'name = "probe-reviewer"\ndescription = "Probe."\ndeveloper_instructions = """\nReview.\n"""\n'
+    for root in (plugin_root, plugin_source):
+        root.joinpath("agents").mkdir(exist_ok=True)
+        root.joinpath("agents", "probe-reviewer.toml").write_bytes(agent_role)
     prior_runtime = tmp_path / "prior-runtime"
     shutil.copytree(ROOT / "plugins" / "escapement" / "harness", prior_runtime)
     (prior_runtime / "bin" / "verify").write_text("#!/bin/sh\nexit 0\n")
@@ -182,6 +187,9 @@ fi
     hook_backups = list(codex_home.glob("hooks.json.backup-*"))
     assert len(hook_backups) == 1
     assert hook_backups[0].read_text(encoding="utf-8") == original_hooks
+    installed_roles = codex_home / "agents"
+    assert installed_roles.joinpath("probe-reviewer.toml").read_bytes() == agent_role
+    assert list(installed_roles.glob("*.pre-escapement-*")) == []
     commands = command_log.read_text(encoding="utf-8")
     assert "plugin remove escapement@escapement" in commands
     assert "plugin add escapement@escapement" in commands
@@ -285,3 +293,102 @@ fi
     assert global_skill.read_bytes() == legacy
     assert list(global_skill.parent.glob("SKILL.md.backup-*")) == []
     assert not (tmp_path / "harness").exists()
+
+
+INSTALLER = ROOT / "scripts" / "install_codex_agent_roles.py"
+ESCAPEMENT_ROLE = b'name = "adversarial-reviewer"\ndeveloper_instructions = """\nv2\n"""\n'
+
+
+def _install_roles(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    source = tmp_path / "plugin" / "agents"
+    source.mkdir(parents=True, exist_ok=True)
+    source.joinpath("adversarial-reviewer.toml").write_bytes(ESCAPEMENT_ROLE)
+    return subprocess.run(
+        [sys.executable, str(INSTALLER), str(source), str(tmp_path / "codex-home" / "agents")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _role_dir(tmp_path: Path) -> Path:
+    return tmp_path / "codex-home" / "agents"
+
+
+def test_agent_role_install_creates_absent_role(tmp_path: Path) -> None:
+    result = _install_roles(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert _role_dir(tmp_path).joinpath("adversarial-reviewer.toml").read_bytes() == ESCAPEMENT_ROLE
+    assert list(_role_dir(tmp_path).glob("*.pre-escapement-*")) == []
+
+
+def test_agent_role_install_leaves_identical_role_untouched(tmp_path: Path) -> None:
+    target = _role_dir(tmp_path) / "adversarial-reviewer.toml"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(ESCAPEMENT_ROLE)
+    before = target.stat()
+
+    result = _install_roles(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert target.read_bytes() == ESCAPEMENT_ROLE
+    assert target.stat().st_ino == before.st_ino
+    assert list(target.parent.glob("*.pre-escapement-*")) == []
+
+
+def test_agent_role_install_replaces_unmodified_prior_escapement_install(
+    tmp_path: Path,
+) -> None:
+    target = _role_dir(tmp_path) / "adversarial-reviewer.toml"
+    target.parent.mkdir(parents=True)
+    previous = b'name = "adversarial-reviewer"\ndeveloper_instructions = """\nv1\n"""\n'
+    previous_source = tmp_path / "old-plugin" / "agents"
+    previous_source.mkdir(parents=True)
+    previous_source.joinpath("adversarial-reviewer.toml").write_bytes(previous)
+    subprocess.run(
+        [sys.executable, str(INSTALLER), str(previous_source), str(target.parent)],
+        check=True,
+        capture_output=True,
+    )
+
+    result = _install_roles(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert target.read_bytes() == ESCAPEMENT_ROLE
+    assert list(target.parent.glob("*.pre-escapement-*")) == []
+    # The upgraded file is still recognized as ours: a later upgrade replaces it too.
+    previous_source.joinpath("adversarial-reviewer.toml").write_bytes(previous)
+    subprocess.run(
+        [sys.executable, str(INSTALLER), str(previous_source), str(target.parent)],
+        check=True,
+        capture_output=True,
+    )
+    assert target.read_bytes() == previous
+    assert list(target.parent.glob("*.pre-escapement-*")) == []
+
+
+@pytest.mark.parametrize("tampered_after_install", (False, True))
+def test_agent_role_install_backs_up_file_escapement_does_not_own(
+    tmp_path: Path, tampered_after_install: bool
+) -> None:
+    target = _role_dir(tmp_path) / "adversarial-reviewer.toml"
+    foreign = b'# migrated from Claude by Codex\nname = "adversarial-reviewer"\n'
+    if tampered_after_install:
+        # Escapement installed it, then the user edited it: no longer ours to overwrite.
+        assert _install_roles(tmp_path).returncode == 0
+        _role_dir(tmp_path).joinpath("adversarial-reviewer.toml").write_bytes(foreign)
+    else:
+        target.parent.mkdir(parents=True)
+        target.write_bytes(foreign)
+
+    result = _install_roles(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert target.read_bytes() == ESCAPEMENT_ROLE
+    [backup] = target.parent.glob("adversarial-reviewer.toml.pre-escapement-*")
+    assert backup.read_bytes() == foreign
+    assert str(backup) in result.stdout
+    # Once installed, a rerun is a no-op: no second backup.
+    assert _install_roles(tmp_path).returncode == 0
+    assert list(target.parent.glob("*.pre-escapement-*")) == [backup]

@@ -50,7 +50,9 @@
       ],
       "read_target_matcher": "read",
       "context_source_event": "UserPromptSubmit",
-      "context_target_event": "before_agent_start"
+      "context_target_event": "before_agent_start",
+      "session_source_event": "SessionStart",
+      "session_target_event": "session_start"
     }
   },
   "support_claims": [
@@ -131,7 +133,367 @@
       }
     }
   ],
+  "rules": [
+    {
+      "id": "agent-teams-default",
+      "source": "claude/rules/agent-teams-default.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "continuation-harness",
+      "source": "claude/rules/continuation-harness.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "Depends on the continuation harness's scheduled wakeup, which this repository's support claims mark Claude-only; not ported to this host."
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Depends on the continuation harness's scheduled wakeup, which this repository's support claims mark Claude-only; not ported to this host."
+        }
+      }
+    },
+    {
+      "id": "delicate-art-of-bureaucracy",
+      "source": "claude/rules/delicate-art-of-bureaucracy.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "evidence-provenance",
+      "source": "claude/rules/evidence-provenance.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "gate-design",
+      "source": "claude/rules/gate-design.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "molecule-awareness",
+      "source": "claude/rules/molecule-awareness.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "never-suppress",
+      "source": "claude/rules/never-suppress.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "outcome-ownership",
+      "source": "claude/rules/outcome-ownership.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "planning-discipline",
+      "source": "claude/rules/planning-discipline.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "research-findings-persistence",
+      "source": "claude/rules/research-findings-persistence.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "tdd-enforcement",
+      "source": "claude/rules/tdd-enforcement.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "why-drilling",
+      "source": "claude/rules/why-drilling.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "worktree-discipline",
+      "source": "claude/rules/worktree-discipline.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    }
+  ],
+  "commands": [
+    {
+      "id": "brainstorm",
+      "source": "claude/commands/brainstorm.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready",
+          "counterpart": ".agents/skills/brainstorming/SKILL.md",
+          "note": "Codex has no plugin command surface; the counterpart skill is invoked as $<skill>."
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "discovery",
+      "source": "claude/commands/discovery.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready",
+          "counterpart": ".agents/skills/discovery/SKILL.md",
+          "note": "Codex has no plugin command surface; the counterpart skill is invoked as $<skill>."
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "review",
+      "source": "claude/commands/review.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready",
+          "counterpart": ".agents/skills/escapement-review/SKILL.md",
+          "note": "Codex has no plugin command surface; the counterpart skill is invoked as $<skill>."
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "work-breakdown",
+      "source": "claude/commands/work-breakdown.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready",
+          "counterpart": ".agents/skills/work-breakdown/SKILL.md",
+          "note": "Codex has no plugin command surface; the counterpart skill is invoked as $<skill>."
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    }
+  ],
+  "agents": [
+    {
+      "id": "adversarial-reviewer",
+      "source": "claude/agents/adversarial-reviewer.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready",
+          "note": "Rendered as an agent role; scripts/codex-plugin-update.sh installs it into ~/.codex/agents (Codex plugins carry no agents)."
+        },
+        "pi": {
+          "status": "ready",
+          "note": "Loaded by the pi-subagents package from package.json pi.subagents.agents."
+        }
+      }
+    },
+    {
+      "id": "test-quality-reviewer",
+      "source": "claude/agents/test-quality-reviewer.md",
+      "hosts": {
+        "claude": {
+          "status": "ready"
+        },
+        "codex": {
+          "status": "ready",
+          "note": "Rendered as an agent role; scripts/codex-plugin-update.sh installs it into ~/.codex/agents (Codex plugins carry no agents)."
+        },
+        "pi": {
+          "status": "ready",
+          "note": "Loaded by the pi-subagents package from package.json pi.subagents.agents."
+        }
+      }
+    }
+  ],
   "hooks": [
+    {
+      "id": "inject_rules",
+      "description": "Inject Escapement's always-on rules (the host package's rules/ bundle) as session context.",
+      "source": "claude/hooks/inject_rules.py",
+      "hosts": {
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "startup|clear|compact",
+              "command": "python3 -B ~/.claude/hooks/inject_rules.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_inject_rules.py"
+          ]
+        },
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/inject_rules.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreCompact",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/inject_rules.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_inject_rules.py::test_codex_plugin_layout_injects_the_packages_own_rule_variants",
+            "claude/hooks/tests/test_inject_rules.py::test_codex_precompact_reinjection_names_its_event"
+          ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/inject_rules.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_session_start_end_to_end.py::test_pi_session_start_injects_rules_every_turn"
+          ]
+        }
+      }
+    },
     {
       "id": "escapement_session_context",
       "description": "Load Escapement-owned task-state and landing policy context at lifecycle boundaries.",
@@ -176,8 +538,18 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/escapement_session_context.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_session_start_end_to_end.py::test_pi_session_start_runs_every_session_gate_once"
+          ]
         }
       }
     },
@@ -525,7 +897,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "Codex-specific SessionStart notice about Codex final-response interception. The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
+          "unsupported_reason": "Codex-specific notice about a Codex final-response lifecycle gap; it describes no Pi behavior."
         }
       }
     },
@@ -865,8 +1237,18 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/mol_status_check.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_session_start_end_to_end.py::test_pi_session_start_runs_every_session_gate_once"
+          ]
         }
       }
     },
@@ -1389,8 +1771,18 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/session_cleanup.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_session_start_end_to_end.py::test_pi_session_start_runs_every_session_gate_once"
+          ]
         }
       }
     },
@@ -1428,8 +1820,18 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/session_status.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_session_start_end_to_end.py::test_pi_session_start_runs_every_session_gate_once"
+          ]
         }
       }
     },
@@ -1719,7 +2121,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
+          "unsupported_reason": "Continuation-harness hook: scheduled continuation is Claude-only in this repository's support claims and is not ported to Pi."
         }
       }
     },
@@ -1747,7 +2149,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
+          "unsupported_reason": "Continuation-harness hook: scheduled continuation is Claude-only in this repository's support claims and is not ported to Pi."
         }
       }
     },
@@ -1776,7 +2178,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "Bootstraps Claude-specific project wiring (OpenSpec --tools claude, CLAUDE.md check, Agent-team reminder). The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
+          "unsupported_reason": "Bootstraps Claude-specific project wiring (OpenSpec --tools claude, CLAUDE.md check, Agent-team reminder); a Pi equivalent needs its own bootstrap."
         }
       }
     }
@@ -1809,7 +2211,7 @@
         "claude": {
           "status": "ready",
           "counterpart": "claude/skills/beads-execution/SKILL.md",
-          "note": "Claude's live beads-execution body is a separate, deliberately divergent implementation (Task-tool subagent dispatch, SendMessage team coordination, wave-based parallel merging) \u2014 primitives Codex does not expose (blocked by CODEX_SKILL_FORBIDDEN). This entry's own `target` is the Codex body; `counterpart` is the file Claude actually loads. Not a wording divergence: the two bodies describe different execution models and are intentionally not unified."
+          "note": "Claude's live beads-execution body is a separate, deliberately divergent implementation (Task-tool subagent dispatch, SendMessage team coordination, wave-based parallel merging) — primitives Codex does not expose (blocked by CODEX_SKILL_FORBIDDEN). This entry's own `target` is the Codex body; `counterpart` is the file Claude actually loads. Not a wording divergence: the two bodies describe different execution models and are intentionally not unified."
         },
         "pi": {
           "status": "ready"
@@ -1927,6 +2329,160 @@
         "claude": {
           "status": "ready",
           "counterpart": ".claude/commands/opsx/propose.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "beads-worktree",
+      "target": ".agents/skills/beads-worktree/SKILL.md",
+      "source": "agent-surfaces/skills/beads-worktree.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/beads-worktree/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "behavioral-test-oracle-review",
+      "target": ".agents/skills/behavioral-test-oracle-review/SKILL.md",
+      "source": "agent-surfaces/skills/behavioral-test-oracle-review.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/behavioral-test-oracle-review/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "brainstorming",
+      "target": ".agents/skills/brainstorming/SKILL.md",
+      "source": "agent-surfaces/skills/brainstorming.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/brainstorming/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "build",
+      "target": ".agents/skills/build/SKILL.md",
+      "source": "agent-surfaces/skills/build.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/build/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "dispatching-parallel-agents",
+      "target": ".agents/skills/dispatching-parallel-agents/SKILL.md",
+      "source": "agent-surfaces/skills/dispatching-parallel-agents.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/dispatching-parallel-agents/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "gate-design",
+      "target": ".agents/skills/gate-design/SKILL.md",
+      "source": "agent-surfaces/skills/gate-design.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/gate-design/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "subagent-driven-development",
+      "target": ".agents/skills/subagent-driven-development/SKILL.md",
+      "source": "agent-surfaces/skills/subagent-driven-development.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/subagent-driven-development/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "vocab",
+      "target": ".agents/skills/vocab/SKILL.md",
+      "source": "agent-surfaces/skills/vocab.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/skills/vocab/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
+        }
+      }
+    },
+    {
+      "id": "escapement-review",
+      "target": ".agents/skills/escapement-review/SKILL.md",
+      "source": "agent-surfaces/commands/review.md",
+      "hosts": {
+        "codex": {
+          "status": "ready"
+        },
+        "claude": {
+          "status": "ready",
+          "counterpart": "claude/commands/review.md",
+          "note": "Claude delivers this workflow as the /escapement:review command."
         },
         "pi": {
           "status": "ready"

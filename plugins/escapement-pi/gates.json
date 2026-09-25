@@ -108,5 +108,32 @@
       "source": "claude/hooks/serena_preference_injection.py",
       "timeout_seconds": 5
     }
+  ],
+  "session_gates": [
+    {
+      "id": "inject_rules",
+      "source": "claude/hooks/inject_rules.py",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "escapement_session_context",
+      "source": "claude/hooks/escapement_session_context.py",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "mol_status_check",
+      "source": "claude/hooks/mol_status_check.py",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "session_cleanup",
+      "source": "claude/hooks/session_cleanup.py",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "session_status",
+      "source": "claude/hooks/session_status.py",
+      "timeout_seconds": 10
+    }
   ]
 }
