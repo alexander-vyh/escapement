@@ -21,7 +21,7 @@ EXPECTED_CODEX_GATE = {
     "matcher": "Bash",
     "dispatcher": "codex_pretool_dispatch.py",
     "gate": "claude/hooks/test_oracle_brief_gate.py",
-    "timeout": 139,
+    "timeout": 145,
 }
 CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = 'python3 -B "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"'
 CODEX_PLUGIN_CONTEXT_FRAGMENT = (
@@ -966,7 +966,12 @@ def test_claude_path_classifying_gates_exclude_serena_without_project_root():
             for event in entry["hosts"]["claude"].get("events", [])
             for matcher in event.get("matcher", "").split("|")
         }
-        assert not any(matcher.startswith("mcp__serena__") for matcher in matchers), (
+        spec = importlib.util.spec_from_file_location(
+            "serena_tools_for_matchers", ROOT / "claude" / "hooks" / "_serena_tools.py"
+        )
+        serena_tools = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(serena_tools)
+        assert not any(serena_tools.serena_tool(matcher) for matcher in matchers), (
             f"{hook_id} cannot classify Serena relative paths without the active project root"
         )
 

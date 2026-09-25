@@ -17,7 +17,14 @@ type HookOutput = {
   additionalContext?: string;
 };
 type DispatcherResponse = { hookSpecificOutput?: HookOutput; systemMessage?: string };
-type Runtime = { dispatcherPath: string; gates: Gate[]; fileGates: Gate[]; instructions: string };
+type Runtime = {
+  dispatcherPath: string;
+  gates: Gate[];
+  fileGates: Gate[];
+  readGates: Gate[];
+  contextGates: Gate[];
+  instructions: string;
+};
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_OUTPUT_BYTES = 1_048_576;
@@ -59,8 +66,11 @@ function loadRuntime(): Runtime {
   if (!Array.isArray(parsed.gates) || parsed.gates.length === 0) {
     return fail("gate inventory must contain gates");
   }
-  const fileGates = Array.isArray(parsed.file_gates) ? parsed.file_gates : [];
-  for (const gate of [...parsed.gates, ...fileGates]) {
+  const optionalGates = (value: unknown): Gate[] => (Array.isArray(value) ? value : []);
+  const fileGates = optionalGates(parsed.file_gates);
+  const readGates = optionalGates(parsed.read_gates);
+  const contextGates = optionalGates(parsed.context_gates);
+  for (const gate of [...parsed.gates, ...fileGates, ...readGates, ...contextGates]) {
     if (
       !gate || typeof gate !== "object" || Array.isArray(gate)
       || typeof gate.id !== "string" || typeof gate.source !== "string"
@@ -74,6 +84,8 @@ function loadRuntime(): Runtime {
     dispatcherPath: confinedFile(parsed.dispatcher),
     gates: parsed.gates,
     fileGates,
+    readGates,
+    contextGates,
     instructions: readFileSync(resolve(pluginRoot, "PI.md"), "utf8"),
   };
 }
@@ -249,20 +261,55 @@ export default function escapementPi(pi: PiAPI): void {
     runtime = error instanceof Error ? error : new Error(String(error));
   }
 
-  pi.on("before_agent_start", (event) => ({
-    systemPrompt: runtime instanceof Error
-      ? `${event.systemPrompt}\n\nEscapement Pi configuration error: ${runtime.message}`
-      : `${event.systemPrompt}\n\n${runtime.instructions}`,
-  }));
+  // Pi has no UserPromptSubmit hook; before_agent_start is the same moment
+  // (prompt submitted, agent not yet running) and may extend the system
+  // prompt. Context hooks get a UserPromptSubmit payload and their
+  // additionalContext is appended for this turn. Prompt context is advisory,
+  // so a failure is reported in the prompt rather than blocking the turn.
+  pi.on("before_agent_start", async (event, context) => {
+    if (runtime instanceof Error) {
+      return { systemPrompt: `${event.systemPrompt}\n\nEscapement Pi configuration error: ${runtime.message}` };
+    }
+    const sections = [event.systemPrompt, runtime.instructions];
+    if (runtime.contextGates.length > 0) {
+      try {
+        const result = await runDispatcher(
+          runtime,
+          runtime.contextGates,
+          {
+            session_id: sessionIdOf(context),
+            cwd: context?.cwd,
+            hook_event_name: "UserPromptSubmit",
+            prompt: typeof event.prompt === "string" ? event.prompt : "",
+          },
+          context?.signal,
+        );
+        const added = result.hookSpecificOutput?.additionalContext;
+        if (added) sections.push(added);
+      } catch (error) {
+        sections.push(`Escapement Pi prompt-context hooks failed: ${error}`);
+      }
+    }
+    return { systemPrompt: sections.join("\n\n") };
+  });
 
   // Pi's file tools, captured from a live `pi --mode json` session: `write`
-  // carries {path, content} and `edit` carries {path, edits:[{oldText,newText}]}.
-  // Both are mapped here onto the payload the gates already read, so a gate
-  // needs no knowledge of Pi.
+  // carries {path, content} and `edit` carries {path, edits:[{oldText,newText}]};
+  // `read` carries {path, offset?, limit?} per Pi's extension docs. All are
+  // mapped here onto the payload the gates already read, so a gate needs no
+  // knowledge of Pi.
   function fileGatePayload(toolName: string, input: unknown): Record<string, unknown> | null {
     const args = (input ?? {}) as Record<string, unknown>;
     const path = args.path;
     if (typeof path !== "string" || path.length === 0) return null;
+
+    if (toolName === "read") {
+      const toolInput: Record<string, unknown> = { file_path: path };
+      for (const field of ["offset", "limit"]) {
+        if (typeof args[field] === "number") toolInput[field] = args[field];
+      }
+      return { tool_name: "Read", tool_input: toolInput };
+    }
 
     if (toolName === "write") {
       const content = args.content;
@@ -296,11 +343,17 @@ export default function escapementPi(pi: PiAPI): void {
   }
 
   pi.on("tool_call", async (event, context) => {
-    if (event.toolName === "write" || event.toolName === "edit") {
+    if (event.toolName === "write" || event.toolName === "edit" || event.toolName === "read") {
+      // Read gates steer toward cheaper navigation; they are not a safety
+      // brake, so a broken install or failed dispatch never blocks a read.
+      const isRead = event.toolName === "read";
       if (runtime instanceof Error) {
-        return { block: true, reason: `Escapement Pi configuration error: ${runtime.message}` };
+        return isRead
+          ? undefined
+          : { block: true, reason: `Escapement Pi configuration error: ${runtime.message}` };
       }
-      if (runtime.fileGates.length === 0) return;
+      const gates = isRead ? runtime.readGates : runtime.fileGates;
+      if (gates.length === 0) return;
       const mapped = fileGatePayload(event.toolName, event.input);
       // An unreadable payload fails OPEN here. A file write that cannot be
       // parsed is not evidence of a violation, and blocking on it would make
@@ -309,7 +362,7 @@ export default function escapementPi(pi: PiAPI): void {
       try {
         const result = await runDispatcher(
           runtime,
-          runtime.fileGates,
+          gates,
           {
             session_id: sessionIdOf(context),
             cwd: cwdOf(event, context),
@@ -323,10 +376,11 @@ export default function escapementPi(pi: PiAPI): void {
         if (hook?.permissionDecision === "deny" || hook?.permissionDecision === "ask") {
           return {
             block: true,
-            reason: hook.permissionDecisionReason || "Escapement blocked this file write",
+            reason: hook.permissionDecisionReason || "Escapement blocked this file tool call",
           };
         }
       } catch (error) {
+        if (isRead) return;
         return { block: true, reason: `Escapement Pi adapter error: ${error}` };
       }
       return;

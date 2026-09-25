@@ -183,9 +183,9 @@ EXPLICIT_EDIT_TOOLS = (
 
 UNREGISTERED_TOOLS = (
     "Bash",
-    "mcp__serena__replace_symbol_body",
+    "mcp__plugin_escapement_serena__replace_symbol_body",
     "mcp__serena__insert_after_symbol",
-    "mcp__serena__insert_before_symbol",
+    "escapement__serena_insert_before_symbol",
 )
 
 

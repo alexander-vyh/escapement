@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "serena-agent==1.7.0",
+        "serena",
+        "start-mcp-server",
+        "--project-from-cwd",
+        "--enable-web-dashboard",
+        "false",
+        "--open-web-dashboard",
+        "false",
+        "--context",
+        "ide"
+      ],
+      "directTools": [
+        "get_symbols_overview",
+        "find_symbol",
+        "find_referencing_symbols"
+      ]
+    }
+  }
+}

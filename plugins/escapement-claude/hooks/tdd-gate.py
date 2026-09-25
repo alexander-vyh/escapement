@@ -45,22 +45,18 @@ except ImportError:  # pragma: no cover
     def _forget_seen(*_args, **_kwargs) -> None:
         return None
 
+from _serena_tools import is_serena_edit  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Gated tools
 # ---------------------------------------------------------------------------
 
 # Tools that write/edit code and therefore go through the TDD nudge.
-# Serena's symbol-editing tools and NotebookEdit modify implementation code the
-# same way Write/Edit do, so they get the same treatment.
-_GATED_TOOLS = frozenset({
-    "Write",
-    "Edit",
-    "NotebookEdit",
-    "mcp__serena__replace_symbol_body",
-    "mcp__serena__insert_after_symbol",
-    "mcp__serena__insert_before_symbol",
-})
+# Serena's symbol-editing tools (any host's spelling, see _serena_tools) and
+# NotebookEdit modify implementation code the same way Write/Edit do, so they
+# get the same treatment.
+_GATED_TOOLS = frozenset({"Write", "Edit", "NotebookEdit"})
 
 # Tool-input keys that carry the target file path, in priority order.
 # Serena tools use relative_path; NotebookEdit uses notebook_path.
@@ -314,7 +310,7 @@ def main() -> int:
 
     if hook_event != "PreToolUse":
         return 0
-    if tool_name not in _GATED_TOOLS:
+    if tool_name not in _GATED_TOOLS and not is_serena_edit(tool_name):
         return 0
 
     # Extract file path from tool input (key varies by tool)

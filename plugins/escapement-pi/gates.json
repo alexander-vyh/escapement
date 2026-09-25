@@ -68,6 +68,11 @@
       "timeout_seconds": 5
     },
     {
+      "id": "serena_preference_gate",
+      "source": "claude/hooks/serena_preference_gate.py",
+      "timeout_seconds": 5
+    },
+    {
       "id": "spec_id_enforcement",
       "source": "claude/hooks/spec_id_enforcement.py",
       "timeout_seconds": 10
@@ -88,6 +93,20 @@
       "id": "file_complexity_gate",
       "source": "claude/hooks/file_complexity_gate.py",
       "timeout_seconds": 10
+    }
+  ],
+  "read_gates": [
+    {
+      "id": "serena_preference_gate",
+      "source": "claude/hooks/serena_preference_gate.py",
+      "timeout_seconds": 5
+    }
+  ],
+  "context_gates": [
+    {
+      "id": "serena_preference_injection",
+      "source": "claude/hooks/serena_preference_injection.py",
+      "timeout_seconds": 5
     }
   ]
 }

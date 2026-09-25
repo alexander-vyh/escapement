@@ -15,6 +15,7 @@ try:
 except ImportError:  # pragma: no cover - exercised by isolated-hook integration test
     _record_signal = None
 
+from _serena_tools import is_serena_edit
 from test_oracle_brief_landing import landing_context, landing_stage
 from oracle_brief_rapid import (
     RAPID_OBSERVED_FIELD,
@@ -29,16 +30,9 @@ from test_oracle_brief_policy import (
 )
 
 
-GATED_EDIT_TOOLS = frozenset(
-    {
-        "Write",
-        "Edit",
-        "NotebookEdit",
-        "mcp__serena__replace_symbol_body",
-        "mcp__serena__insert_after_symbol",
-        "mcp__serena__insert_before_symbol",
-    }
-)
+# Serena's code-editing tools are gated too, in any host's spelling
+# (is_serena_edit); they carry the target in relative_path.
+GATED_EDIT_TOOLS = frozenset({"Write", "Edit", "NotebookEdit"})
 FILE_PATH_KEYS = ("file_path", "relative_path", "notebook_path")
 
 
@@ -164,7 +158,9 @@ def _path_from(data: dict) -> str | None:
 def handle_edit_gate(data: dict) -> int:
     hook_event = data.get("hook_event_name", "") or data.get("hookEventName", "")
     tool_name = data.get("tool_name", "")
-    if hook_event != "PreToolUse" or tool_name not in GATED_EDIT_TOOLS:
+    if hook_event != "PreToolUse" or (
+        tool_name not in GATED_EDIT_TOOLS and not is_serena_edit(tool_name)
+    ):
         return allow()
     raw_path = _path_from(data)
     if raw_path is None:

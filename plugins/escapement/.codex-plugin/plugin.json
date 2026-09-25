@@ -19,6 +19,7 @@
   ],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Escapement",
     "shortDescription": "The control system for agentic delivery. Delegate outcomes. Get verified delivery.",

@@ -47,7 +47,10 @@
       "file_target_matchers": [
         "write",
         "edit"
-      ]
+      ],
+      "read_target_matcher": "read",
+      "context_source_event": "UserPromptSubmit",
+      "context_target_event": "before_agent_start"
     }
   },
   "support_claims": [
@@ -75,6 +78,57 @@
       "id": "codex-scheduled-continuation",
       "status": "unsupported",
       "reason": "Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live."
+    }
+  ],
+  "mcp_servers": [
+    {
+      "id": "serena",
+      "description": "Serena: LSP-backed symbol-level code navigation and editing. Launched per session with the project detected from the working directory, so no manual activation is needed.",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "serena-agent==1.7.0",
+        "serena",
+        "start-mcp-server",
+        "--project-from-cwd",
+        "--enable-web-dashboard",
+        "false",
+        "--open-web-dashboard",
+        "false"
+      ],
+      "hosts": {
+        "claude": {
+          "status": "ready",
+          "context": "claude-code",
+          "fixtures": [
+            "tests/test_all_hosts_policy.py::test_serena_mcp_server_is_declared_for_every_host"
+          ]
+        },
+        "codex": {
+          "status": "ready",
+          "context": "codex",
+          "options": {
+            "startup_timeout_sec": 120
+          },
+          "fixtures": [
+            "tests/test_all_hosts_policy.py::test_serena_mcp_server_is_declared_for_every_host"
+          ]
+        },
+        "pi": {
+          "status": "ready",
+          "context": "ide",
+          "options": {
+            "directTools": [
+              "get_symbols_overview",
+              "find_symbol",
+              "find_referencing_symbols"
+            ]
+          },
+          "fixtures": [
+            "tests/test_all_hosts_policy.py::test_serena_mcp_server_is_declared_for_every_host"
+          ]
+        }
+      }
     }
   ],
   "hooks": [
@@ -120,6 +174,10 @@
             "claude/hooks/tests/test_escapement_session_context.py::test_precompact_reinjects_the_same_authoritative_contract",
             "tests/test_agent_surfaces.py::test_codex_escapement_session_context_is_reinjected_for_both_hosts_and_lifecycle_events"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
         }
       }
     },
@@ -180,6 +238,10 @@
           "fixtures": [
             "claude/hooks/tests/test_review_gate.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Keys on Claude Agent-tool dispatch and bd close/update Bash prefix matchers; Pi has no Agent tool and this gate is not Codex-ready for derivation."
         }
       }
     },
@@ -205,6 +267,10 @@
             "harness/tests/test_gate.py",
             "harness/tests/test_winddown_stop_integration.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter has no Stop (agent_end) gate; Pi sessions are not re-entered or blocked at turn end."
         }
       }
     },
@@ -231,6 +297,10 @@
         "claude": {
           "status": "unsupported",
           "unsupported_reason": "Translates a Codex Stop payload into thread state; Claude Stop is served natively by harness/bin/stop_hook.py, which owns the same would_block_stop decision core."
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter has no Stop (agent_end) gate; Pi sessions are not re-entered or blocked at turn end."
         }
       }
     },
@@ -257,6 +327,10 @@
         "claude": {
           "status": "unsupported",
           "unsupported_reason": "Codex transcripts are not parsed for user turns; Claude reads the user release from its own transcript, so no recorder is needed there."
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Records prompts for the Codex Stop adapter, which is not ported to Pi, so nothing on Pi would consume them."
         }
       }
     },
@@ -375,6 +449,10 @@
           "fixtures": [
             "claude/hooks/tests/test_cache_write_guard.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Pi Bash gates run the same dispatcher as Codex and are enabled from Codex-ready Bash entries; this gate is not Codex-ready (see its Codex reason) and has no Pi fixture."
         }
       }
     },
@@ -414,6 +492,10 @@
           "fixtures": [
             "claude/settings.template.json"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Keys on Claude Agent/Read/Grep/Glob tool metadata for heavy-session detection; no Pi fixture maps Pi's tools onto it."
         }
       }
     },
@@ -440,6 +522,10 @@
         "claude": {
           "status": "unsupported",
           "unsupported_reason": "Codex-specific transparency hook for a lifecycle gap; Claude has native Stop hooks for this class."
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Codex-specific SessionStart notice about Codex final-response interception. The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
         }
       }
     },
@@ -469,6 +555,10 @@
           "fixtures": [
             "claude/settings.template.json"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter does not translate PostToolUse (tool_result) events."
         }
       }
     },
@@ -563,6 +653,10 @@
           "fixtures": [
             "claude/settings.template.json"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Portable to the Pi before_agent_start context roster, but it has no Pi fixture yet."
         }
       }
     },
@@ -592,6 +686,10 @@
           "fixtures": [
             "claude/hooks/tests/test_discovery_input_gate.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Pi write/edit are mapped onto Write/Edit payloads, but this gate has no Pi fixture proving it on that mapping yet."
         }
       }
     },
@@ -616,6 +714,10 @@
           "fixtures": [
             "claude/hooks/tests/test_enforce_named_agents.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Inspects Claude Agent/TeamCreate payloads; Pi has no named-agent team dispatch tool."
         }
       }
     },
@@ -761,6 +863,10 @@
           "fixtures": [
             "claude/settings.template.json"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
         }
       }
     },
@@ -800,6 +906,10 @@
           "fixtures": [
             "claude/hooks/tests/test_no_direct_send_guard.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Matches Claude Slack-MCP tool names; the Pi adapter does not route MCP tool calls through gates."
         }
       }
     },
@@ -897,6 +1007,10 @@
             "claude/hooks/tests/test_oracle_downgrade_stop_quiet.py::test_unchanged_finding_is_silent_the_second_time",
             "claude/hooks/tests/test_oracle_downgrade_stop_quiet.py::test_a_reintroduced_finding_reports_again"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter has no Stop (agent_end) gate; Pi sessions are not re-entered or blocked at turn end."
         }
       }
     },
@@ -991,6 +1105,10 @@
           "fixtures": [
             "tests/test_prepatch_failure_gate.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Pi Bash gates run the same dispatcher as Codex and are enabled from Codex-ready Bash entries; this gate is not Codex-ready (see its Codex reason) and has no Pi fixture."
         }
       }
     },
@@ -1120,17 +1238,32 @@
           "fixtures": [
             "claude/settings.template.json"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Portable to the Pi before_agent_start context roster, but it has no Pi fixture yet."
         }
       }
     },
     {
       "id": "serena_preference_gate",
-      "description": "Block full-file Read on source-code files when Serena is available.",
+      "description": "Deny a full read of a large source file in a Serena-onboarded project and redirect to Serena's symbol tools.",
       "source": "claude/hooks/serena_preference_gate.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Depends on Serena (MCP) availability detection; Serena is not part of the Codex adapter."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/serena_preference_gate.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_serena_preference_gate.py::test_codex_full_cat_of_large_source_is_denied",
+            "claude/hooks/tests/test_serena_preference_gate.py::test_codex_ranged_sed_read_is_allowed"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1149,17 +1282,49 @@
           "fixtures": [
             "claude/hooks/tests/test_serena_preference_gate.py"
           ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/serena_preference_gate.py",
+              "timeout_seconds": 5
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "read",
+              "command": "python3 -B claude/hooks/serena_preference_gate.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_serena_preference_gate.py::test_pi_read_of_large_source_is_denied",
+            "tests/test_pi_serena_end_to_end.py::test_pi_read_of_large_source_is_blocked",
+            "tests/test_pi_serena_end_to_end.py::test_pi_ranged_read_is_not_blocked"
+          ]
         }
       }
     },
     {
       "id": "serena_preference_injection",
-      "description": "Inject Serena-preference guidance at turn start.",
+      "description": "Add Serena code-navigation guidance (and an onboarding nudge when needed) once per session in a code project.",
       "source": "claude/hooks/serena_preference_injection.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Injects Serena-preference guidance; Serena is not part of the Codex adapter."
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/serena_preference_injection.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_serena_preference_injection.py::test_codex_prompt_submit_injects_guidance_once_per_session"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1171,7 +1336,22 @@
             }
           ],
           "fixtures": [
-            "claude/settings.template.json"
+            "claude/hooks/tests/test_serena_preference_injection.py::test_claude_prompt_submit_injects_guidance_once_per_session"
+          ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/serena_preference_injection.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_serena_preference_injection.py::test_pi_prompt_submit_injects_guidance_once_per_session",
+            "tests/test_pi_serena_end_to_end.py::test_pi_prompt_context_carries_serena_guidance_once_per_session"
           ]
         }
       }
@@ -1207,6 +1387,10 @@
           "fixtures": [
             "claude/settings.template.json"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
         }
       }
     },
@@ -1242,6 +1426,10 @@
           "fixtures": [
             "claude/hooks/tests/test_session_status.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
         }
       }
     },
@@ -1312,6 +1500,10 @@
             "claude/hooks/tests/test_tdd_gate.py",
             "claude/hooks/tests/test_tdd_gate_quiet.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Pi write/edit are mapped onto Write/Edit payloads, but this gate has no Pi fixture proving it on that mapping yet."
         }
       }
     },
@@ -1341,6 +1533,10 @@
           "fixtures": [
             "claude/settings.template.json"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter does not translate PostToolUse (tool_result) events."
         }
       }
     },
@@ -1370,30 +1566,10 @@
           "fixtures": [
             "claude/hooks/tests/test_validate_no_shirking.py"
           ]
-        }
-      }
-    },
-    {
-      "id": "serena_onboarding_check",
-      "description": "Serena onboarding nudge on session start.",
-      "source": "claude/hooks/serena_onboarding_check.sh",
-      "hosts": {
-        "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Checks Serena onboarding/memory state; Serena is not part of the Codex adapter."
         },
-        "claude": {
-          "status": "ready",
-          "events": [
-            {
-              "event": "SessionStart",
-              "matcher": "",
-              "command": "bash ~/.claude/hooks/serena_onboarding_check.sh"
-            }
-          ],
-          "fixtures": [
-            "claude/settings.template.json"
-          ]
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Reads the Claude transcript and Stop payload. The Pi adapter has no Stop (agent_end) gate; Pi sessions are not re-entered or blocked at turn end."
         }
       }
     },
@@ -1418,6 +1594,10 @@
           "fixtures": [
             "claude/hooks/tests/test_bypass_guard.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Pi Bash gates run the same dispatcher as Codex and are enabled from Codex-ready Bash entries; this gate is not Codex-ready (see its Codex reason) and has no Pi fixture."
         }
       }
     },
@@ -1479,6 +1659,10 @@
           "fixtures": [
             "harness/tests/test_schedule_wakeup_bridge.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Keys on Claude's ScheduleWakeup tool. The Pi adapter does not translate PostToolUse (tool_result) events."
         }
       }
     },
@@ -1504,6 +1688,10 @@
             "harness/tests/test_task_mode_scope.py",
             "harness/tests/test_task_mode_root_scope.py::test_successful_posttool_claim_creates_exact_scoped_task_mode"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter does not translate PostToolUse (tool_result) events."
         }
       }
     },
@@ -1528,6 +1716,10 @@
           "fixtures": [
             "harness/tests/test_session_watermark.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
         }
       }
     },
@@ -1552,6 +1744,10 @@
           "fixtures": [
             "harness/tests/test_reconcile_incidents.py"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
         }
       }
     },
@@ -1562,7 +1758,7 @@
       "hosts": {
         "codex": {
           "status": "unsupported",
-          "unsupported_reason": "Bootstraps Claude-specific project wiring (Serena project registration, ~/.claude layout); a Codex equivalent needs its own adapter."
+          "unsupported_reason": "Bootstraps Claude-specific project wiring (OpenSpec --tools claude, CLAUDE.md check, Agent-team reminder); a Codex equivalent needs its own adapter."
         },
         "claude": {
           "status": "ready",
@@ -1577,6 +1773,10 @@
           "fixtures": [
             "tests/test_no_dual_hook_registration.py::test_plugin_bootstrap_command_does_not_rely_on_the_exec_bit"
           ]
+        },
+        "pi": {
+          "status": "unsupported",
+          "unsupported_reason": "Bootstraps Claude-specific project wiring (OpenSpec --tools claude, CLAUDE.md check, Agent-team reminder). The Pi adapter translates only tool_call (bash, write, edit, read) and prompt-time context at before_agent_start; it has no SessionStart/PreCompact translation yet."
         }
       }
     }
@@ -1610,6 +1810,9 @@
           "status": "ready",
           "counterpart": "claude/skills/beads-execution/SKILL.md",
           "note": "Claude's live beads-execution body is a separate, deliberately divergent implementation (Task-tool subagent dispatch, SendMessage team coordination, wave-based parallel merging) \u2014 primitives Codex does not expose (blocked by CODEX_SKILL_FORBIDDEN). This entry's own `target` is the Codex body; `counterpart` is the file Claude actually loads. Not a wording divergence: the two bodies describe different execution models and are intentionally not unified."
+        },
+        "pi": {
+          "status": "ready"
         }
       }
     },
@@ -1623,6 +1826,9 @@
         "claude": {
           "status": "ready",
           "counterpart": "claude/skills/huh/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
         }
       }
     },
@@ -1636,6 +1842,9 @@
         "claude": {
           "status": "ready",
           "counterpart": "claude/skills/discovery/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
         }
       }
     },
@@ -1650,6 +1859,9 @@
         "claude": {
           "status": "ready",
           "counterpart": "claude/skills/work-breakdown/SKILL.md"
+        },
+        "pi": {
+          "status": "ready"
         }
       }
     },
@@ -1664,6 +1876,9 @@
         "claude": {
           "status": "ready",
           "counterpart": ".claude/commands/opsx/apply.md"
+        },
+        "pi": {
+          "status": "ready"
         }
       }
     },
@@ -1678,6 +1893,9 @@
         "claude": {
           "status": "ready",
           "counterpart": ".claude/commands/opsx/archive.md"
+        },
+        "pi": {
+          "status": "ready"
         }
       }
     },
@@ -1692,6 +1910,9 @@
         "claude": {
           "status": "ready",
           "counterpart": ".claude/commands/opsx/explore.md"
+        },
+        "pi": {
+          "status": "ready"
         }
       }
     },
@@ -1706,6 +1927,9 @@
         "claude": {
           "status": "ready",
           "counterpart": ".claude/commands/opsx/propose.md"
+        },
+        "pi": {
+          "status": "ready"
         }
       }
     }

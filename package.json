@@ -14,6 +14,10 @@
   "pi": {
     "extensions": [
       "./plugins/escapement-pi/extensions/index.ts"
-    ]
+    ],
+    "skills": [
+      "./.agents/skills"
+    ],
+    "mcp": "./plugins/escapement-pi/mcp.json"
   }
 }

@@ -481,8 +481,11 @@ implementation. Sequence: **Outcome → Oracle → Constraints → Tests → Cod
 
 - **Serena** — An LSP-backed semantic code tool (MCP). Preferred over grep+read for code
   *navigation* and *editing*: symbol overview, find-symbol, find-references,
-  replace-symbol-body. Grep/Read are fallbacks for string literals and short files.
-  *In repo:* `claude/rules/serena-first.md`.
+  replace-symbol-body. Grep/Read are fallbacks for string literals and short files. The
+  Serena MCP server ships in each host's Escapement package (Claude Code, Codex, Pi) and
+  activates the project from the working directory.
+  *In repo:* `claude/hooks/_serena_tools.py` (tool names and guidance for every host),
+  `claude/hooks/serena_preference_injection.py`.
 
 - **context-mode** — A plugin that does heavy processing in a sandbox and surfaces only the
   derived answer, keeping raw bytes out of the conversation. Note the standing tension: it

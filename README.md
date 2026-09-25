@@ -82,7 +82,9 @@ Support in one host is never inferred from another host's lifecycle model.
 
 ## Install current adapters
 
-The complete current workflow expects `openspec`, `bd`, `git`, `python3`, and `jq`. Install only the capability adapters you intend to use; `direnv` and Serena are optional.
+The complete current workflow expects `openspec`, `bd`, `git`, `python3`, `jq`, and `uv` (its `uvx` launches the [Serena](https://github.com/oraios/serena) MCP server that ships in every host's Escapement package). Install only the capability adapters you intend to use; `direnv` is optional.
+
+Remove any Serena server you configured by hand. On Codex, a user-level `[mcp_servers.serena]` replaces the bundled server of the same name. On Claude Code and Pi, a hand-configured Serena runs alongside the bundled one, so the model sees two sets of the same tools.
 
 ### Codex
 
@@ -186,7 +188,7 @@ ESCAPEMENT_BOOTSTRAP_ROOTS="$HOME/src:$HOME/work"
 
 ## Credits
 
-The current adapters build on [OpenSpec](https://github.com/Fission-AI/OpenSpec), [Beads](https://github.com/steveyegge/beads), Git, GitHub, and optional [Serena](https://github.com/oraios/serena). The operating doctrine draws from mission command, Grove's leverage, closed-loop control, Lean flow, constraint management, enabling bureaucracy, walking-skeleton development, and independent test-oracle practice.
+The current adapters build on [OpenSpec](https://github.com/Fission-AI/OpenSpec), [Beads](https://github.com/steveyegge/beads), Git, GitHub, and [Serena](https://github.com/oraios/serena). The operating doctrine draws from mission command, Grove's leverage, closed-loop control, Lean flow, constraint management, enabling bureaucracy, walking-skeleton development, and independent test-oracle practice.
 
 ## License
 
