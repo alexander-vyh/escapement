@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Claude Code hook: gate solution artifacts on a confirmed problem framing.
+"""PreToolUse hook: gate solution artifacts on a confirmed problem framing.
 
-Fires as PreToolUse on Write/Edit. When the target is a solution artifact
-(`proposal.md` or `design.md`) under an OpenSpec change, this hook requires a
-confirmed `problem-framing.md` in the same change directory before the write is
-allowed.
+Fires as PreToolUse on Write/Edit (Claude Code; Pi maps its write/edit onto
+them) and on apply_patch (Codex, whose patch may name several files -- every
+file it adds, updates or moves to is judged). When a target is a solution
+artifact (`proposal.md` or `design.md`) under an OpenSpec change, this hook
+requires a confirmed `problem-framing.md` in the same change directory before
+the write is allowed.
 
 Mechanical backstop for the discovery Input Gate — prevents the
 "draft-and-fabricate" failure where discovery fills an unconfirmed framing with
@@ -29,10 +31,9 @@ counts as filled. Only genuinely unfilled fields block.
   - Unparseable stdin                     -> fail open (allow)
 
 Input (via stdin):
-  JSON with hook_event_name, tool_name, tool_input
+  JSON with hook_event_name, tool_name, tool_input (and cwd for apply_patch)
 Exit codes:
-  0 — allow
-  2 — deny (JSON output explains why)
+  0 — always; a deny is the permissionDecision JSON on stdout
 """
 
 import json
@@ -47,6 +48,12 @@ try:
 except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
+try:
+    from _codex_patch import payload_targets as _patch_targets
+except ImportError:  # pragma: no cover - fail open: no patch, no gated target
+    def _patch_targets(*_args, **_kwargs):
+        return None
+from _agent_dispatch import host as _host  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +75,11 @@ REQUIRED_FIELDS = [
 # deferred, not answered. Note: "none" is deliberately NOT a marker. "none" means
 # a considered judgment that the dimension does not apply, which counts as filled.
 TBD_MARKERS = ("tbd", "todo", "???", "fixme")
+
+# How the agent starts the convergent interview on each host. Pi ships the
+# brainstorming skill but has no agent-invokable slash command for it.
+INTERVIEW_ROUTE = {"pi": "Load the brainstorming skill (read its SKILL.md)"}
+DEFAULT_INTERVIEW_ROUTE = "Run /brainstorming"
 
 
 # ---------------------------------------------------------------------------
@@ -188,31 +200,27 @@ def deny(hook_event: str, message: str) -> NoReturn:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main() -> int:
-    try:
-        data = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        return 0  # fail open on malformed input
-
-    hook_event = data.get("hook_event_name", "") or data.get("hookEventName", "")
-    if hook_event != "PreToolUse":
-        return 0
-
+def written_paths(data: dict) -> list:
+    """Every file this tool call writes, whichever host's edit tool it is."""
     tool_name = data.get("tool_name", "")
-    if tool_name not in ("Write", "Edit"):
-        return 0
-
     tool_input = data.get("tool_input", {})
-    file_path = tool_input.get("file_path", "") if isinstance(tool_input, dict) else ""
+    if not isinstance(tool_input, dict):
+        return []
+    if tool_name in ("Write", "Edit"):
+        return [tool_input.get("file_path", "")]
+    if tool_name == "apply_patch":
+        # Codex's only file-writing tool. Deleting a design needs no framing.
+        found = _patch_targets(tool_input, str(data.get("cwd") or "")) or []
+        return [path for kind, path in found if kind != "Delete"]
+    return []
 
-    change_dir = is_gated_artifact(file_path)
-    if change_dir is None:
-        return 0  # not a gated solution artifact
 
+def judge_artifact(hook_event: str, file_path: str, change_dir: str, host: str) -> None:
+    """Deny (and exit) unless change_dir holds a filled framing; else record allow."""
     # rapid-schema work is exempt. An unreadable schema fails CLOSED — we treat
     # it as feature/epic and require the framing.
     if read_schema(change_dir) == "rapid":
-        return 0
+        return
 
     framing_path = str(Path(change_dir) / "problem-framing.md")
     result = validate_framing(framing_path)
@@ -229,8 +237,9 @@ def main() -> int:
         deny(
             hook_event,
             f"No confirmed problem framing. Discovery requires problem-framing.md "
-            f"in this change directory before drafting {artifact_name}. Run "
-            f"/brainstorming for the convergent interview, or supply the six "
+            f"in this change directory before drafting {artifact_name}. "
+            f"{INTERVIEW_ROUTE.get(host, DEFAULT_INTERVIEW_ROUTE)} for the "
+            f"convergent interview, or supply the six "
             f"framing fields inline and confirm them.",
         )
 
@@ -259,7 +268,23 @@ def main() -> int:
         artifact=artifact_name,
         change_dir=change_dir,
     )
-    return 0  # all six fields filled — allow
+
+
+def main() -> int:
+    try:
+        data = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0  # fail open on malformed input
+
+    hook_event = data.get("hook_event_name", "") or data.get("hookEventName", "")
+    if hook_event != "PreToolUse":
+        return 0
+
+    for file_path in written_paths(data):
+        change_dir = is_gated_artifact(file_path)
+        if change_dir is not None:
+            judge_artifact(hook_event, file_path, change_dir, _host(data))
+    return 0  # no gated artifact, or every one has a filled framing — allow
 
 
 if __name__ == "__main__":

@@ -1,11 +1,32 @@
 {
   "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/design_doc_location_guard.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/test_reminder.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      }
+    ],
     "PreCompact": [
       {
         "hooks": [
           {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\"",
-            "timeout": 10,
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/escapement_session_context.py\"",
             "type": "command"
           }
         ],
@@ -14,7 +35,8 @@
       {
         "hooks": [
           {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/escapement_session_context.py\"",
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\"",
+            "timeout": 10,
             "type": "command"
           }
         ],
@@ -25,8 +47,8 @@
       {
         "hooks": [
           {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/codex_pretool_dispatch.py\" --gate claude/hooks/test_oracle_brief_gate.py --gate-timeout 5 --gate claude/hooks/beads_worktree_guard.py --gate-timeout 10 --gate claude/hooks/discovery-close-gate.py --gate-timeout 10 --gate claude/hooks/discovery-gate.py --gate-timeout 10 --gate claude/hooks/epic_coverage_gate.py --gate-timeout 10 --gate claude/hooks/implementation_echo_test_gate.py --gate-timeout 10 --gate claude/hooks/openspec_init_guard.py --gate-timeout 10 --gate claude/hooks/openspec_task_reconciliation_gate.py --gate-timeout 10 --gate claude/hooks/oracle_downgrade_warning_gate.py --gate-timeout 10 --gate claude/hooks/outcome_assertion_gate.py --gate-timeout 10 --gate claude/hooks/merge_authorization_gate.py --gate-timeout 10 --gate claude/hooks/outcome_ownership_nudge.py --gate-timeout 5 --gate claude/hooks/bead_verify_nudge.py --gate-timeout 5 --gate claude/hooks/serena_preference_gate.py --gate-timeout 5 --gate claude/hooks/spec_id_enforcement.py --gate-timeout 10",
-            "timeout": 145,
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/codex_pretool_dispatch.py\" --gate claude/hooks/test_oracle_brief_gate.py --gate-timeout 5 --gate claude/hooks/review_gate.py --gate-timeout 5 --gate claude/hooks/beads_worktree_guard.py --gate-timeout 10 --gate claude/hooks/cache_write_guard.py --gate-timeout 10 --gate claude/hooks/context_burn_detector.py --gate-timeout 5 --gate claude/hooks/discovery-close-gate.py --gate-timeout 10 --gate claude/hooks/discovery-gate.py --gate-timeout 10 --gate claude/hooks/epic_coverage_gate.py --gate-timeout 10 --gate claude/hooks/implementation_echo_test_gate.py --gate-timeout 10 --gate claude/hooks/openspec_init_guard.py --gate-timeout 10 --gate claude/hooks/openspec_task_reconciliation_gate.py --gate-timeout 10 --gate claude/hooks/oracle_downgrade_warning_gate.py --gate-timeout 10 --gate claude/hooks/outcome_assertion_gate.py --gate-timeout 10 --gate claude/hooks/prepatch_failure_gate.py --gate-timeout 120 --gate claude/hooks/merge_authorization_gate.py --gate-timeout 10 --gate claude/hooks/outcome_ownership_nudge.py --gate-timeout 5 --gate claude/hooks/bead_verify_nudge.py --gate-timeout 5 --gate claude/hooks/serena_preference_gate.py --gate-timeout 5 --gate claude/hooks/spec_id_enforcement.py --gate-timeout 10 --gate claude/hooks/bypass_guard.py --gate-timeout 5",
+            "timeout": 295,
             "type": "command"
           }
         ],
@@ -35,7 +57,77 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/review_gate.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "(collaboration)?spawn_agent"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/root_checkout_guard.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/context_burn_detector.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "(collaboration)?spawn_agent"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/discovery_input_gate.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/enforce_named_agents.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "(collaboration)?spawn_agent"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/gate_design_nudge.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/no_direct_send_guard.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "^mcp__.+_slack_(send|schedule)_message$"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/tdd-gate.py\"",
             "timeout": 10,
             "type": "command"
           }
@@ -54,16 +146,6 @@
       }
     ],
     "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\"",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
       {
         "hooks": [
           {
@@ -112,6 +194,26 @@
           }
         ],
         "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "ESCAPEMENT_HOST=codex bash \"${PLUGIN_ROOT}/scripts/project-bootstrap.sh\"",
+            "timeout": 15,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
       }
     ],
     "Stop": [
@@ -119,6 +221,26 @@
         "hooks": [
           {
             "command": "python3 -B \"${PLUGIN_ROOT}/harness/bin/codex_stop_hook.py\"",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/oracle_downgrade_stop.py\"",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/validate_no_shirking.py\"",
             "timeout": 30,
             "type": "command"
           }
@@ -132,6 +254,26 @@
           {
             "command": "python3 -B \"${PLUGIN_ROOT}/harness/bin/codex_prompt_recorder.py\"",
             "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/discovery-nudge.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/review_nudge.py\"",
+            "timeout": 5,
             "type": "command"
           }
         ],

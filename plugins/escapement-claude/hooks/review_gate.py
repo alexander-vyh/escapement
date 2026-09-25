@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Claude Code hook: soft gate on bd close — warns if no review agent was dispatched.
+"""Agent-dispatch hook: soft gate on bd close — warns if no review agent was dispatched.
 
 Dual-purpose PreToolUse hook:
-  - On Agent calls: checks if name/description contains "review" and records it
-    in a per-session state file under /tmp/
+  - On agent dispatch (Claude `Agent`, Codex spawn_agent, Pi's translated
+    `Agent`): records it in a per-session state file under /tmp/ when it is a
+    review (see _is_review_agent)
   - On Bash calls: checks if the command is `bd close` or `bd update --status closed`
     and warns if no review agent was recorded for this session
 
-This is advisory (soft warning) — it never blocks, only nudges.
+This is advisory — it never denies. On Claude it asks the user to confirm the
+close. Codex has no working ask (a PreToolUse "ask" fails the hook run and its
+context is dropped) and Pi enforces ask as a block, so on those hosts the
+same finding reaches the model as non-blocking context.
 
 Input (via stdin):
   JSON with hook_event_name, tool_name, tool_input, session_id
@@ -28,6 +32,9 @@ try:
 except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
+
+from _agent_dispatch import agent_dispatch, host as _host  # noqa: E402
+from _host_output import advisory  # noqa: E402
 
 _STATE_DIR = Path("/tmp/claude-review-gate")
 
@@ -142,6 +149,26 @@ _ASK_REASON = (
     "'proceed' to close without review."
 )
 
+# How to dispatch a reviewer, in the words of the host that will read it.
+_REVIEW_DISPATCH = {
+    "codex": 'spawn_agent with a task_name that names the review, e.g. task_name="code_reviewer"',
+    "pi": (
+        'the subagent tool and one of the reviewers Escapement ships for Pi, e.g. '
+        '{agent: "adversarial-reviewer", task: "..."} or '
+        '{agent: "test-quality-reviewer", task: "..."}'
+    ),
+}
+
+_NUDGE_NO_REVIEW = (
+    "No review agent was dispatched in this session before this close. Review "
+    "catches drift between spec and implementation, oracle downgrades and "
+    "missed regressions that the implementer's own context hides. Dispatch one "
+    "first with {dispatch}; it counts when its name, task or type says review "
+    "(reviewer, review, code-reviewer, adversarial-reviewer, "
+    "test-quality-reviewer). This notice does not block the close: if the work "
+    "was already reviewed or needs none, go ahead."
+)
+
 
 def main() -> int:
     try:
@@ -157,10 +184,11 @@ def main() -> int:
         return 0
 
     # --- Agent tracking path ---
-    if tool_name == "Agent":
-        if _is_review_agent(tool_input):
+    dispatch = agent_dispatch(data)
+    if dispatch is not None:
+        if _is_review_agent(dispatch):
             reviews = _read_state(session_id)
-            agent_name = tool_input.get("name", "unknown")
+            agent_name = dispatch.get("name") or "unknown"
             reviews.append(agent_name)
             _write_state(session_id, reviews)
         return 0
@@ -182,9 +210,9 @@ def main() -> int:
             )
             return 0
 
-        # No review agent — ask the user to confirm before closing. This is a
-        # soft gate: it never denies, only surfaces the missed review so the
-        # user can dispatch a reviewer or knowingly proceed.
+        # No review agent — surface it before closing. This is a soft gate: it
+        # never denies. Claude asks the user to confirm; other hosts get the
+        # same finding as model context (see the module docstring).
         #
         # CANONICAL DECISION CONTRACT: the decision is signaled with a single
         # mechanism — one permissionDecision JSON document on stdout, exit 0.
@@ -192,11 +220,19 @@ def main() -> int:
         # both the JSON decision *and* a non-zero exit is a contradictory
         # double-signal. This advisory gate uses the same single-mechanism
         # JSON-on-stdout-plus-exit-0 contract as the hard-deny gates.
+        host = _host(data)
         _record_signal(
             gate_name="review_gate",
             decision="nudge",
             reason="no review agent dispatched this session before bd close",
+            host=host,
         )
+        if host != "claude":
+            json.dump(
+                advisory(_NUDGE_NO_REVIEW.format(dispatch=_REVIEW_DISPATCH[host])),
+                sys.stdout,
+            )
+            return 0
         result = {
             "systemMessage": _WARN_NO_REVIEW,
             "hookSpecificOutput": {

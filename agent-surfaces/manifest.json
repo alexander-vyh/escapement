@@ -52,7 +52,13 @@
       "context_source_event": "UserPromptSubmit",
       "context_target_event": "before_agent_start",
       "session_source_event": "SessionStart",
-      "session_target_event": "session_start"
+      "session_target_event": "session_start",
+      "agent_target_matcher": "subagent",
+      "mcp_target_matcher": "mcp",
+      "post_tool_source_event": "PostToolUse",
+      "post_tool_target_event": "tool_result",
+      "stop_source_event": "Stop",
+      "stop_target_event": "agent_end"
     }
   },
   "support_claims": [
@@ -595,8 +601,25 @@
       "source": "claude/hooks/review_gate.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Depends on Claude Agent tool metadata and review-dispatch semantics; Codex subagent mapping needs a dedicated adapter."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "(collaboration)?spawn_agent",
+              "command": "python3 -B claude/hooks/review_gate.py",
+              "timeout_seconds": 5
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/review_gate.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_agent_dispatch_gates.py::test_codex_close_without_reviewer_reaches_the_model_as_context",
+            "claude/hooks/tests/test_codex_agent_dispatch_gates.py::test_codex_reviewer_spawn_satisfies_the_close"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -612,8 +635,26 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Keys on Claude Agent-tool dispatch and bd close/update Bash prefix matchers; Pi has no Agent tool and this gate is not Codex-ready for derivation."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "subagent",
+              "command": "python3 -B claude/hooks/review_gate.py",
+              "timeout_seconds": 5
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/review_gate.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_review_gate_end_to_end.py::test_pi_close_without_reviewer_reaches_the_model_without_blocking",
+            "tests/test_pi_review_gate_end_to_end.py::test_pi_reviewer_subagent_satisfies_the_close",
+            "tests/test_pi_review_gate_end_to_end.py::test_pi_non_reviewer_subagent_does_not_satisfy_the_close"
+          ]
         }
       }
     },
@@ -624,7 +665,7 @@
       "hosts": {
         "codex": {
           "status": "unsupported",
-          "unsupported_reason": "Claude-payload-shaped (transcript layout, ScheduleWakeup, task-mode rungs). Codex HAS a GA Stop event (docs, published schema stop.command, and a captured payload in harness/tests/fixtures/codex_stop_payload.json); the plugin-owned harness/bin/codex_stop_hook.py serves Codex Stop gating through the shared decision core. The Claude-specific scheduling, task-mode, and judge rungs remain unsupported."
+          "unsupported_reason": "Translates a Claude Stop payload (Claude transcript layout, ScheduleWakeup, task-mode rungs) into thread state; Codex Stop is served by the separate hook codex_stop_hook (harness/bin/codex_stop_hook.py), which owns the same would_block_stop decision core. The scheduled-wakeup, task-mode and local-judge rungs belong to the continuation-harness family and are not ported to this host."
         },
         "claude": {
           "status": "ready",
@@ -641,8 +682,21 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "The Pi adapter has no Stop (agent_end) gate; Pi sessions are not re-entered or blocked at turn end."
+          "status": "ready",
+          "source": "harness/bin/pi_stop_hook.py",
+          "events": [
+            {
+              "event": "Stop",
+              "matcher": "",
+              "command": "python3 -B harness/bin/pi_stop_hook.py",
+              "timeout_seconds": 30
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_stop_hook_end_to_end.py::test_pi_undeclared_code_change_continues_the_run_once",
+            "tests/test_pi_stop_hook_end_to_end.py::test_pi_following_the_block_releases_the_stop",
+            "tests/test_pi_stop_hook_end_to_end.py::test_pi_user_stop_releases_the_session"
+          ]
         }
       }
     },
@@ -672,7 +726,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "The Pi adapter has no Stop (agent_end) gate; Pi sessions are not re-entered or blocked at turn end."
+          "unsupported_reason": "Translates a Codex Stop payload; Pi Stop is served by stop_hook through harness/bin/pi_stop_hook.py, which owns the same would_block_stop decision core."
         }
       }
     },
@@ -702,7 +756,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "Records prompts for the Codex Stop adapter, which is not ported to Pi, so nothing on Pi would consume them."
+          "unsupported_reason": "Records user prompts because Codex transcripts are not parsed; the Pi adapter writes a Claude-shaped transcript that pi_stop_hook reads the user release from, so no recorder is needed there."
         }
       }
     },
@@ -743,12 +797,24 @@
     },
     {
       "id": "root_checkout_guard",
-      "description": "Prevent Claude built-in explicit-path edit tools from mutating the primary checkout of a beads-managed repo; arbitrary process and Serena project-relative effects are outside this hard gate.",
+      "description": "Prevent explicit-path edits (Claude Write/Edit/NotebookEdit/MultiEdit, Pi write/edit, Codex apply_patch) from mutating the primary checkout of a beads-managed repo; arbitrary process and Serena project-relative effects are outside this hard gate.",
       "source": "claude/hooks/root_checkout_guard.py",
       "hosts": {
         "codex": {
-          "status": "partial",
-          "unsupported_reason": "The current Codex hook payload does not expose the effective per-command working directory, so relative mutation targets cannot be classified safely."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "apply_patch",
+              "command": "python3 -B claude/hooks/root_checkout_guard.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_patch_gates.py::test_codex_relative_patch_into_primary_checkout_is_denied",
+            "claude/hooks/tests/test_codex_patch_gates.py::test_codex_patch_in_linked_worktree_is_allowed",
+            "claude/hooks/tests/test_codex_patch_gates.py::test_codex_patch_writing_the_root_waiver_is_allowed"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -806,8 +872,19 @@
       "source": "claude/hooks/cache_write_guard.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/cache_write_guard.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_bash_policy_gates.py::test_codex_cache_write_guard_denies_a_status_op_in_a_heavy_session",
+            "claude/hooks/tests/test_codex_bash_policy_gates.py::test_codex_cache_write_guard_allows_the_same_op_after_a_quiet_hour"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -823,8 +900,19 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Pi Bash gates run the same dispatcher as Codex and are enabled from Codex-ready Bash entries; this gate is not Codex-ready (see its Codex reason) and has no Pi fixture."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/cache_write_guard.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_cache_write_guard_end_to_end.py::test_pi_status_op_in_a_heavy_session_is_blocked_toward_pi_print",
+            "tests/test_pi_cache_write_guard_end_to_end.py::test_pi_status_op_in_a_light_session_runs"
+          ]
         }
       }
     },
@@ -834,8 +922,26 @@
       "source": "claude/hooks/context_burn_detector.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Fires on Claude Agent-tool dispatch metadata (PreToolUse:Agent). Codex documents SubagentStart and SubagentStop with subagent-type matchers; the port has not been done. Tracked as escapement-vjv2."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "(collaboration)?spawn_agent",
+              "command": "python3 -B claude/hooks/context_burn_detector.py",
+              "timeout_seconds": 5
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/context_burn_detector.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_agent_dispatch_gates.py::test_codex_full_source_reads_cross_the_threshold_once",
+            "claude/hooks/tests/test_codex_agent_dispatch_gates.py::test_codex_spawn_resets_the_count",
+            "claude/hooks/tests/test_codex_agent_dispatch_gates.py::test_codex_subagent_reads_do_not_count"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -866,8 +972,33 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Keys on Claude Agent/Read/Grep/Glob tool metadata for heavy-session detection; no Pi fixture maps Pi's tools onto it."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "subagent",
+              "command": "python3 -B claude/hooks/context_burn_detector.py",
+              "timeout_seconds": 5
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "read",
+              "command": "python3 -B claude/hooks/context_burn_detector.py",
+              "timeout_seconds": 5
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/context_burn_detector.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_context_burn_detector_end_to_end.py::test_pi_full_source_reads_cross_the_threshold_once",
+            "tests/test_pi_context_burn_detector_end_to_end.py::test_pi_subagent_dispatch_resets_the_count",
+            "tests/test_pi_context_burn_detector_end_to_end.py::test_pi_bash_cat_of_source_counts_as_a_read",
+            "tests/test_pi_context_burn_detector_end_to_end.py::test_pi_targeted_reads_stay_under_the_threshold"
+          ]
         }
       }
     },
@@ -907,8 +1038,19 @@
       "source": "claude/hooks/design_doc_location_guard.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "apply_patch",
+              "command": "python3 -B claude/hooks/design_doc_location_guard.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_context_hooks.py::test_codex_design_doc_patch_gets_openspec_redirect_in_context",
+            "claude/hooks/tests/test_codex_context_hooks.py::test_codex_source_patch_gets_no_design_doc_redirect"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -929,8 +1071,26 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "The Pi adapter does not translate PostToolUse (tool_result) events."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "write",
+              "command": "python3 -B claude/hooks/design_doc_location_guard.py",
+              "timeout_seconds": 5
+            },
+            {
+              "event": "PostToolUse",
+              "matcher": "edit",
+              "command": "python3 -B claude/hooks/design_doc_location_guard.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_design_doc_location_guard_end_to_end.py::test_pi_design_doc_write_gets_openspec_redirect_in_result",
+            "tests/test_pi_design_doc_location_guard_end_to_end.py::test_pi_design_doc_edit_gets_openspec_redirect_in_result",
+            "tests/test_pi_design_doc_location_guard_end_to_end.py::test_pi_other_doc_write_gets_no_redirect"
+          ]
         }
       }
     },
@@ -1010,8 +1170,19 @@
       "source": "claude/hooks/discovery-nudge.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/discovery-nudge.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_context_hooks.py::test_codex_feature_prompt_without_design_gets_discovery_nudge",
+            "claude/hooks/tests/test_codex_context_hooks.py::test_codex_feature_prompt_with_recent_design_is_silent"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1027,8 +1198,19 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Portable to the Pi before_agent_start context roster, but it has no Pi fixture yet."
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/discovery-nudge.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_discovery_nudge_end_to_end.py::test_pi_feature_prompt_without_design_gets_discovery_nudge",
+            "tests/test_pi_discovery_nudge_end_to_end.py::test_pi_feature_prompt_with_recent_design_is_silent"
+          ]
         }
       }
     },
@@ -1038,8 +1220,19 @@
       "source": "claude/hooks/discovery_input_gate.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "apply_patch",
+              "command": "python3 -B claude/hooks/discovery_input_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_patch_gates.py::test_codex_design_patch_without_framing_is_denied",
+            "claude/hooks/tests/test_codex_patch_gates.py::test_codex_design_patch_with_filled_framing_is_allowed"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1060,8 +1253,26 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Pi write/edit are mapped onto Write/Edit payloads, but this gate has no Pi fixture proving it on that mapping yet."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "write",
+              "command": "python3 -B claude/hooks/discovery_input_gate.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "edit",
+              "command": "python3 -B claude/hooks/discovery_input_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_discovery_input_gate_end_to_end.py::test_pi_design_write_without_framing_is_blocked",
+            "tests/test_pi_discovery_input_gate_end_to_end.py::test_pi_edit_with_unfilled_framing_is_blocked",
+            "tests/test_pi_discovery_input_gate_end_to_end.py::test_pi_design_write_with_filled_framing_is_allowed"
+          ]
         }
       }
     },
@@ -1071,8 +1282,20 @@
       "source": "claude/hooks/enforce_named_agents.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Inspects Claude Agent/TeamCreate tool payloads; Codex has no named-agent team dispatch tool to gate."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "(collaboration)?spawn_agent",
+              "command": "python3 -B claude/hooks/enforce_named_agents.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_agent_dispatch_gates.py::test_codex_spawn_matcher_fires_on_the_captured_tool_name",
+            "claude/hooks/tests/test_codex_agent_dispatch_gates.py::test_codex_unnamed_spawn_is_denied_with_the_repair",
+            "claude/hooks/tests/test_codex_agent_dispatch_gates.py::test_codex_named_spawn_is_allowed"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1088,8 +1311,20 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Inspects Claude Agent/TeamCreate payloads; Pi has no named-agent team dispatch tool."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "subagent",
+              "command": "python3 -B claude/hooks/enforce_named_agents.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_enforce_named_agents_end_to_end.py::test_pi_subagent_without_agent_is_blocked_with_the_repair",
+            "tests/test_pi_enforce_named_agents_end_to_end.py::test_pi_subagent_with_agent_is_allowed",
+            "tests/test_pi_enforce_named_agents_end_to_end.py::test_pi_management_action_is_not_judged_as_a_dispatch"
+          ]
         }
       }
     },
@@ -1258,8 +1493,20 @@
       "source": "claude/hooks/no_direct_send_guard.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Matches Claude Slack-MCP tool names (mcp__*_Slack__*); Codex tool routing differs and needs a dedicated adapter."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "^mcp__.+_slack_(send|schedule)_message$",
+              "command": "python3 -B claude/hooks/no_direct_send_guard.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_no_direct_send_guard.py::test_codex_matcher_selects_send_tools_and_skips_drafts",
+            "claude/hooks/tests/test_codex_no_direct_send_guard.py::test_codex_captured_send_is_denied_toward_the_draft",
+            "claude/hooks/tests/test_codex_no_direct_send_guard.py::test_codex_draft_is_allowed"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1290,8 +1537,21 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Matches Claude Slack-MCP tool names; the Pi adapter does not route MCP tool calls through gates."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "mcp",
+              "command": "python3 -B claude/hooks/no_direct_send_guard.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_no_direct_send_guard_end_to_end.py::test_pi_slack_send_is_blocked_toward_the_draft",
+            "tests/test_pi_no_direct_send_guard_end_to_end.py::test_pi_slack_draft_runs",
+            "tests/test_pi_no_direct_send_guard_end_to_end.py::test_pi_direct_and_scripted_slack_sends_are_blocked",
+            "tests/test_pi_no_direct_send_guard_end_to_end.py::test_pi_unrelated_extension_tools_run"
+          ]
         }
       }
     },
@@ -1371,8 +1631,20 @@
       "source": "claude/hooks/oracle_downgrade_stop.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Depends on Claude Stop payload and transcript shape for the whole-diff oracle-strength differ. Codex HAS a GA Stop event; this differ has simply not been ported. Tracked as escapement-vjv2."
+          "status": "ready",
+          "events": [
+            {
+              "event": "Stop",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/oracle_downgrade_stop.py",
+              "timeout_seconds": 30
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_stop_gates.py::test_codex_stop_surfaces_oracle_downgrade",
+            "claude/hooks/tests/test_codex_stop_gates.py::test_codex_stop_is_silent_on_strengthened_tests",
+            "claude/hooks/tests/test_codex_stop_gates.py::test_codex_plugin_copy_surfaces_oracle_downgrade"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1391,8 +1663,19 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "The Pi adapter has no Stop (agent_end) gate; Pi sessions are not re-entered or blocked at turn end."
+          "status": "ready",
+          "events": [
+            {
+              "event": "Stop",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/oracle_downgrade_stop.py",
+              "timeout_seconds": 30
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_oracle_downgrade_stop_end_to_end.py::test_pi_weakened_test_is_shown_without_continuing_the_run",
+            "tests/test_pi_oracle_downgrade_stop_end_to_end.py::test_pi_strengthened_test_is_silent"
+          ]
         }
       }
     },
@@ -1472,8 +1755,19 @@
       "source": "claude/hooks/prepatch_failure_gate.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "No captured Codex fixture proves the PreToolUse Bash payload carries the cwd this gate needs to resolve the repository and its merge-base."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/prepatch_failure_gate.py",
+              "timeout_seconds": 120
+            }
+          ],
+          "fixtures": [
+            "tests/test_codex_prepatch_failure_gate.py::test_codex_vacuous_landing_is_blocked_with_its_repair_path",
+            "tests/test_codex_prepatch_failure_gate.py::test_codex_landing_with_a_detecting_test_is_allowed"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1489,8 +1783,20 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Pi Bash gates run the same dispatcher as Codex and are enabled from Codex-ready Bash entries; this gate is not Codex-ready (see its Codex reason) and has no Pi fixture."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/prepatch_failure_gate.py",
+              "timeout_seconds": 120
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_prepatch_failure_gate_end_to_end.py::test_pi_vacuous_landing_is_blocked_by_the_vendored_verifier",
+            "tests/test_pi_prepatch_failure_gate_end_to_end.py::test_pi_landing_with_a_detecting_test_runs",
+            "tests/test_pi_prepatch_failure_gate_end_to_end.py::test_pi_package_without_the_verifier_fails_open"
+          ]
         }
       }
     },
@@ -1605,8 +1911,19 @@
       "source": "claude/hooks/review_nudge.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/review_nudge.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_context_hooks.py::test_codex_review_prompt_gets_review_nudge",
+            "claude/hooks/tests/test_codex_context_hooks.py::test_codex_non_review_prompt_is_silent"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1622,8 +1939,19 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Portable to the Pi before_agent_start context roster, but it has no Pi fixture yet."
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/review_nudge.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_review_nudge_end_to_end.py::test_pi_review_prompt_gets_review_nudge",
+            "tests/test_pi_review_nudge_end_to_end.py::test_pi_non_review_prompt_is_silent"
+          ]
         }
       }
     },
@@ -1876,8 +2204,19 @@
       "source": "claude/hooks/tdd-gate.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "The Codex hook surface has no captured fixture proving an equivalent built-in edit-tool event contract."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "apply_patch",
+              "command": "python3 -B claude/hooks/tdd-gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_patch_gates.py::test_codex_impl_patch_without_tests_is_denied_once_then_allowed",
+            "claude/hooks/tests/test_codex_patch_gates.py::test_codex_patch_that_writes_a_test_is_allowed"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1904,8 +2243,26 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Pi write/edit are mapped onto Write/Edit payloads, but this gate has no Pi fixture proving it on that mapping yet."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "write",
+              "command": "python3 -B claude/hooks/tdd-gate.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "edit",
+              "command": "python3 -B claude/hooks/tdd-gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_tdd_gate_end_to_end.py::test_pi_impl_write_without_tests_is_blocked_once_then_the_retry_passes",
+            "tests/test_pi_tdd_gate_end_to_end.py::test_pi_impl_edit_without_tests_is_blocked",
+            "tests/test_pi_tdd_gate_end_to_end.py::test_pi_test_write_is_not_blocked"
+          ]
         }
       }
     },
@@ -1915,8 +2272,19 @@
       "source": "claude/hooks/test_reminder.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Codex-portable but needs fixture coverage before marking ready"
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "apply_patch",
+              "command": "python3 -B claude/hooks/test_reminder.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_context_hooks.py::test_codex_code_patch_gets_test_reminder_in_context",
+            "claude/hooks/tests/test_codex_context_hooks.py::test_codex_docs_patch_gets_no_test_reminder"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1937,8 +2305,25 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "The Pi adapter does not translate PostToolUse (tool_result) events."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "write",
+              "command": "python3 -B claude/hooks/test_reminder.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PostToolUse",
+              "matcher": "edit",
+              "command": "python3 -B claude/hooks/test_reminder.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_test_reminder_end_to_end.py::test_pi_code_write_gets_test_reminder_in_result_once_per_cooldown",
+            "tests/test_pi_test_reminder_end_to_end.py::test_pi_docs_write_gets_no_test_reminder"
+          ]
         }
       }
     },
@@ -1948,8 +2333,21 @@
       "source": "claude/hooks/validate_no_shirking.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Reads the Claude transcript path and Claude-shaped Stop payloads. Codex HAS a GA Stop event and honours the same block-decision contract (captured 2026-09-07, codex-cli 0.153.4); it is served by harness/bin/codex_stop_hook.py instead. Parity port tracked as escapement-vjv2."
+          "status": "ready",
+          "events": [
+            {
+              "event": "Stop",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/validate_no_shirking.py",
+              "timeout_seconds": 30
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_stop_gates.py::test_codex_stop_blocks_shirking_final_message",
+            "claude/hooks/tests/test_codex_stop_gates.py::test_codex_stop_allows_owned_final_message",
+            "claude/hooks/tests/test_codex_stop_gates.py::test_codex_stop_without_final_message_says_it_did_not_judge",
+            "claude/hooks/tests/test_codex_stop_gates.py::test_codex_plugin_copy_blocks_shirking_final_message"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1970,8 +2368,26 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Reads the Claude transcript and Stop payload. The Pi adapter has no Stop (agent_end) gate; Pi sessions are not re-entered or blocked at turn end."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/validate_no_shirking.py",
+              "timeout_seconds": 30
+            },
+            {
+              "event": "Stop",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/validate_no_shirking.py",
+              "timeout_seconds": 30
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_validate_no_shirking_end_to_end.py::test_pi_stop_after_shirking_continues_the_run",
+            "tests/test_pi_validate_no_shirking_end_to_end.py::test_pi_commit_after_shirking_is_blocked",
+            "tests/test_pi_validate_no_shirking_end_to_end.py::test_pi_owned_final_message_stops_cleanly"
+          ]
         }
       }
     },
@@ -1981,8 +2397,19 @@
       "source": "claude/hooks/bypass_guard.py",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Not yet ported to Codex; Claude-only PreToolUse gate."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/bypass_guard.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_bash_policy_gates.py::test_codex_bypass_guard_denies_a_no_verify_commit",
+            "claude/hooks/tests/test_codex_bash_policy_gates.py::test_codex_bypass_guard_allows_no_verify_quoted_in_a_message"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -1998,8 +2425,19 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Pi Bash gates run the same dispatcher as Codex and are enabled from Codex-ready Bash entries; this gate is not Codex-ready (see its Codex reason) and has no Pi fixture."
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/bypass_guard.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_bypass_guard_end_to_end.py::test_pi_no_verify_commit_is_blocked_with_the_waiver_escape",
+            "tests/test_pi_bypass_guard_end_to_end.py::test_pi_no_verify_quoted_in_a_commit_message_runs"
+          ]
         }
       }
     },
@@ -2047,7 +2485,7 @@
       "hosts": {
         "codex": {
           "status": "unsupported",
-          "unsupported_reason": "Continuation-harness hook not yet validated for the Codex plugin surface."
+          "unsupported_reason": "Continuation-harness hook: it serves Claude's scheduled wakeup (ScheduleWakeup and task-mode re-entry), which this repository's support claims mark Claude-only; not ported to this host."
         },
         "claude": {
           "status": "ready",
@@ -2064,7 +2502,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "Keys on Claude's ScheduleWakeup tool. The Pi adapter does not translate PostToolUse (tool_result) events."
+          "unsupported_reason": "Continuation-harness hook: it serves Claude's scheduled wakeup (ScheduleWakeup and task-mode re-entry), which this repository's support claims mark Claude-only; not ported to this host."
         }
       }
     },
@@ -2075,7 +2513,7 @@
       "hosts": {
         "codex": {
           "status": "unsupported",
-          "unsupported_reason": "Continuation-harness hook not yet validated for the Codex plugin surface."
+          "unsupported_reason": "Continuation-harness hook: it serves Claude's scheduled wakeup (ScheduleWakeup and task-mode re-entry), which this repository's support claims mark Claude-only; not ported to this host."
         },
         "claude": {
           "status": "ready",
@@ -2093,7 +2531,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "The Pi adapter does not translate PostToolUse (tool_result) events."
+          "unsupported_reason": "Continuation-harness hook: it serves Claude's scheduled wakeup (ScheduleWakeup and task-mode re-entry), which this repository's support claims mark Claude-only; not ported to this host."
         }
       }
     },
@@ -2104,7 +2542,7 @@
       "hosts": {
         "codex": {
           "status": "unsupported",
-          "unsupported_reason": "Continuation-harness hook not yet validated for the Codex plugin surface."
+          "unsupported_reason": "Continuation-harness hook: it serves Claude's scheduled wakeup (ScheduleWakeup and task-mode re-entry), which this repository's support claims mark Claude-only; not ported to this host."
         },
         "claude": {
           "status": "ready",
@@ -2121,7 +2559,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "Continuation-harness hook: scheduled continuation is Claude-only in this repository's support claims and is not ported to Pi."
+          "unsupported_reason": "Continuation-harness hook: it serves Claude's scheduled wakeup (ScheduleWakeup and task-mode re-entry), which this repository's support claims mark Claude-only; not ported to this host."
         }
       }
     },
@@ -2132,7 +2570,7 @@
       "hosts": {
         "codex": {
           "status": "unsupported",
-          "unsupported_reason": "Continuation-harness hook not yet validated for the Codex plugin surface."
+          "unsupported_reason": "Continuation-harness hook: it serves Claude's scheduled wakeup (ScheduleWakeup and task-mode re-entry), which this repository's support claims mark Claude-only; not ported to this host."
         },
         "claude": {
           "status": "ready",
@@ -2149,7 +2587,7 @@
         },
         "pi": {
           "status": "unsupported",
-          "unsupported_reason": "Continuation-harness hook: scheduled continuation is Claude-only in this repository's support claims and is not ported to Pi."
+          "unsupported_reason": "Continuation-harness hook: it serves Claude's scheduled wakeup (ScheduleWakeup and task-mode re-entry), which this repository's support claims mark Claude-only; not ported to this host."
         }
       }
     },
@@ -2159,8 +2597,19 @@
       "source": "scripts/project-bootstrap.sh",
       "hosts": {
         "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Bootstraps Claude-specific project wiring (OpenSpec --tools claude, CLAUDE.md check, Agent-team reminder); a Codex equivalent needs its own adapter."
+          "status": "ready",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "ESCAPEMENT_HOST=codex bash \"${PLUGIN_ROOT}/scripts/project-bootstrap.sh\"",
+              "timeout_seconds": 15
+            }
+          ],
+          "fixtures": [
+            "tests/test_codex_project_bootstrap.py::test_codex_plugin_command_bootstraps_for_codex",
+            "tests/test_codex_project_bootstrap.py::test_codex_existing_project_gets_only_the_codex_prime"
+          ]
         },
         "claude": {
           "status": "ready",
@@ -2177,8 +2626,20 @@
           ]
         },
         "pi": {
-          "status": "unsupported",
-          "unsupported_reason": "Bootstraps Claude-specific project wiring (OpenSpec --tools claude, CLAUDE.md check, Agent-team reminder); a Pi equivalent needs its own bootstrap."
+          "status": "ready",
+          "source": "scripts/pi_project_bootstrap.py",
+          "events": [
+            {
+              "event": "SessionStart",
+              "matcher": "",
+              "command": "python3 -B scripts/pi_project_bootstrap.py",
+              "timeout_seconds": 15
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_project_bootstrap_end_to_end.py::test_pi_session_start_bootstraps_the_project_for_pi",
+            "tests/test_pi_project_bootstrap_end_to_end.py::test_pi_session_start_outside_a_repository_adds_no_bootstrap"
+          ]
         }
       }
     }

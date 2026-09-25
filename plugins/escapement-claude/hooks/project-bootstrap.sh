@@ -8,8 +8,12 @@
 #   2. Worktree detection
 #   3. Silent init (direnv, openspec)
 #   4. Announced init (beads, outcome policy)
-#   5. Check-and-report (CLAUDE.md)
+#   5. Check-and-report (the host's instructions file)
 #   6. Emit bootstrap context (JSON additionalContext)
+#
+# Host: ESCAPEMENT_HOST=claude|codex|pi (default claude) selects the host's
+# OpenSpec tool id, instructions file and agent-dispatch wording. The Codex
+# plugin command sets it; the Pi extension sets it for every gate it runs.
 
 # Fail-open: trap any unexpected error, emit nothing, exit 0
 trap 'exit 0' ERR
@@ -18,6 +22,12 @@ trap 'exit 0' ERR
 INPUT=$(cat)
 SESSION_CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 CWD="${SESSION_CWD:-$(pwd)}"
+
+case "${ESCAPEMENT_HOST:-claude}" in
+  codex) HOST=codex ;;
+  pi) HOST=pi ;;
+  *) HOST=claude ;;
+esac
 
 # --- Phase 1: Environment gate ---
 if [[ ! -d "$CWD" ]]; then
@@ -113,10 +123,10 @@ bootstrap_openspec() {
   if ! command -v openspec >/dev/null 2>&1; then
     return 0  # openspec not installed, skip silently
   fi
-  if (cd "$CWD" && openspec init --tools claude . >/dev/null 2>&1); then
-    ACTIONS+=("openspec: initialized with claude tools")
+  if (cd "$CWD" && openspec init --tools "$HOST" . >/dev/null 2>&1); then
+    ACTIONS+=("openspec: initialized with $HOST tools")
   else
-    REPORT+=("WARN: openspec init failed -- run manually: openspec init --tools claude")
+    REPORT+=("WARN: openspec init failed -- run manually: openspec init --tools $HOST")
   fi
 }
 
@@ -227,17 +237,30 @@ bootstrap_outcome() {
 JSON
   then
     ACTIONS+=("outcome: wrote conservative default (pr-opened, no auto-merge)")
-    REPORT+=("NOTE: no outcome policy was set for this repo -- wrote the conservative default (.escapement/repo.json: pr-opened, no auto-merge). ACTION: ask the user how far agents should drive here (committed / pr-opened / merged / merged-and-deployed) and whether to auto-merge on green; update with harness/bin/set_repo_outcome.py if they want more than the default. See continuation-harness.md § Per-repo outcome authorization.")
+    REPORT+=("NOTE: no outcome policy was set for this repo -- wrote the conservative default (.escapement/repo.json: pr-opened, no auto-merge). ACTION: ask the user how far agents should drive here (committed / pr-opened / merged / merged-and-deployed) and whether to auto-merge on green; update with harness/bin/set_repo_outcome.py if they want more than the default.${OUTCOME_REF}")
   fi
 }
 
 # --- Phase 5: Check and report ---
 
-check_claude_md() {
-  if [[ ! -f "$CWD/CLAUDE.md" ]]; then
-    REPORT+=("NOTE: No CLAUDE.md found -- consider creating project-specific instructions")
-  fi
+check_instructions_file() {
+  # The file each host reads project instructions from. Pi reads either.
+  case "$HOST" in
+    codex)
+      [[ -f "$CWD/AGENTS.md" ]] || REPORT+=("NOTE: No AGENTS.md found -- consider creating project-specific instructions") ;;
+    pi)
+      [[ -f "$CWD/AGENTS.md" || -f "$CWD/CLAUDE.md" ]] || REPORT+=("NOTE: No AGENTS.md found -- consider creating project-specific instructions") ;;
+    *)
+      [[ -f "$CWD/CLAUDE.md" ]] || REPORT+=("NOTE: No CLAUDE.md found -- consider creating project-specific instructions") ;;
+  esac
 }
+
+# The per-repo outcome rule ships with the continuation harness, which only the
+# Claude host carries; other hosts get the note without a pointer to it.
+OUTCOME_REF=""
+if [[ "$HOST" == "claude" ]]; then
+  OUTCOME_REF=" See continuation-harness.md § Per-repo outcome authorization."
+fi
 
 # --- Execute all phases ---
 bootstrap_direnv
@@ -245,12 +268,22 @@ bootstrap_openspec
 bootstrap_beads
 repair_beads
 bootstrap_outcome
-check_claude_md
+check_instructions_file
 
-# --- Phase 6: Agent team reminder (always emitted) ---
-AGENT_PRIME="## Agent Dispatch Rules
+# --- Phase 6: Agent dispatch reminder (always emitted, in the host's words) ---
+case "$HOST" in
+  codex)
+    AGENT_PRIME="## Agent Dispatch Rules
+Give every spawn_agent call a task_name that says what the agent is for (for example task_name=\"explorer\" or task_name=\"code_reviewer\"); an agent_type also counts.
+The enforce_named_agents hook blocks a spawn that carries neither." ;;
+  pi)
+    AGENT_PRIME="## Agent Dispatch Rules
+Dispatch subagents with the subagent tool, naming the agent that fits the job (for example scout for research, a reviewer agent for review) and giving it a self-contained task." ;;
+  *)
+    AGENT_PRIME="## Agent Dispatch Rules
 When dispatching 2+ agents, ALWAYS: (1) TeamCreate first, (2) name + team_name on every Agent call.
-The enforce_named_agents hook will BLOCK the second teamless agent. Do not test this — just use TeamCreate."
+The enforce_named_agents hook will BLOCK the second teamless agent. Do not test this — just use TeamCreate." ;;
+esac
 
 # --- Phase 7: Emit context ---
 if [[ ${#ACTIONS[@]} -eq 0 && ${#REPORT[@]} -eq 0 ]]; then

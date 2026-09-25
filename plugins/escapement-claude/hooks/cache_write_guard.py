@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
-"""Claude Code hook: redirect trivial ops OUT of a heavy (bloated-context) session.
+"""PreToolUse hook: redirect trivial ops OUT of a heavy (bloated-context) session.
 
-PreToolUse on Bash. When the current session has written a large amount to the 1h cache
-recently (default >250k `cache_creation_input_tokens` in the last hour — i.e. it is
+PreToolUse on Bash. When the current session has written a large amount of new context
+into its prompt cache recently (default >250k tokens in the last hour — i.e. it is
 carrying a huge context) AND the next command is just a read-only status op
 (`gh pr view`, `bd show`, `bd close`, …), running it inline re-pays that context cost for
 nothing. The guard BLOCKS and redirects to a lightweight runner (a fresh cheap session or
 a shell job). It fires ONLY at the intersection: heavy session AND lightweight op.
+
+The measure is read from the payload's `transcript_path`, in whichever host's format it is:
+  - Claude Code transcript: `usage.cache_creation_input_tokens` on assistant turns.
+  - Codex rollout: `event_msg`/`token_count` entries. OpenAI caches the prompt without a
+    separate write count, so the uncached input (`input_tokens - cached_input_tokens`) is
+    the new context written; `total_token_usage` is cumulative, so the window's amount is
+    the growth since the last entry before the window (repeated entries count once).
+  - Pi: the extension writes a Claude-shaped transcript with Pi's usage under Claude's
+    names. Per turn, cache writes plus uncached input: whichever provider runs, that is
+    the new context (Anthropic reports writes; OpenAI reports 0 writes and the uncached
+    prompt as input).
 
 Fail-open: if usage can't be read, ALLOW (a guard that blocks when it can't measure is
 worse than the waste). Subagent-exempt. gate-design compliant: the denial names the
@@ -21,6 +32,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+from _agent_dispatch import host as _host  # noqa: E402
 try:
     from _gate_signal import record as _record_signal
 except ImportError:  # pragma: no cover
@@ -61,8 +73,29 @@ def _parse_ts(s):
         return None
 
 
-def recent_cache_writes(transcript_path: str, now: _dt.datetime, window_seconds: int = WINDOW_SECONDS) -> int:
-    """Sum `usage.cache_creation_input_tokens` over assistant turns within the window.
+def _codex_fresh_input(entry: dict):
+    """Cumulative uncached input of a Codex rollout `token_count` entry, else None."""
+    if entry.get("type") != "event_msg":
+        return None
+    payload = entry.get("payload") or {}
+    if not isinstance(payload, dict) or payload.get("type") != "token_count":
+        return None
+    total = (payload.get("info") or {}).get("total_token_usage") or {}
+    fed, cached = total.get("input_tokens"), total.get("cached_input_tokens", 0)
+    if not isinstance(fed, (int, float)) or not isinstance(cached, (int, float)):
+        return None
+    return max(int(fed) - int(cached), 0)
+
+
+def recent_cache_writes(transcript_path: str, now: _dt.datetime, window_seconds: int = WINDOW_SECONDS,
+                        *, uncached_input: bool = False) -> int:
+    """New context tokens written to the prompt cache within the window.
+
+    Claude transcript: the sum of `usage.cache_creation_input_tokens` over assistant turns.
+    Codex rollout: the growth of cumulative uncached input across the window.
+    `uncached_input` also counts each turn's `usage.input_tokens`: the Pi extension writes
+    Pi's usage under Claude's names, and there a provider without explicit cache writes
+    (OpenAI: cacheWrite 0, input = the uncached prompt) reports its new context as input.
 
     FAIL-OPEN: missing/unreadable transcript → 0 (→ below threshold → allow).
     """
@@ -74,31 +107,46 @@ def recent_cache_writes(transcript_path: str, now: _dt.datetime, window_seconds:
     n = now if now.tzinfo else now.replace(tzinfo=_dt.timezone.utc)
     cutoff = n - _dt.timedelta(seconds=window_seconds)
     total = 0
+    codex_before = codex_latest = None
+    marker = "input_tokens" if uncached_input else "cache_creation_input_tokens"
     try:
         with p.open(encoding="utf-8", errors="replace") as f:
             for line in f:
-                line = line.strip()
-                if not line:
+                # Rollouts run to hundreds of MB; only usage-bearing lines are parsed.
+                if marker not in line and "token_count" not in line:
                     continue
                 try:
                     e = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if e.get("type") != "assistant":
+                if not isinstance(e, dict):
                     continue
                 ts = _parse_ts(e.get("timestamp"))
                 if ts is None:
                     continue
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=_dt.timezone.utc)
-                if ts < cutoff:
+                fresh = _codex_fresh_input(e)
+                if fresh is not None:
+                    if ts < cutoff:
+                        codex_before = fresh
+                    else:
+                        codex_latest = fresh
+                    continue
+                if e.get("type") != "assistant" or ts < cutoff:
                     continue
                 usage = (e.get("message", {}) or {}).get("usage", {}) or {}
-                val = usage.get("cache_creation_input_tokens")
-                if isinstance(val, (int, float)):
-                    total += int(val)
+                keys = ("cache_creation_input_tokens", "input_tokens") if uncached_input else (
+                    "cache_creation_input_tokens",)
+                for key in keys:
+                    val = usage.get(key)
+                    if isinstance(val, (int, float)):
+                        total += int(val)
     except OSError:
         return 0
+    if codex_latest is not None:
+        grown = codex_latest - (codex_before or 0)
+        total += grown if grown >= 0 else codex_latest  # a reset counter restarts at 0
     return total
 
 
@@ -113,15 +161,21 @@ def decide(command: str, cache_writes: int, *, has_waiver: bool = False,
 
 
 _REDIRECT = (
-    "Blocked: this session has written {kw}k tokens to the 1h cache in the last hour — it "
-    "is carrying a heavy context. Running `{cmd}` here re-pays that whole context cost for "
-    "a trivial read-only op.\n\n"
+    "Blocked: this session has written {kw}k new tokens into its prompt cache in the last "
+    "hour — it is carrying a heavy context. Running `{cmd}` here re-pays that whole context "
+    "cost for a trivial read-only op.\n\n"
     "Run it lightweight instead:\n"
-    "  • fresh cheap session:  claude -p --model haiku '{cmd}'\n"
+    "  • fresh cheap session:  {runner}\n"
     "  • or just run it as a plain shell job outside this conversation\n"
     "  • or, if you genuinely need the result inline here, append a real reason:\n"
     "      {cmd}  # cache-guard-waiver: <why this must run in-session, ≥20 chars>"
 )
+# The fresh session each host can start. Claude's line also names Codex's, as it did before
+# hosts were told apart; Pi's print mode (`pi -p`) runs one prompt and exits.
+_RUNNERS = {
+    "pi": "pi -p '{cmd}'",
+}
+_DEFAULT_RUNNER = "claude -p --model haiku '{cmd}'  (on Codex: codex exec '{cmd}')"
 
 
 def _deny(reason: str) -> int:
@@ -159,8 +213,9 @@ def main() -> int:
         return 0  # cheap exit: only the named ops are ever in scope
 
     waiver = has_waiver(command)
+    host = _host(data)
     cache_writes = recent_cache_writes(
-        data.get("transcript_path", ""), _dt.datetime.now(_dt.timezone.utc)
+        data.get("transcript_path", ""), _dt.datetime.now(_dt.timezone.utc), uncached_input=host == "pi"
     )
     block, reason = decide(command, cache_writes, has_waiver=waiver)
 
@@ -171,7 +226,9 @@ def main() -> int:
     if block:
         _record_signal(gate_name="cache_write_guard", decision="deny",
                        reason=reason, cmd=command[:80])
-        return _deny(_REDIRECT.format(kw=cache_writes // 1000, cmd=command.strip()[:120]))
+        cmd = command.strip()[:120]
+        runner = _RUNNERS.get(host, _DEFAULT_RUNNER).format(cmd=cmd)
+        return _deny(_REDIRECT.format(kw=cache_writes // 1000, cmd=cmd, runner=runner))
     return 0
 
 

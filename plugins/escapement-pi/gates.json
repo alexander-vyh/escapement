@@ -8,9 +8,24 @@
       "timeout_seconds": 5
     },
     {
+      "id": "review_gate",
+      "source": "claude/hooks/review_gate.py",
+      "timeout_seconds": 5
+    },
+    {
       "id": "beads_worktree_guard",
       "source": "claude/hooks/beads_worktree_guard.py",
       "timeout_seconds": 10
+    },
+    {
+      "id": "cache_write_guard",
+      "source": "claude/hooks/cache_write_guard.py",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "context_burn_detector",
+      "source": "claude/hooks/context_burn_detector.py",
+      "timeout_seconds": 5
     },
     {
       "id": "discovery-close-gate",
@@ -53,6 +68,11 @@
       "timeout_seconds": 10
     },
     {
+      "id": "prepatch_failure_gate",
+      "source": "claude/hooks/prepatch_failure_gate.py",
+      "timeout_seconds": 120
+    },
+    {
       "id": "merge_authorization_gate",
       "source": "claude/hooks/merge_authorization_gate.py",
       "timeout_seconds": 10
@@ -76,6 +96,16 @@
       "id": "spec_id_enforcement",
       "source": "claude/hooks/spec_id_enforcement.py",
       "timeout_seconds": 10
+    },
+    {
+      "id": "validate_no_shirking",
+      "source": "claude/hooks/validate_no_shirking.py",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "bypass_guard",
+      "source": "claude/hooks/bypass_guard.py",
+      "timeout_seconds": 5
     }
   ],
   "file_gates": [
@@ -85,8 +115,18 @@
       "timeout_seconds": 10
     },
     {
+      "id": "discovery_input_gate",
+      "source": "claude/hooks/discovery_input_gate.py",
+      "timeout_seconds": 10
+    },
+    {
       "id": "gate_design_nudge",
       "source": "claude/hooks/gate_design_nudge.py",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "tdd-gate",
+      "source": "claude/hooks/tdd-gate.py",
       "timeout_seconds": 10
     },
     {
@@ -97,12 +137,84 @@
   ],
   "read_gates": [
     {
+      "id": "context_burn_detector",
+      "source": "claude/hooks/context_burn_detector.py",
+      "timeout_seconds": 5
+    },
+    {
       "id": "serena_preference_gate",
       "source": "claude/hooks/serena_preference_gate.py",
       "timeout_seconds": 5
     }
   ],
+  "agent_gates": [
+    {
+      "id": "review_gate",
+      "source": "claude/hooks/review_gate.py",
+      "timeout_seconds": 5
+    },
+    {
+      "id": "context_burn_detector",
+      "source": "claude/hooks/context_burn_detector.py",
+      "timeout_seconds": 5
+    },
+    {
+      "id": "enforce_named_agents",
+      "source": "claude/hooks/enforce_named_agents.py",
+      "timeout_seconds": 5
+    }
+  ],
+  "mcp_gates": [
+    {
+      "id": "no_direct_send_guard",
+      "source": "claude/hooks/no_direct_send_guard.py",
+      "timeout_seconds": 5
+    }
+  ],
+  "unlisted_tool_gates": [
+    {
+      "id": "no_direct_send_guard",
+      "source": "claude/hooks/no_direct_send_guard.py",
+      "timeout_seconds": 5
+    }
+  ],
+  "post_tool_gates": {
+    "write": [
+      {
+        "id": "design_doc_location_guard",
+        "source": "claude/hooks/design_doc_location_guard.py",
+        "timeout_seconds": 5
+      },
+      {
+        "id": "test_reminder",
+        "source": "claude/hooks/test_reminder.py",
+        "timeout_seconds": 10
+      }
+    ],
+    "edit": [
+      {
+        "id": "design_doc_location_guard",
+        "source": "claude/hooks/design_doc_location_guard.py",
+        "timeout_seconds": 5
+      },
+      {
+        "id": "test_reminder",
+        "source": "claude/hooks/test_reminder.py",
+        "timeout_seconds": 10
+      }
+    ]
+  },
   "context_gates": [
+    {
+      "id": "discovery-nudge",
+      "source": "claude/hooks/discovery-nudge.py",
+      "timeout_seconds": 5
+    },
+    {
+      "id": "review_nudge",
+      "source": "claude/hooks/review_nudge.py",
+      "timeout_seconds": 5
+    },
     {
       "id": "serena_preference_injection",
       "source": "claude/hooks/serena_preference_injection.py",
@@ -134,6 +246,28 @@
       "id": "session_status",
       "source": "claude/hooks/session_status.py",
       "timeout_seconds": 10
+    },
+    {
+      "id": "project_bootstrap",
+      "source": "scripts/pi_project_bootstrap.py",
+      "timeout_seconds": 15
+    }
+  ],
+  "stop_gates": [
+    {
+      "id": "stop_hook",
+      "source": "harness/bin/pi_stop_hook.py",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "oracle_downgrade_stop",
+      "source": "claude/hooks/oracle_downgrade_stop.py",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "validate_no_shirking",
+      "source": "claude/hooks/validate_no_shirking.py",
+      "timeout_seconds": 30
     }
   ]
 }

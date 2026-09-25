@@ -29,32 +29,24 @@ except ModuleNotFoundError:  # Imported by a path-based test module from the rep
 
 try:
     from pi_agent_surface import (
-        PI_HOOK_SUPPORT,
         PI_MCP_CONFIG,
         PI_PLUGIN_ROOT,
         PI_SKILL_DIRS,
+        pi_gate_sources as _pi_gate_sources,
         pi_status as _pi_status,
-        ready_bash_gates as _pi_ready_bash_gates,
-        ready_context_gates as _pi_ready_context_gates,
-        ready_file_gates as _pi_ready_file_gates,
-        ready_read_gates as _pi_ready_read_gates,
-        ready_session_gates as _pi_ready_session_gates,
+        pi_tool_targets as _pi_tool_targets,
         render_gate_inventory as _render_pi_gate_inventory,
         render_package as _render_pi_package,
         validate_adapter as _validate_pi_adapter,
     )
 except ModuleNotFoundError:
     from tools.pi_agent_surface import (
-        PI_HOOK_SUPPORT,
         PI_MCP_CONFIG,
         PI_PLUGIN_ROOT,
         PI_SKILL_DIRS,
+        pi_gate_sources as _pi_gate_sources,
         pi_status as _pi_status,
-        ready_bash_gates as _pi_ready_bash_gates,
-        ready_context_gates as _pi_ready_context_gates,
-        ready_file_gates as _pi_ready_file_gates,
-        ready_read_gates as _pi_ready_read_gates,
-        ready_session_gates as _pi_ready_session_gates,
+        pi_tool_targets as _pi_tool_targets,
         render_gate_inventory as _render_pi_gate_inventory,
         render_package as _render_pi_package,
         validate_adapter as _validate_pi_adapter,
@@ -138,6 +130,9 @@ SHARED_HOOK_SUPPORT = {
     # Every Serena-aware gate recognizes the bundled server's tool names on
     # every host through this one helper.
     "claude/hooks/_serena_tools.py",
+    # Host detection and the captured Codex spawn_agent payload mapping, imported
+    # at module scope by every agent-dispatch gate. Omitting it crashes them.
+    "claude/hooks/_agent_dispatch.py",
 }
 SHARED_RUNTIME_SUPPORT = {
     "bin/escapement-worktree",
@@ -165,10 +160,10 @@ CODEX_HOOK_SUPPORT = {
     # Codex Bash policy gates execute through one in-process dispatcher to avoid
     # multiplying interpreter startup and filesystem pressure per tool call.
     "claude/hooks/codex_pretool_dispatch.py",
-    # Retain partial hook sources for isolated fixtures and byte-parity checks
-    # without registering them against an unverified Codex payload boundary.
-    "claude/hooks/root_checkout_guard.py",
     "claude/hooks/_local_judge_client.py",
+    # prepatch_failure_gate.py loads its verifier from <plugin root>/harness/bin.
+    # Without it the gate finds no verifier and allows every landing unexamined.
+    "harness/bin/prepatch_verify.py",
     # merge_authorization_gate.py resolves this sibling via its plugin-relative
     # path. Without it, an explicitly authorized Codex repository is denied
     # fail-closed because the policy reader cannot be imported.
@@ -306,7 +301,47 @@ def _codex_plugin_command(command: str) -> str:
     return command
 
 
-def _render_codex_plugin_hooks(manifest: dict[str, Any]) -> str:
+def _read_json_or_none(path: Path) -> dict[str, Any] | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _codex_group_identity(group: dict[str, Any]) -> tuple[str, str]:
+    """A hook group's identity across releases: its matcher and script path,
+    not its arguments (the Bash dispatcher's gate list grows)."""
+    command = group["hooks"][0]["command"]
+    script = command.split('"', 2)[1] if '"' in command else command
+    return group.get("matcher", ""), script
+
+
+def _keep_trusted_positions(
+    hooks: dict[str, list[dict[str, Any]]], previous: dict[str, Any] | None
+) -> dict[str, list[dict[str, Any]]]:
+    """Order each event's groups as the previous release did, new groups last.
+
+    Codex keys hook trust by ``<event>:<group index>:<hook index>`` and hashes
+    the definition found there, so inserting a group ahead of others silently
+    untrusts every group it displaces. Anchoring on the committed file keeps
+    the grants the user already made valid; only new or changed hooks need
+    review.
+    """
+    if not previous:
+        return hooks
+    ordered: dict[str, list[dict[str, Any]]] = {}
+    for event, groups in hooks.items():
+        rank = {
+            _codex_group_identity(group): index
+            for index, group in enumerate(previous.get("hooks", {}).get(event, []))
+        }
+        ordered[event] = sorted(
+            groups, key=lambda group: rank.get(_codex_group_identity(group), len(rank))
+        )
+    return ordered
+
+
+def _render_codex_plugin_hooks(manifest: dict[str, Any], previous: dict[str, Any] | None = None) -> str:
     hooks: dict[str, list[dict[str, Any]]] = {}
     bash_sources: list[str] = []
     bash_timeouts: list[int] = []
@@ -363,6 +398,7 @@ def _render_codex_plugin_hooks(manifest: dict[str, Any]) -> str:
             if timeout is not None:
                 item["hooks"][0]["timeout"] = timeout
             hooks.setdefault(event["event"], []).append(item)
+    hooks = _keep_trusted_positions(hooks, previous)
     return json.dumps({"hooks": hooks}, indent=2, sort_keys=True) + "\n"
 
 
@@ -595,13 +631,18 @@ def rendered_targets(
         root / docs["pi"]["target"]: _render_document(root, manifest, identity, "pi"),
         root / "package.json": _render_pi_package(identity),
         root / PI_PLUGIN_ROOT / "gates.json": _render_pi_gate_inventory(manifest),
-        root / PI_PLUGIN_ROOT / "extensions" / "index.ts": (
-            root / "agent-surfaces" / "hosts" / "pi" / "extensions" / "index.ts"
-        ).read_text(encoding="utf-8"),
+        # Every module of the Pi extension: index.ts is the entry package.json
+        # names, and it imports its siblings relatively.
+        **{
+            root / PI_PLUGIN_ROOT / "extensions" / module.name: module.read_text(encoding="utf-8")
+            for module in sorted((root / "agent-surfaces" / "hosts" / "pi" / "extensions").glob("*.ts"))
+        },
         root / ".codex" / "hooks.json": _render_codex_hooks(manifest),
         root / ".agents" / "plugins" / "marketplace.json": _render_codex_marketplace(),
         root / CODEX_PLUGIN_ROOT / ".codex-plugin" / "plugin.json": _render_codex_plugin_manifest(identity, manifest),
-        root / CODEX_PLUGIN_ROOT / "hooks" / "hooks.json": _render_codex_plugin_hooks(manifest),
+        root / CODEX_PLUGIN_ROOT / "hooks" / "hooks.json": _render_codex_plugin_hooks(
+            manifest, _read_json_or_none(root / CODEX_PLUGIN_ROOT / "hooks" / "hooks.json")
+        ),
         # Escapement-owned MCP servers, one file per host package.
         root / CODEX_PLUGIN_ROOT / MCP_CONFIG_NAME: _render_mcp_config(manifest, "codex"),
         root / CLAUDE_PLUGIN_ROOT / MCP_CONFIG_NAME: _render_mcp_config(manifest, "claude"),
@@ -660,21 +701,11 @@ def rendered_targets(
         if source_path.exists():
             targets[root / CODEX_PLUGIN_ROOT / source] = source_path.read_text(encoding="utf-8")
 
-    # Every Pi gate list. gates.json names a gate by path and the dispatcher
-    # opens it from the plugin root, so a gate listed but not vendored is a gate
-    # that cannot run -- the inventory looks right and the brake is not there.
-    pi_hook_sources = {
-        gate["source"]
-        for gate in [
-            *_pi_ready_bash_gates(manifest),
-            *_pi_ready_file_gates(manifest),
-            *_pi_ready_read_gates(manifest),
-            *_pi_ready_context_gates(manifest),
-            *_pi_ready_session_gates(manifest),
-        ]
-    }
-    pi_hook_sources.update(SHARED_HOOK_SUPPORT | PI_HOOK_SUPPORT)
-    for source in sorted(pi_hook_sources):
+    # Every Pi gate and every sibling module it imports. gates.json names a
+    # gate by path and the dispatcher opens it from the plugin root, so a gate
+    # listed but not vendored is a gate that cannot run -- the inventory looks
+    # right and the brake is not there.
+    for source in sorted(_pi_gate_sources(manifest, root, SHARED_HOOK_SUPPORT)):
         source_path = root / source
         if source_path.exists():
             targets[root / PI_PLUGIN_ROOT / source] = source_path.read_text(encoding="utf-8")
@@ -931,7 +962,7 @@ def validate_manifest(root: Path, manifest: dict[str, Any]) -> list[str]:
             _validate_host_entry("hook", item_id, "pi", hosts["pi"], errors)
             for fixture in hosts["pi"].get("fixtures", []):
                 _validate_fixture(root, "hook", item_id, "pi", fixture, errors)
-            _validate_pi_events(manifest, item_id, hosts["pi"], errors)
+            _validate_pi_events(root, manifest, hook, errors)
         elif _pi_status(manifest, hook) is None:
             errors.append(f"hook {item_id}: missing host pi ({ALL_HOSTS_POLICY})")
         codex = hosts.get("codex", {})
@@ -1017,24 +1048,35 @@ def validate_manifest(root: Path, manifest: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _validate_pi_events(manifest: dict[str, Any], item_id: str, entry: dict[str, Any], errors: list[str]) -> None:
-    """A Pi event the extension does not translate is a gate that never runs."""
+def _validate_pi_events(root: Path, manifest: dict[str, Any], hook: dict[str, Any], errors: list[str]) -> None:
+    """A Pi event the extension does not translate is a gate that never runs,
+    and a Pi gate whose file is absent is a gate the package cannot carry."""
+    item_id = hook.get("id", "<missing>")
+    entry = hook.get("hosts", {}).get("pi", {})
     adapter = manifest.get("adapters", {}).get("pi", {})
-    tool_targets = {
-        adapter.get("target_matcher"),
-        adapter.get("read_target_matcher"),
-        *adapter.get("file_target_matchers", []),
-    }
+    try:
+        tool_targets = set(_pi_tool_targets(adapter))
+    except KeyError:
+        tool_targets = set()  # validate_adapter reports the broken mapping
+    tool_events = (adapter.get("source_event"), adapter.get("post_tool_source_event"))
+    whole_events = (
+        adapter.get("context_source_event"),
+        adapter.get("session_source_event"),
+        adapter.get("stop_source_event"),
+    )
     for event in entry.get("events", []):
         name, matcher = event.get("event"), event.get("matcher")
-        if name == adapter.get("source_event"):
+        if name in tool_events:
             if matcher not in tool_targets:
                 errors.append(f"hook {item_id}: Pi {name} matcher {matcher!r} is not a translated Pi tool")
-        elif name not in (adapter.get("context_source_event"), adapter.get("session_source_event")):
+        elif name not in whole_events:
             errors.append(f"hook {item_id}: Pi event {name!r} is not translated by the Pi adapter")
         timeout = event.get("timeout_seconds")
         if not isinstance(timeout, int) or timeout <= 0:
             errors.append(f"hook {item_id}: Pi event needs a positive integer timeout_seconds")
+    source = entry.get("source") or hook.get("source")
+    if entry.get("status") == "ready" and source and not (root / source).is_file():
+        errors.append(f"hook {item_id}: Pi gate source does not exist, so the Pi package cannot carry it: {source}")
 
 
 def validate_codex_surfaces(targets: dict[Path, str], manifest: dict[str, Any]) -> list[str]:

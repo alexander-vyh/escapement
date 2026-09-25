@@ -10,6 +10,8 @@ Run from anywhere with:
   python -m pytest ~/.claude/hooks/tests/test_validate_no_shirking.py -v
 """
 
+from __future__ import annotations
+
 import io
 import importlib.util
 import json
@@ -80,8 +82,13 @@ def _make_transcript(agent_text: str) -> str:
     return f.name
 
 
-def _run_main(hook_event: str, command: str = "", transcript_path: str = "") -> bool:
-    """Run main() with the given hook input; return True if it denied (SystemExit(2))."""
+def _hook_result(hook_event: str, command: str = "", transcript_path: str = "") -> dict | None:
+    """Run main() and return its stdout JSON, or None when it printed nothing.
+
+    Asserts the host contract every host honours: the verdict is the JSON on
+    stdout and the exit status is 0. The old gate printed the JSON and exited 2;
+    Claude discards stdout on exit 2, so the block reason never reached the agent.
+    """
     from validate_no_shirking import main
 
     payload: dict = {"hook_event_name": hook_event, "transcript_path": transcript_path}
@@ -89,35 +96,36 @@ def _run_main(hook_event: str, command: str = "", transcript_path: str = "") -> 
         payload["tool_name"] = "Bash"
         payload["tool_input"] = {"command": command}
 
-    stdin_data = json.dumps(payload)
+    captured = io.StringIO()
+    code = 0
     try:
-        with patch("sys.stdin", io.StringIO(stdin_data)):
-            main()
-        return False
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))), patch("sys.stdout", captured):
+            code = main() or 0
     except SystemExit as exc:
-        return exc.code == 2
+        code = exc.code or 0
+    assert code == 0, f"hook must exit 0 and carry its verdict in JSON; exited {code}"
+    out = captured.getvalue().strip()
+    return json.loads(out) if out else None
+
+
+def _is_block(result: dict | None) -> bool:
+    if not result:
+        return False
+    decision = result.get("hookSpecificOutput", {}).get("permissionDecision")
+    return result.get("decision") == "block" or decision == "deny"
+
+
+def _run_main(hook_event: str, command: str = "", transcript_path: str = "") -> bool:
+    """Run main() with the given hook input; return True if it blocked or denied."""
+    return _is_block(_hook_result(hook_event, command, transcript_path))
 
 
 def _run_main_output(hook_event: str, command: str = "", transcript_path: str = "") -> dict:
     """Run main() and return the parsed JSON deny payload. Raises if hook allowed."""
-    import io as _io
-
-    from validate_no_shirking import main
-
-    payload: dict = {"hook_event_name": hook_event, "transcript_path": transcript_path}
-    if hook_event == "PreToolUse":
-        payload["tool_name"] = "Bash"
-        payload["tool_input"] = {"command": command}
-
-    stdin_data = json.dumps(payload)
-    captured = _io.StringIO()
-    try:
-        with patch("sys.stdin", _io.StringIO(stdin_data)), patch("sys.stdout", captured):
-            main()
+    result = _hook_result(hook_event, command, transcript_path)
+    if not _is_block(result):
         raise AssertionError("Expected hook to block but it allowed the action")
-    except SystemExit:
-        captured.seek(0)
-        return json.loads(captured.read())
+    return result
 
 
 # ---------------------------------------------------------------------------

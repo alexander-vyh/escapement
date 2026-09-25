@@ -13,10 +13,13 @@ this hook blocks the finishing action and forces the agent to either:
   2. Obtain explicit user approval to proceed with a known failure.
 
 Input (via stdin):
-  JSON with hook_event_name, tool_name, tool_input, transcript_path
-Exit codes:
-  0 — allow
-  2 — block (JSON output explains why)
+  JSON with hook_event_name, tool_name, tool_input, transcript_path, and on
+  Stop `last_assistant_message` (Codex always sends it; Codex transcripts are
+  not parsed, so on Codex the final message is the text this gate judges).
+Output:
+  one contract on every host: the block/deny JSON on stdout with exit 0.
+  Emitting the JSON AND exiting 2 made Claude discard the JSON (exit 2 is the
+  stderr-feedback path) and Codex treat the run as failed.
 """
 
 # PEP 604 annotations below are evaluated when each def executes, so without
@@ -765,7 +768,38 @@ def block(event_name: str, phrase: str, category: str = "uncategorized") -> NoRe
         hook_event=event_name,
     )
     print(json.dumps(_deny_output(event_name, phrase, category)))
-    sys.exit(2)
+    sys.exit(0)
+
+
+def _final_message_only(data: dict) -> list[tuple[str, str]]:
+    """The Stop payload's own final message, for hosts whose transcript is unread.
+
+    Codex Stop carries `last_assistant_message` (captured on codex-cli 0.156.1)
+    and a transcript in an undocumented format. The final message is the text
+    a shirking or stop-solicitation claim lands in, so it is judged directly.
+    A phrase from an EARLIER Codex turn is not seen: that is the whole loss.
+    """
+    final = data.get("last_assistant_message")
+    if isinstance(final, str) and final.strip():
+        return [("assistant", final)]
+    return []
+
+
+def _report_unjudged_stop(hook_event: str) -> int:
+    """Fail open, but say so: a gate that could not look must not look like a pass."""
+    _record_signal(
+        gate_name="validate_no_shirking",
+        decision="allow",
+        reason="stop payload carried no readable transcript and no last_assistant_message",
+        hook_event=hook_event,
+    )
+    print(json.dumps({
+        "systemMessage": (
+            "validate_no_shirking did not run for this stop: the payload carried "
+            "neither a readable transcript nor last_assistant_message."
+        )
+    }))
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -786,7 +820,7 @@ def main() -> int:
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {})
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-    transcript_path = data.get("transcript_path", "")
+    transcript_path = data.get("transcript_path") or ""
 
     # Decide whether this invocation is relevant
     if hook_event == "PreToolUse":
@@ -799,11 +833,15 @@ def main() -> int:
     else:
         return 0
 
-    if not transcript_path:
+    if not transcript_path and hook_event != "Stop":
         return 0
 
     # ── Phase 1: Shirking phrase detection ────────────────────────────────
-    messages = read_recent_messages(transcript_path)
+    messages = read_recent_messages(transcript_path) if transcript_path else []
+    if not messages and hook_event == "Stop":
+        messages = _final_message_only(data)
+        if not messages:
+            return _report_unjudged_stop(hook_event)
 
     if messages:
         last_assistant_idx = None

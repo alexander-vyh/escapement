@@ -42,16 +42,19 @@ def deny(reason: str) -> dict:
     }
 
 
-def advisory(message: str) -> dict:
+def advisory(message: str, event: str = "PreToolUse") -> dict:
     """A non-blocking message, on both names the hosts use for it.
 
     `systemMessage` reaches Claude and the Pi extension's diagnostics;
-    `additionalContext` is the only one Codex passes to the model.
+    `additionalContext` is the only one Codex passes to the model. `event` is
+    the event the hook is answering, since hookSpecificOutput is read per event.
+    Captured on Codex 0.156.1: PostToolUse additionalContext on an apply_patch
+    call reached the model verbatim.
     """
     return {
         "systemMessage": message,
         "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
+            "hookEventName": event,
             "additionalContext": message,
         },
     }

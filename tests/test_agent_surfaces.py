@@ -21,7 +21,9 @@ EXPECTED_CODEX_GATE = {
     "matcher": "Bash",
     "dispatcher": "codex_pretool_dispatch.py",
     "gate": "claude/hooks/test_oracle_brief_gate.py",
-    "timeout": 145,
+    # Codex kills the whole dispatcher at its hooks.json timeout, so that
+    # timeout must cover every gate's own budget plus per-gate startup.
+    "overhead_seconds_per_gate": 1,
 }
 CODEX_PLUGIN_FINAL_RESPONSE_GAP_FRAGMENT = 'python3 -B "${PLUGIN_ROOT}/claude/hooks/codex_final_response_gap.py"'
 CODEX_PLUGIN_CONTEXT_FRAGMENT = (
@@ -875,34 +877,46 @@ def test_codex_behavioral_gate_has_exact_event_shape():
         for hook in item.get("hooks", [])
         if EXPECTED_CODEX_GATE["dispatcher"] in hook.get("command", "")
         and EXPECTED_CODEX_GATE["gate"] in _dispatcher_gate_paths(hook["command"])
-        and hook.get("timeout") == EXPECTED_CODEX_GATE["timeout"]
     ]
     assert len(matches) == 1, "Codex Test Oracle Brief gate must run through one Bash dispatcher"
+    budgets = _dispatcher_gate_timeouts(matches[0]["command"])
+    assert len(budgets) == len(_dispatcher_gate_paths(matches[0]["command"]))
+    assert matches[0].get("timeout") == sum(budgets) + len(budgets) * EXPECTED_CODEX_GATE[
+        "overhead_seconds_per_gate"
+    ], "a Codex timeout below the gates' own budgets kills a gate mid-verdict"
 
 
 def test_root_checkout_guard_is_enabled_only_where_command_cwd_is_verified():
-    """Codex cannot block when its hook payload omits exec-command workdir."""
+    """Codex runs the guard on apply_patch only.
+
+    Codex resolves a patch's relative paths against the turn cwd, which is the
+    payload `cwd` (captured in claude/hooks/tests/fixtures/codex_hook_payloads.json).
+    Its shell tool's per-command working directory is not in the payload, so the
+    guard must never be dispatched for Bash.
+    """
     manifest = json.loads(MANIFEST.read_text())
     entries = [hook for hook in manifest["hooks"] if hook["id"] == "root_checkout_guard"]
     assert len(entries) == 1, "root_checkout_guard must have exactly one manifest entry"
     entry = entries[0]
     assert entry["source"] == "claude/hooks/root_checkout_guard.py"
     codex = entry["hosts"]["codex"]
-    assert codex["status"] == "partial"
-    assert codex.get("events", []) == []
-    assert "per-command working directory" in codex["unsupported_reason"]
+    assert codex["status"] == "ready"
+    assert {(event["event"], event["matcher"]) for event in codex["events"]} == {
+        ("PreToolUse", "apply_patch")
+    }
     assert entry["hosts"]["claude"]["status"] == "ready"
 
     codex_hooks = json.loads((CODEX_WRAPPER / "hooks" / "hooks.json").read_text())[
         "hooks"
     ]
     codex_matchers = {
-        item.get("matcher", "")
-        for item in codex_hooks.get("PreToolUse", [])
+        (event, item.get("matcher", ""))
+        for event, items in codex_hooks.items()
+        for item in items
         for hook in item.get("hooks", [])
         if hook.get("command") == CODEX_PLUGIN_ROOT_CHECKOUT_GUARD_FRAGMENT
     }
-    assert codex_matchers == set()
+    assert codex_matchers == {("PreToolUse", "apply_patch")}
     bash_dispatchers = [
         hook["command"]
         for item in codex_hooks.get("PreToolUse", [])

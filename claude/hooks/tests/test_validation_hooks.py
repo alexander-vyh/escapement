@@ -483,22 +483,28 @@ class TestDesignDocLocationGuard:
         assert err == ""
 
     def test_design_doc_path_warns(self):
-        """Writing to docs/plans/*design* emits a warning on stderr."""
+        """Writing to docs/plans/*design* hands the agent the openspec redirect.
+
+        It must arrive as PostToolUse additionalContext: an exit-0 PostToolUse
+        hook's stderr reaches neither the model nor, outside verbose mode, the
+        user, which is where this warning used to go.
+        """
         code, out, err = _run_hook("design_doc_location_guard", "PostToolUse",
                                    tool_name="Write",
                                    file_path="docs/plans/2026-03-20-auth-design.md")
         assert code == 0  # Advisory only — never blocks
-        assert out == ""  # No stdout JSON
-        assert "openspec/changes/" in err
+        hook_output = json.loads(out)["hookSpecificOutput"]
+        assert hook_output["hookEventName"] == "PostToolUse"
+        assert "openspec/changes/" in hook_output["additionalContext"]
+        assert "permissionDecision" not in hook_output
 
     def test_edit_design_doc_warns(self):
-        """Editing docs/plans/*design* also warns on stderr."""
+        """Editing docs/plans/*design* at an absolute path also warns."""
         code, out, err = _run_hook("design_doc_location_guard", "PostToolUse",
                                    tool_name="Edit",
                                    file_path="/Users/me/project/docs/plans/feature-design.md")
         assert code == 0
-        assert out == ""
-        assert "advisory" in err.lower()
+        assert "openspec/changes/" in json.loads(out)["hookSpecificOutput"]["additionalContext"]
 
     def test_plans_non_design_allows(self):
         """Files in docs/plans/ without 'design' in the name are silently allowed."""

@@ -1,9 +1,16 @@
 # Pi Adapter Notes
 
-Pi receives Escapement's ready Bash policy gates through the same bundled Python
-dispatcher used by Codex. The TypeScript extension translates Pi events only;
-the Python sources remain the workflow-policy authority.
+Pi runs Escapement's ready gates through the same bundled Python dispatcher
+used by Codex. The TypeScript extension only translates Pi events; the Python
+sources remain the workflow-policy authority. Translated events:
 
-Pi does not currently claim Claude-only Agent/team hooks or mechanical
-final-response interception. Those capabilities remain unsupported rather than
-being approximated with prose.
+- `tool_call` becomes PreToolUse for `bash`, `read`, `write`, `edit`, `subagent`
+  (as Agent, including workflowScript children), and MCP calls.
+- `tool_result` becomes PostToolUse.
+- `before_agent_start` becomes UserPromptSubmit.
+- `session_start` becomes SessionStart.
+- `agent_end` becomes Stop. A blocking Stop gate continues the run with a
+  follow-up message.
+
+The continuation harness's scheduled wakeup and task-mode re-entry are not
+ported to this host.

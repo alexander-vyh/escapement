@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Claude Code hook: nudge toward /review when a prompt looks like a review request.
+"""UserPromptSubmit hook: nudge toward /review when a prompt looks like a review request.
 
-Fires on UserPromptSubmit. If the prompt contains review-intent language
-(e.g., "review this PR", "code review", "look at this PR"), emits a
-systemMessage suggesting /review or manual team dispatch. Advisory only.
+Fires on UserPromptSubmit (Claude Code, Codex; Pi runs it at before_agent_start).
+If the prompt contains review-intent language (e.g., "review this PR", "code
+review", "look at this PR"), it adds a nudge suggesting /review or manual team
+dispatch to the turn's context. Advisory only.
+
+Every host sends the prompt as the top-level `prompt` field and hands
+`hookSpecificOutput.additionalContext` to the model; `systemMessage` alone only
+reaches the user. This hook used to read `user_prompt`, so it never fired.
 
 Input (via stdin):
-  JSON with hook_event_name, session_id, user_prompt
+  JSON with hook_event_name, prompt
 Exit codes:
   0 — always (advisory only, never blocks)
 """
@@ -14,6 +19,10 @@ Exit codes:
 import json
 import re
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _host_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -85,18 +94,14 @@ def main() -> int:
     if hook_event != "UserPromptSubmit":
         return 0
 
-    prompt = (
-        data.get("user_prompt", "")
-        or data.get("tool_input", {}).get("prompt", "")
-    )
-    if not prompt:
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str) or not prompt:
         return 0
 
     if not looks_like_review_request(prompt):
         return 0
 
-    # Emit advisory system message
-    json.dump({"systemMessage": NUDGE_MESSAGE}, sys.stdout)
+    print(json.dumps(_host_output.advisory(NUDGE_MESSAGE, "UserPromptSubmit")))
     return 0
 
 

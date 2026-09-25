@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1288 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1252 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -48,6 +48,7 @@ import winddown_outage_sentinel as _wos  # noqa: E402
 import datetime as _dt2  # noqa: E402
 from beads_task_state import check_task_root_outcome, check_task_scope  # noqa: E402
 from execution_stop_adapter import decide_task_mode  # noqa: E402
+from gate_signal_bridge import record_gate_signal as _record_gate_signal  # noqa: E402
 
 # State root is the standard per-user location (env-overridable), NOT relative
 # to where this code is installed — so dev-copy and installed-copy share state
@@ -928,43 +929,6 @@ def _check_bd_queue_implicit(
     if any(_created_at_in_scope(it, watermark) for it in seen.values()):
         return ("block", "implicit_queue_scoped")
     return ("allow", "implicit_queue_scoped_drained")
-
-
-def _record_gate_signal(decision: str, reason: str, session_id: str, notes: str = "") -> None:
-    """Bridge a Stop-gate decision to `.beads/.gate-signal.jsonl` (corpus-bridge).
-
-    harness/bin is state-only and cannot import claude/hooks/_gate_signal, so we
-    mirror its line shape + .beads resolution (BEADS_DIR, else walk up from cwd).
-    REQUIRED because the half-life toolchain and the running launchd monitor read
-    ONLY `.gate-signal.jsonl`; a scope decision logged only to incidents.jsonl is
-    invisible to half-life review (the corpus-split gap the 858 panel flagged).
-    Best-effort — never fails the hook.
-    """
-    try:
-        beads = None
-        env = os.environ.get("BEADS_DIR")
-        if env and pathlib.Path(env).is_dir():
-            beads = pathlib.Path(env)
-        else:
-            cwd = pathlib.Path(os.getcwd()).resolve()
-            for parent in [cwd, *cwd.parents]:
-                if (parent / ".beads").is_dir():
-                    beads = parent / ".beads"
-                    break
-        if beads is None:
-            return
-        line = {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "gate": "continuation-harness",
-            "decision": decision,
-            "reason": reason,
-            "session_id": session_id,
-            "extras": {"notes": notes} if notes else {},
-        }
-        with (beads / ".gate-signal.jsonl").open("a") as f:
-            f.write(json.dumps(line) + "\n")
-    except OSError:
-        pass
 
 
 def _log_incident(record: dict) -> None:

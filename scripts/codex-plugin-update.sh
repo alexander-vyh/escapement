@@ -174,6 +174,15 @@ python3 "$REPO_DIR/scripts/install_codex_agent_roles.py" \
   "$plugin_root/agents" \
   "$CODEX_STATE_HOME/agents"
 
+# Codex and Pi also read ~/.agents/skills, where Pi lets an old copy of an
+# Escapement skill replace the shipped one. Move differing copies aside (never
+# delete); beads-execution there is managed by the migration above.
+python3 "$REPO_DIR/scripts/retire_shadowing_skills.py" \
+  "$authoritative_root/skills" \
+  "$HOME/.agents/skills" \
+  "$HOME/.agents/skills-retired" \
+  --keep beads-execution
+
 if [[ -f "$GLOBAL_SKILL" ]] && ! cmp -s "$authoritative_skill" "$GLOBAL_SKILL"; then
   echo "FATAL: effective global Beads skill does not match the installed plugin" >&2
   exit 1

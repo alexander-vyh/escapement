@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Claude Code hook: PostToolUse test reminder after file edits.
+"""PostToolUse hook: test reminder after file edits.
 
-Fires after Write and Edit tool calls. If the edited file is a code file
-(not docs/config) and the project has test infrastructure, emits a
-systemMessage reminding the agent to run tests — with the likely test
-command auto-detected.
+Fires after Write and Edit tool calls (Claude Code; Pi maps its write/edit onto
+them) and after apply_patch (Codex). If an edited file is a code file (not
+docs/config) and the project has test infrastructure, it reminds the agent to
+run tests — with the likely test command auto-detected.
 
-Cooldown: at most one reminder per 60 seconds per session.
+The reminder is for the agent, so it goes out as
+`hookSpecificOutput.additionalContext`, the channel every host hands to the
+model after a tool call (Codex shows a bare `systemMessage` only in its UI);
+`systemMessage` carries the same text for the user.
+
+Cooldown: at most one reminder per 60 seconds per session, keyed by the
+payload's session_id.
 
 Exit codes:
   0 — always (advisory only, never blocks)
@@ -18,9 +24,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _host_output  # noqa: E402
+
+try:
+    from _codex_patch import payload_targets as _patch_targets
+except ImportError:  # pragma: no cover - fail open: an unread patch reminds nobody
+    def _patch_targets(*_args, **_kwargs):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -55,8 +71,15 @@ _NON_CODE_FILENAMES = frozenset({
 # State management (cooldown)
 # ---------------------------------------------------------------------------
 
-def _state_file() -> Path:
-    session_id = os.environ.get("CLAUDE_SESSION_ID") or str(os.getppid())
+_SESSION_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+
+
+def _state_file(session_id: str = "") -> Path:
+    # The payload names the session on every host. The process tree does not:
+    # a host that spawns each hook through a fresh shell gives it a new parent
+    # every call, which silently disables the cooldown.
+    if not _SESSION_RE.fullmatch(session_id or ""):
+        session_id = os.environ.get("CLAUDE_SESSION_ID") or str(os.getppid())
     return Path(f"/tmp/test_reminder_{session_id}.ts")
 
 
@@ -74,14 +97,14 @@ def _write_last_fire(path: Path, ts: float) -> None:
         pass
 
 
-def _cooldown_active() -> bool:
-    state = _state_file()
+def _cooldown_active(session_id: str = "") -> bool:
+    state = _state_file(session_id)
     last = _read_last_fire(state)
     return (time.time() - last) < _COOLDOWN_SECONDS
 
 
-def _record_fire() -> None:
-    _write_last_fire(_state_file(), time.time())
+def _record_fire(session_id: str = "") -> None:
+    _write_last_fire(_state_file(session_id), time.time())
 
 
 # ---------------------------------------------------------------------------
@@ -244,49 +267,53 @@ def _detect_test_command(project_root: str) -> str | None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def edited_files(data: dict) -> list[str]:
+    """Every file the finished call wrote: one per Write/Edit, any per patch."""
+    tool_name = data.get("tool_name", "")
+    tool_input = data.get("tool_input", {})
+    if not isinstance(tool_input, dict):
+        return []
+    if tool_name in ("Write", "Edit"):
+        filepath = tool_input.get("file_path", "")
+        return [filepath] if filepath else []
+    if tool_name == "apply_patch":
+        found = _patch_targets(tool_input, str(data.get("cwd") or "")) or []
+        return [path for kind, path in found if kind != "Delete"]
+    return []
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:
         return 0
 
-    tool_name = data.get("tool_name", "")
-    tool_input = data.get("tool_input", {})
-
-    # Only fire for Write and Edit
-    if tool_name not in ("Write", "Edit"):
-        return 0
-
-    # Extract file path
-    if not isinstance(tool_input, dict):
-        return 0
-    filepath = tool_input.get("file_path", "")
-    if not filepath:
-        return 0
-
-    # Skip non-code files
-    if not _is_code_file(filepath):
-        return 0
-
-    # Find project root
-    project_root = _find_git_root(filepath)
-    if not project_root:
-        return 0
-
-    # Detect test infrastructure
-    test_cmd = _detect_test_command(project_root)
+    test_cmd = None
+    for filepath in edited_files(data):
+        # Skip non-code files
+        if not _is_code_file(filepath):
+            continue
+        # Find project root
+        project_root = _find_git_root(filepath)
+        if not project_root:
+            continue
+        # Detect test infrastructure
+        test_cmd = _detect_test_command(project_root)
+        if test_cmd:
+            break
     if not test_cmd:
         return 0
 
     # Check cooldown
-    if _cooldown_active():
+    session_id = str(data.get("session_id") or "")
+    if _cooldown_active(session_id):
         return 0
 
     # Fire the reminder
-    _record_fire()
+    _record_fire(session_id)
 
     message = f"You modified code — run tests to verify. Run `{test_cmd}`"
-    json.dump({"systemMessage": message}, sys.stdout)
+    json.dump(_host_output.advisory(message, "PostToolUse"), sys.stdout)
 
     return 0
 
