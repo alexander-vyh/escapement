@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Run manifest-declared Codex Bash gates in one interpreter process."""
+"""Run manifest-declared hook gates for Codex and Pi in one interpreter process.
+
+Codex sends PreToolUse Bash payloads. Pi sends every event it translates
+(PreToolUse, PostToolUse, UserPromptSubmit, SessionStart, Stop), so the
+aggregate carries the payload's own event name and a gate's top-level
+`{"decision": "block", "reason": ...}` -- the Stop and PostToolUse block
+contract -- alongside the PreToolUse permission decision.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +23,14 @@ from typing import Any
 
 
 DECISION_STRENGTH = {"allow": 1, "ask": 2, "deny": 3}
+# Neither host this dispatcher serves can hold a call for confirmation. Codex
+# runs a PreToolUse "ask" as if it were allowed and shows the model nothing
+# (captured on codex-cli 0.156.1), and Pi has no confirmation path at all. An
+# ask that silently becomes an allow is no gate, so it is emitted as a deny;
+# the "[ask]" prefix on its reason keeps what the gate meant, and ask-once
+# gates still let the retry through.
+HOST_DECISION = {"allow": "allow", "ask": "deny", "deny": "deny"}
+DEFAULT_EVENT = "PreToolUse"
 MAX_PAYLOAD_BYTES = 1_048_576
 
 
@@ -142,10 +157,15 @@ def _run_gate(
 
     if failure is None and exit_status not in (None, 0):
         failure = f"exited with status {exit_status}"
+    return _gate_result(path, stdout.getvalue(), failure)
+
+
+def _gate_result(
+    path: Path, stdout: str, failure: str | None
+) -> tuple[dict[str, Any] | None, str | None]:
     if failure is not None:
         return None, f"Escapement gate {path.name} failed: {failure}"
-
-    rendered = stdout.getvalue().strip()
+    rendered = stdout.strip()
     if not rendered:
         return None, None
     try:
@@ -158,15 +178,19 @@ def _run_gate(
 
 
 def _aggregate(
-    results: list[dict[str, Any]], warnings: list[str]
+    results: list[dict[str, Any]], warnings: list[str], event: str = DEFAULT_EVENT
 ) -> dict[str, Any]:
     decisions: list[tuple[str, str]] = []
     contexts: list[str] = []
     messages: list[str] = []
+    blocks: list[str] = []
     for result in results:
         message = result.get("systemMessage")
         if isinstance(message, str):
             messages.append(message)
+        if result.get("decision") == "block":
+            reason = result.get("reason")
+            blocks.append(reason if isinstance(reason, str) else "")
         hook = result.get("hookSpecificOutput")
         if not isinstance(hook, dict):
             continue
@@ -179,10 +203,13 @@ def _aggregate(
             decisions.append((decision, reason if isinstance(reason, str) else ""))
 
     output: dict[str, Any] = {}
-    hook_output: dict[str, Any] = {"hookEventName": "PreToolUse"}
+    if blocks:
+        output["decision"] = "block"
+        output["reason"] = "\n\n".join(_unique(blocks))
+    hook_output: dict[str, Any] = {"hookEventName": event}
     if decisions:
         strongest = max(decisions, key=lambda item: DECISION_STRENGTH[item[0]])[0]
-        hook_output["permissionDecision"] = strongest
+        hook_output["permissionDecision"] = HOST_DECISION[strongest]
         reasons = _unique(
             [f"[{decision}] {reason}" for decision, reason in decisions if reason]
         )
@@ -204,6 +231,16 @@ def _aggregate(
     if len(hook_output) > 1:
         output["hookSpecificOutput"] = hook_output
     return output
+
+
+def _event_name(payload: str) -> str:
+    """The payload's own hook event, so a Pi PostToolUse or Stop aggregate is not
+    labelled PreToolUse. Anything unreadable keeps the PreToolUse default."""
+    try:
+        event = json.loads(payload).get("hook_event_name")
+    except (json.JSONDecodeError, ValueError, AttributeError):
+        return DEFAULT_EVENT
+    return event if isinstance(event, str) and event else DEFAULT_EVENT
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -247,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             results.append(result)
         if warning is not None:
             warnings.append(warning)
-    print(json.dumps(_aggregate(results, warnings)))
+    print(json.dumps(_aggregate(results, warnings, _event_name(payload))))
     return 0
 
 

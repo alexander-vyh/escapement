@@ -28,6 +28,8 @@ or any exact expected/observed mismatch. Run the focused mutation controls with:
 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_gate_decision_replay.py
 ```
 
-Codex has no supported `tdd_gate` hook, so that cell is intentionally absent.
-The supported population is 36 cases in each of five cells: Claude TDD, Claude
-and Codex Test Oracle Brief, and Claude and Codex Outcome Assertion.
+The corpus has no Codex `tdd_gate` cell: its recorded rows are Write/Edit
+payloads, while Codex runs the gate on `apply_patch` (behavior covered by
+`claude/hooks/tests/test_codex_patch_gates.py`). The labeled population is 36
+cases in each of five cells: Claude TDD, Claude and Codex Test Oracle Brief, and
+Claude and Codex Outcome Assertion.

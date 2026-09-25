@@ -5,7 +5,16 @@ The independent oracle is filesystem shape. A primary checkout has a .git
 directory and a sibling .beads directory. A linked worktree has .git as a file,
 so explicit edits there remain allowed.
 
+Explicit-path edits are Claude's Write/Edit/NotebookEdit/MultiEdit (Pi maps its
+write/edit onto them) and Codex's apply_patch, whose every added, updated,
+deleted or moved-to file is judged. Codex resolves a patch's relative paths
+against the turn's working directory, which is the payload `cwd` (captured:
+tests/fixtures/codex_hook_payloads.json). A patch naming another environment
+resolves elsewhere and is not judged.
+
 Arbitrary process effects are outside this hook's hard-enforcement boundary.
+Codex's shell tool is one: its per-command working directory is not in the
+payload, so a relative shell target cannot be placed.
 """
 
 from __future__ import annotations
@@ -23,6 +32,11 @@ try:
     from _gate_signal import record as _record_signal
 except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
+        return None
+try:
+    from _codex_patch import payload_targets as _patch_targets
+except ImportError:  # pragma: no cover - fail open: an unread patch is not judged
+    def _patch_targets(*_args, **_kwargs):
         return None
 
 
@@ -46,7 +60,9 @@ PATH_KEY_BY_TOOL = {
     "NotebookEdit": "notebook_path",
     "MultiEdit": "file_path",
 }
-GATED_EDIT_TOOLS = frozenset(PATH_KEY_BY_TOOL)
+# Codex's apply_patch names its files inside the patch, not under a key.
+PATCH_TOOL = "apply_patch"
+GATED_EDIT_TOOLS = frozenset({*PATH_KEY_BY_TOOL, PATCH_TOOL})
 
 
 def _emit_deny(reason: str) -> NoReturn:
@@ -164,6 +180,15 @@ def _deny(operation: str, root: Path, tool_name: str) -> NoReturn:
     _emit_deny(_deny_reason(operation, root))
 
 
+def _targets(tool_name: str, tool_input: dict, cwd: Path) -> list[Path]:
+    """Every file this call changes, resolved against the call's directory."""
+    if tool_name == PATCH_TOOL:
+        found = _patch_targets(tool_input, str(cwd)) or []
+        return [_safe_resolve(Path(path)) for _kind, path in found]
+    target = _path_from_tool_input(tool_name, tool_input, cwd)
+    return [target] if target is not None else []
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
@@ -180,26 +205,24 @@ def main() -> int:
     cwd = _safe_resolve(
         Path(data.get("cwd") or data.get("workingDirectory") or os.getcwd())
     )
-    target = _path_from_tool_input(tool_name, tool_input, cwd)
-    if target is None:
-        return 0
-    root = _primary_checkout_root_for(target)
-    if root is None:
-        return 0
-    if _safe_resolve(target) == _safe_resolve(root / WAIVER_RELATIVE_PATH):
-        # An escape the gate blocks you from reaching is not an escape.
-        return 0
-    reason = _waiver_reason(root)
-    if reason is not None:
-        _record_signal(
-            gate_name="root_checkout_guard",
-            decision="waiver-accepted",
-            reason=reason,
-            tool=tool_name,
-            target=str(target),
-        )
-        return 0
-    _deny(f"{tool_name} {target}", root, tool_name)
+    for target in _targets(tool_name, tool_input, cwd):
+        root = _primary_checkout_root_for(target)
+        if root is None:
+            continue
+        if _safe_resolve(target) == _safe_resolve(root / WAIVER_RELATIVE_PATH):
+            # An escape the gate blocks you from reaching is not an escape.
+            continue
+        reason = _waiver_reason(root)
+        if reason is not None:
+            _record_signal(
+                gate_name="root_checkout_guard",
+                decision="waiver-accepted",
+                reason=reason,
+                tool=tool_name,
+                target=str(target),
+            )
+            continue
+        _deny(f"{tool_name} {target}", root, tool_name)
     return 0
 
 

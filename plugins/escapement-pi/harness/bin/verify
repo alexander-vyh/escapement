@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# harness/bin/verify
+# Agent's verification affordance. Reads contract.json from the active thread,
+# runs verification_command, writes the result back as last_run, exits with
+# the same code as the verification command.
+#
+# Resolution is delegated to the canonical Python actor/session resolver used by
+# every hook, so this shell entrypoint cannot drift into parent-state fallback.
+
+set -u
+
+# Standard per-user state root (env-overridable); never a repo path.
+HARNESS_ROOT="${HARNESS_ROOT:-${CONTINUATION_HARNESS_HOME:-$HOME/.claude/harness}}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if ! THREAD_DIR="$(python3 "$SCRIPT_DIR/thread_identity.py" \
+    --session-id "${CLAUDE_CODE_SESSION_ID:-}" --harness-root "$HARNESS_ROOT")"; then
+  echo "verify: invalid actor identity; refusing parent-state fallback" >&2
+  exit 2
+fi
+CONTRACT="$THREAD_DIR/contract.json"
+
+if [[ ! -f "$CONTRACT" ]]; then
+  echo "verify: no contract.json at $CONTRACT" >&2
+  echo "verify: declare a contract first (e.g. via init_contract.py)" >&2
+  exit 2
+fi
+
+VERIFICATION_COMMAND="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("verification_command",""))' "$CONTRACT")"
+EXPECTED_EXIT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("expected_exit",0))' "$CONTRACT")"
+
+if [[ -z "$VERIFICATION_COMMAND" ]]; then
+  echo "verify: contract has no verification_command" >&2
+  exit 2
+fi
+
+TMP_OUT="$(mktemp)"
+trap 'rm -f "$TMP_OUT"' EXIT
+
+bash -c "$VERIFICATION_COMMAND" >"$TMP_OUT" 2>&1
+ACTUAL_EXIT=$?
+TIMESTAMP="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
+
+python3 - "$CONTRACT" "$ACTUAL_EXIT" "$TIMESTAMP" "$TMP_OUT" <<'PY'
+import json
+import sys
+
+path, exit_code, timestamp, out_path = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+
+# Keep the tail of the history bounded: a long-lived contract must not grow
+# without limit, and the recent runs are the ones that answer "is this oracle
+# still biting?".
+MAX_RUNS = 50
+
+with open(out_path) as f:
+    excerpt = f.read(4096)
+with open(path) as f:
+    c = json.load(f)
+
+run = {
+    "exit_code": exit_code,
+    "timestamp": timestamp,
+    "output_excerpt": excerpt,
+}
+
+# `last_run` stays the MOST RECENT run, because the Stop gate reads it
+# (would_block_stop._verification_passed_this_turn). History is measurement,
+# never policy — adding it must not move what the gate sees.
+c["last_run"] = run
+
+# `runs` is the append-only record (escapement-5xlj). Without it a fail -> fix ->
+# pass cycle erases the failure, so the contract file cannot answer whether an
+# oracle ever actually failed — which makes the green rate across contracts a
+# tautology and leaves escapement-v3mj's red-rate trigger unmeasurable.
+# Contracts written before this change have no `runs` key; 191 such contracts
+# exist, so treat a missing or malformed value as an empty history rather than
+# failing the verify.
+history = c.get("runs")
+if not isinstance(history, list):
+    history = []
+history.append(run)
+c["runs"] = history[-MAX_RUNS:]
+
+with open(path, "w") as f:
+    json.dump(c, f, indent=2)
+PY
+
+cat "$TMP_OUT"
+
+if [[ $ACTUAL_EXIT -eq $EXPECTED_EXIT ]]; then
+  # Tracked work completed: self-cancel this thread's ScheduleWakeup wakeups so a
+  # stale fallback can't replay a finished task list (bead escapement-0wg,
+  # part 2). Best-effort; never let pruning affect the verify result.
+  _BRIDGE="$(cd "$(dirname "$0")" && pwd)/schedule_wakeup_bridge.py"
+  [[ -f "$_BRIDGE" ]] && python3 "$_BRIDGE" --prune "$THREAD_DIR" >/dev/null 2>&1 || true
+  echo "verify: PASS (exit $ACTUAL_EXIT)"
+  exit 0
+fi
+
+echo "verify: FAIL (exit $ACTUAL_EXIT, expected $EXPECTED_EXIT)"
+exit "$ACTUAL_EXIT"

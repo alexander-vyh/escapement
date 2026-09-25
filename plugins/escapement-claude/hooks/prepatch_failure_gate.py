@@ -215,7 +215,9 @@ def _message(verdict, waiver_path: str, rejected: str = "") -> str:
         f"Reproduce: python3 harness/bin/prepatch_verify.py --commit HEAD\n\n"
         f"Either add a test that fails without the production change, or write why "
         f"none applies to {waiver_path} (20+ characters, naming something beyond the "
-        f"changed file names), or say 'proceed'."
+        f"changed file names), or say 'proceed' where your host asks you to confirm. "
+        f"Hosts without a confirm prompt (Codex, Pi) block this landing instead, so "
+        f"there the test or the waiver is the way through."
     )
 
 

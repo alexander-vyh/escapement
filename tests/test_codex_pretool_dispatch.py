@@ -130,7 +130,9 @@ def test_dispatcher_preserves_healthy_messages_and_equal_precedence_reasons(
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)
     hook = output["hookSpecificOutput"]
-    assert hook["permissionDecision"] == "ask"
+    # Codex runs an "ask" call as if allowed and Pi cannot confirm, so the
+    # strongest ask leaves as a deny; the "[ask]" reasons keep the gate's intent.
+    assert hook["permissionDecision"] == "deny"
     assert hook["permissionDecisionReason"] == (
         "[ask] first ask\n\n[ask] second ask\n\n[allow] weaker allow"
     )

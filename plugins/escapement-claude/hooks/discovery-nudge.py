@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Claude Code hook: nudge toward discovery when a prompt looks like new feature work.
+"""UserPromptSubmit hook: nudge toward discovery when a prompt looks like new feature work.
 
-Fires on UserPromptSubmit. If the prompt contains implementation-intent keywords
-and no recent design doc exists in docs/plans/ or openspec/changes/, emits an "ask"
-nudge suggesting the user run /discovery first. This is advisory — the user can
-always proceed.
+Fires on UserPromptSubmit (Claude Code, Codex; Pi runs it at before_agent_start).
+If the prompt contains implementation-intent keywords and no recent design doc
+exists in docs/plans/ or openspec/changes/, it adds a nudge to the turn's
+context suggesting discovery first. Advisory — the prompt always proceeds.
+
+Every host sends the prompt as the top-level `prompt` field and reads added
+context from `hookSpecificOutput.additionalContext`. This hook used to read
+`user_prompt` and answer with a PreToolUse-only `permissionDecision`, so it
+never fired anywhere.
 
 Input (via stdin):
-  JSON with hook_event_name, session_id, user_prompt, transcript_path
+  JSON with hook_event_name, prompt, cwd
 Exit codes:
-  0 — allow or ask (never blocks)
+  0 — always (never blocks)
 """
 
 import json
@@ -18,6 +23,9 @@ import re
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _host_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -110,25 +118,11 @@ def looks_like_new_work(prompt: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
-# Output helpers
-# ---------------------------------------------------------------------------
-
-def allow() -> int:
-    """Allow silently."""
-    return 0
-
-
-def ask(hook_event: str, message: str) -> int:
-    """Prompt the user for confirmation (nudge)."""
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": hook_event,
-            "permissionDecision": "ask",
-            "permissionDecisionReason": message,
-        }
-    }))
-    return 0
+NUDGE_MESSAGE = (
+    "No design doc from the last 30 days in docs/plans/ or openspec/changes/. "
+    "If this prompt is new feature work rather than a fix or exploration, run "
+    "/discovery (the discovery skill) before implementing."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -145,29 +139,25 @@ def main() -> int:
     if hook_event != "UserPromptSubmit":
         return 0
 
-    prompt = data.get("user_prompt", "") or data.get("tool_input", {}).get("prompt", "")
-    if not prompt:
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str) or not prompt:
         return 0
 
-    # If the prompt doesn't look like new feature work, allow silently
+    # If the prompt doesn't look like new feature work, stay silent
     if not looks_like_new_work(prompt):
-        return allow()
+        return 0
 
-    # Determine the project directory from the hook payload.
-    # Claude Code passes the working directory as "cwd" in the hook JSON.
+    # The project directory is the payload's `cwd` on every host.
     # Fall back to os.getcwd() as a last resort.
     cwd = Path(data.get("cwd", "") or data.get("workingDirectory", "") or os.getcwd())
     plans_dir = cwd / "docs" / "plans"
     openspec_dir = cwd / "openspec" / "changes"
     if has_recent_design_doc(plans_dir) or has_recent_openspec_design(openspec_dir):
-        return allow()
+        return 0
 
     # No design doc and prompt looks like new work — nudge
-    return ask(
-        hook_event,
-        "I don't see a design doc for this. Is this exploratory, a fix, or "
-        "new work? If new work, run /discovery first.",
-    )
+    print(json.dumps(_host_output.advisory(NUDGE_MESSAGE, "UserPromptSubmit")))
+    return 0
 
 
 if __name__ == "__main__":

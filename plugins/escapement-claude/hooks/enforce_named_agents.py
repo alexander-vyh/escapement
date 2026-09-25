@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Claude Code hook: enforce named agents.
+"""Agent-dispatch hook: enforce named agents on every host.
 
 Enforcement:
-  - HARD BLOCK: Agent calls without `name` — anonymous agents cannot be
-    addressed via SendMessage and are never acceptable.
+  - HARD BLOCK: an agent dispatch with no name. On Claude that is an Agent
+    call without `name` (anonymous agents cannot be addressed via
+    SendMessage). On Codex it is a spawn_agent call with neither task_name nor
+    agent_type (see _agent_dispatch for the captured payload). On Pi it is a
+    pi-subagents `subagent` call with a task but no `agent`.
 
 Input (via stdin):
   JSON with hook_event_name, tool_name, tool_input
 Exit codes:
   0 — allow or deny (deny is signaled via permissionDecision JSON, not exit code)
 """
+
+from __future__ import annotations
 
 import json
 import sys
@@ -23,6 +28,8 @@ try:
 except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
+
+from _agent_dispatch import agent_dispatch, host as _host  # noqa: E402
 
 _LOG_FILE = Path.home() / ".claude" / "hooks" / "agent-dispatch.log"
 
@@ -92,6 +99,31 @@ rejected) and is logged to the gate-signal corpus. You do NOT need to
 disable this gate.\
 """
 
+_BLOCK_NO_NAME_CODEX = """\
+🚫 SPAWN BLOCKED — spawn_agent carries neither task_name nor agent_type.
+
+An unnamed spawned agent cannot be told apart afterwards: its results, its
+follow-up messages and the gate-signal log have nothing to refer to it by.
+
+Repair (the only change needed): call spawn_agent again with a task_name that
+says what the agent is for, e.g. task_name="explorer" or
+task_name="test_reviewer". An agent_type also counts.\
+"""
+
+_BLOCK_NO_NAME_PI = """\
+🚫 SUBAGENT BLOCKED — this subagent call has a task but no `agent`.
+
+The agent is the child's identity: without one, its result, its status and
+the gate-signal log have nothing to refer to it by.
+
+Repair (the only change needed): call subagent again with `agent` set to the
+agent that should do the task, e.g. {agent: "scout", task: "..."} or
+{agent: "adversarial-reviewer", task: "..."}. {action: "list"} shows the
+agents you can run.\
+"""
+
+_BLOCK_TEXT = {"codex": _BLOCK_NO_NAME_CODEX, "pi": _BLOCK_NO_NAME_PI}
+
 
 def main() -> int:
     try:
@@ -102,15 +134,14 @@ def main() -> int:
     tool_name = data.get("tool_name", "")
     _log(f"CALLED tool_name={tool_name!r}")
 
-    if tool_name != "Agent":
+    tool_input = agent_dispatch(data)
+    if tool_input is None:
         return 0
+    host = _host(data)
+    block_text = _BLOCK_TEXT.get(host, _BLOCK_NO_NAME)
 
-    tool_input = data.get("tool_input", {})
-    if not isinstance(tool_input, dict):
-        return 0
-
-    agent_name = (tool_input.get("name") or "").strip()
-    _log(f"AGENT name={agent_name!r} desc={tool_input.get('description', '')!r}")
+    agent_name = str(tool_input.get("name") or "").strip()
+    _log(f"AGENT host={host} name={agent_name!r} desc={tool_input.get('description', '')!r}")
 
     # HARD BLOCK: no name — unless a valid waiver is supplied (escape path,
     # gate-design.md Rule 1). The waiver reason is validated for substance
@@ -134,6 +165,7 @@ def main() -> int:
                 gate_name="enforce_named_agents",
                 decision="deny",
                 reason=f"invalid waiver: {error}",
+                host=host,
             )
             result = {
                 "hookSpecificOutput": {
@@ -141,7 +173,7 @@ def main() -> int:
                     "permissionDecision": "deny",
                     "permissionDecisionReason": (
                         f"🚫 AGENT BLOCKED — waiver rejected: {error}\n\n"
-                        f"{_BLOCK_NO_NAME}"
+                        f"{block_text}"
                     ),
                 }
             }
@@ -153,12 +185,13 @@ def main() -> int:
             gate_name="enforce_named_agents",
             decision="deny",
             reason="agent dispatched without name parameter",
+            host=host,
         )
         result = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": _BLOCK_NO_NAME,
+                "permissionDecisionReason": block_text,
             }
         }
         json.dump(result, sys.stdout)
@@ -170,6 +203,7 @@ def main() -> int:
         decision="allow",
         reason="named agent",
         name=agent_name,
+        host=host,
     )
     return 0
 

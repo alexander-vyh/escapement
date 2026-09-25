@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Claude Code hook: TDD enforcement — test before implementation.
+"""PreToolUse hook: TDD enforcement — test before implementation.
 
-Fires as PreToolUse on Write and Edit.
+Fires as PreToolUse on Write, Edit and NotebookEdit (Claude Code; Pi maps its
+write/edit onto them) and on apply_patch (Codex). A patch can name several
+files; one that writes a test file is TDD in progress, like a Write to a test.
 
 When writing to an implementation file in a code project — one with test
 infrastructure or a language project manifest — checks that test files have
@@ -9,13 +11,18 @@ been modified in the working tree first. If no test files are modified,
 prompts the user to confirm. Greenfield counts: a project whose tests/ dir
 does not exist yet is exactly where the question is still open.
 
-Severity: ask (not block) — the user can always override.
+Severity: ask (not block) — the user can always override. Codex runs a
+PreToolUse `ask` as an allow and tells the model nothing (captured on 0.156.1,
+tests/fixtures/codex_hook_payloads.json), so on apply_patch the same question
+is a deny that fires once per file per session: re-applying the patch is the
+override, as answering the prompt is on Claude. The Pi extension runs `ask` as
+a block, so a Pi write or edit gets the same once-per-file deny, and making the
+same write or edit again is the override.
 
 Input (via stdin):
-  JSON with hook_event_name, tool_name, tool_input
+  JSON with hook_event_name, tool_name, tool_input (cwd, session_id)
 Exit codes:
-  0 — allow or ask
-  2 — deny (not used by this hook)
+  0 — always; the decision is the JSON on stdout
 """
 
 # PEP 604 annotations below are evaluated when each def executes, so without
@@ -45,7 +52,15 @@ except ImportError:  # pragma: no cover
     def _forget_seen(*_args, **_kwargs) -> None:
         return None
 
+import _host_output  # noqa: E402
+from _agent_dispatch import host as _host  # noqa: E402
 from _serena_tools import is_serena_edit  # noqa: E402
+
+try:
+    from _codex_patch import payload_targets as _patch_targets
+except ImportError:  # pragma: no cover - fail open: no patch, nothing to judge
+    def _patch_targets(*_args, **_kwargs):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -294,9 +309,94 @@ def ask(hook_event: str, message: str) -> int:
     return 0
 
 
+def ask_without_prompt(message: str, session_id: str, retry: str) -> int:
+    """The same question on a host where `ask` prompts no one.
+
+    Codex runs `ask` as an allow and the Pi extension runs it as a block, so
+    neither can take "say 'proceed'" for an answer. This is a deny, made
+    escapable by the per-session dedupe: retrying the call (`retry` names how,
+    in the host's own tool words) finds the file already reported and passes.
+    Without a session id that dedupe cannot hold, so a deny would block every
+    retry -- the question is then delivered as model context instead.
+    """
+    if not session_id:
+        print(json.dumps(_host_output.advisory(message)))
+        return 0
+    print(json.dumps(_host_output.deny(
+        f"{message} To go ahead without a test, {retry}: "
+        f"this check blocks only once per file per session."
+    )))
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+def written_files(tool_name: str, tool_input: dict, cwd: str) -> list[str]:
+    """Every file this call writes: one per built-in edit, any number per patch."""
+    if tool_name == "apply_patch":
+        found = _patch_targets(tool_input, cwd) or []
+        return [path for kind, path in found if kind != "Delete"]
+    for key in _FILE_PATH_KEYS:
+        value = tool_input.get(key)
+        if value:
+            return [value]
+    return []
+
+
+def nudge_for(filepath: str, session_id: str) -> str | None:
+    """The repo-relative path to nudge about, or None when the write is fine."""
+    # Exempt file type (config, docs, scripts, etc.)?
+    if is_exempt_file(filepath):
+        return None
+
+    # Not in a git repo? Allow — not "actual dev"
+    repo_root = find_git_root(filepath)
+    if not repo_root:
+        return None
+
+    # Neither test infrastructure nor a code-project manifest? Allow — a docs
+    # or config repo is not "actual dev". Test infrastructure alone is not
+    # enough of a signal: requiring it made the gate silent on greenfield,
+    # where the presence of tests is still an open question.
+    if not (has_tests_directory(repo_root) or has_project_manifest(repo_root)):
+        return None
+
+    # --- TDD enforcement ---
+
+    # Check if any test files have been modified in the working tree
+    modified_files = get_modified_files(repo_root)
+    has_test_changes = any(is_test_file(f) for f in modified_files)
+
+    rel_path = os.path.relpath(filepath, repo_root)
+
+    if has_test_changes:
+        # The condition this gate exists to flag is resolved, so the memory of
+        # having flagged it must go too. Leaving it would silence the gate for
+        # the rest of the session once tests are touched and then abandoned.
+        _forget_seen("tdd_gate", str(session_id))
+        _record_signal(
+            gate_name="tdd_gate",
+            decision="allow",
+            reason="test files already modified in working tree",
+            file=rel_path,
+        )
+        return None
+
+    # No test files modified — nudge toward TDD, but only about a file this
+    # session has not already been nudged about. The advice does not depend on
+    # which file triggered it, and repeating it trains the reader to skip it.
+    if _already_seen("tdd_gate", str(session_id), rel_path):
+        _record_signal(
+            gate_name="tdd_gate",
+            decision="allow",
+            reason="already nudged about this file in this session",
+            file=rel_path,
+        )
+        return None
+    return rel_path
+
 
 def main() -> int:
     try:
@@ -310,88 +410,44 @@ def main() -> int:
 
     if hook_event != "PreToolUse":
         return 0
-    if tool_name not in _GATED_TOOLS and not is_serena_edit(tool_name):
+    if (tool_name not in _GATED_TOOLS and tool_name != "apply_patch"
+            and not is_serena_edit(tool_name)):
         return 0
-
-    # Extract file path from tool input (key varies by tool)
     if not isinstance(tool_input, dict):
         return 0
-    filepath = ""
-    for key in _FILE_PATH_KEYS:
-        value = tool_input.get(key)
-        if value:
-            filepath = value
-            break
-    if not filepath:
+    files = written_files(tool_name, tool_input, str(data.get("cwd") or ""))
+    if not files:
         return 0
 
-    # --- Exemption checks (fast path) ---
-
     # Writing a test file? Always allow — this IS TDD
-    if is_test_file(filepath):
+    if any(is_test_file(path) for path in files):
         return allow()
 
-    # Exempt file type (config, docs, scripts, etc.)?
-    if is_exempt_file(filepath):
+    session_id = str(data.get("session_id") or data.get("sessionId") or "")
+    nudges = [rel for rel in (nudge_for(path, session_id) for path in files) if rel]
+    if not nudges:
         return allow()
 
-    # Not in a git repo? Allow — not "actual dev"
-    repo_root = find_git_root(filepath)
-    if not repo_root:
-        return allow()
-
-    # Neither test infrastructure nor a code-project manifest? Allow — a docs
-    # or config repo is not "actual dev". Test infrastructure alone is not
-    # enough of a signal: requiring it made the gate silent on greenfield,
-    # where the presence of tests is still an open question.
-    if not (has_tests_directory(repo_root) or has_project_manifest(repo_root)):
-        return allow()
-
-    # --- TDD enforcement ---
-
-    # Check if any test files have been modified in the working tree
-    modified_files = get_modified_files(repo_root)
-    has_test_changes = any(is_test_file(f) for f in modified_files)
-
-    rel_path = os.path.relpath(filepath, repo_root)
-
-    session_id = data.get("session_id") or data.get("sessionId") or ""
-
-    if has_test_changes:
-        # The condition this gate exists to flag is resolved, so the memory of
-        # having flagged it must go too. Leaving it would silence the gate for
-        # the rest of the session once tests are touched and then abandoned.
-        _forget_seen("tdd_gate", str(session_id))
-        _record_signal(
-            gate_name="tdd_gate",
-            decision="allow",
-            reason="test files already modified in working tree",
-            file=rel_path,
-        )
-        return allow()
-
-    # No test files modified — nudge toward TDD, but only about a file this
-    # session has not already been nudged about. The advice does not depend on
-    # which file triggered it, and repeating it trains the reader to skip it.
-    if _already_seen("tdd_gate", str(session_id), rel_path):
-        _record_signal(
-            gate_name="tdd_gate",
-            decision="allow",
-            reason="already nudged about this file in this session",
-            file=rel_path,
-        )
-        return allow()
-
+    shown = "', '".join(nudges)
     _record_signal(
         gate_name="tdd_gate",
         decision="ask",
         reason="writing impl file with no test changes in working tree",
-        file=rel_path,
+        file=nudges[0] if len(nudges) == 1 else nudges,
     )
+    found = f"TDD: writing to '{shown}' but no test files have been modified yet."
+    # Only Claude prompts the user on `ask`; elsewhere the retry is the answer.
+    if tool_name == "apply_patch":
+        return ask_without_prompt(
+            f"{found} Write the failing test first.", session_id, "apply the same patch again"
+        )
+    if _host(data) == "pi":
+        return ask_without_prompt(
+            f"{found} Write the failing test first.", session_id, "make the same write or edit again"
+        )
     return ask(
         hook_event,
-        f"TDD: writing to '{rel_path}' but no test files have been modified yet. "
-        f"Write the failing test first, or say 'proceed' to skip TDD for this change.",
+        f"{found} Write the failing test first, or say 'proceed' to skip TDD for this change.",
     )
 
 

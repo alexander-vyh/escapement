@@ -1,0 +1,113 @@
+{
+  "_provenance": {
+    "captured_at": "2026-09-24",
+    "codex_cli": "0.156.1",
+    "model": "gpt-6-sol",
+    "method": "isolated CODEX_HOME (copied auth.json only) with its own hooks.json whose command hooks dumped stdin verbatim; a stub stdio MCP server named 'slack' exposing slack_send_message and slack_send_message_draft; codex exec --skip-git-repo-check --dangerously-bypass-hook-trust --dangerously-bypass-approvals-and-sandbox. The user's ~/.codex was not touched.",
+    "observed": {
+      "agent_dispatch_tool_name": "collaborationspawn_agent. The PreToolUse matchers 'Agent' and 'spawn_agent' did NOT fire for it (matchers are anchored); '(collaboration)?spawn_agent' did.",
+      "agent_dispatch_tool_input": "{task_name, message}; message is an opaque encrypted blob, so a hook cannot read the subagent prompt. The spawned subagent reported agent_type 'default'.",
+      "subagent_tool_calls": "PreToolUse from inside a subagent carries agent_id and agent_type; the session_id is the parent's.",
+      "spawn_deny": "permissionDecision deny on collaborationspawn_agent -> 'hook: PreToolUse Blocked', no SubagentStart fired, and the model received 'Tool call blocked by PreToolUse hook: <reason>'.",
+      "mcp_tool_name": "a config MCP server named 'slack' surfaces as mcp__slack__slack_send_message; ChatGPT-app Slack tools in live rollouts are named mcp__codex_apps__slack_slack_send_message. '^mcp__.+_slack_(send|schedule)_message$' fired on the former.",
+      "mcp_deny": "permissionDecision deny on mcp__slack__slack_send_message -> Blocked; the stub server recorded no call (control run without the deny recorded the call).",
+      "ask_is_inert": "permissionDecision ask on Bash -> 'hook: PreToolUse Failed', the command ran, and that hook's additionalContext did NOT reach the model; a plain additionalContext from the same hook on another command did.",
+      "subagent_start_context": "SubagentStart hookSpecificOutput.additionalContext reached the subagent (it appended the requested marker to its reply).",
+      "stop": "Stop carries last_assistant_message (string) and stop_hook_active.",
+      "escapement_hooks_live": "Same isolated CODEX_HOME, hooks.json built from the rendered plugins/escapement/hooks/hooks.json (PLUGIN_ROOT substituted; Bash dispatcher limited to review_gate and context_burn_detector): project-bootstrap's '## Agent Dispatch Rules' context reached the model; review_gate's 'No review agent was dispatched...' reached the model on `bd close`; no_direct_send_guard blocked mcp__slack__slack_send_message and the stub server recorded no call; a final message calling a failure 'pre-existing' produced 'hook: Stop Blocked', the turn continued, and the re-entered Stop was allowed."
+    }
+  },
+  "payloads": {
+    "spawn_agent_pretooluse": {
+      "session_id": "01a0d670-49c9-7741-b387-bc5d257d2352",
+      "turn_id": "01a0d670-4a4e-7210-9a67-227f622b1795",
+      "transcript_path": "/private/tmp/codex-agent-probe/home/sessions/2026/09/24/rollout-2026-09-24T19-41-18-01a0d670-49c9-7741-b387-bc5d257d2352.jsonl",
+      "cwd": "/private/tmp/codex-agent-probe/work",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "collaborationspawn_agent",
+      "tool_input": {
+        "task_name": "readme",
+        "message": "gAAAAABqtd9XeHSliURuJhW1rcfHQcvUN6scyPcdbql8nQR2...(encrypted, truncated)"
+      },
+      "tool_use_id": "call_r2FScFUqH4C3nPSvw7RgcYqT"
+    },
+    "subagent_bash_pretooluse": {
+      "session_id": "01a0d670-49c9-7741-b387-bc5d257d2352",
+      "turn_id": "01a0d670-6f34-7180-a317-9dc4de59447d",
+      "agent_id": "01a0d670-6d6b-7b92-9d01-dd2119daf15c",
+      "agent_type": "default",
+      "transcript_path": "/private/tmp/codex-agent-probe/home/sessions/2026/09/24/rollout-2026-09-24T19-41-27-01a0d670-6d6b-7b92-9d01-dd2119daf15c.jsonl",
+      "cwd": "/private/tmp/codex-agent-probe/work",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat README.txt"
+      },
+      "tool_use_id": "exec-81587941-64ab-4d5a-8e27-ac98586f7883"
+    },
+    "main_bash_pretooluse": {
+      "session_id": "01a0d670-49c9-7741-b387-bc5d257d2352",
+      "turn_id": "01a0d670-4a4e-7210-9a67-227f622b1795",
+      "transcript_path": "/private/tmp/codex-agent-probe/home/sessions/2026/09/24/rollout-2026-09-24T19-41-18-01a0d670-49c9-7741-b387-bc5d257d2352.jsonl",
+      "cwd": "/private/tmp/codex-agent-probe/work",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo two"
+      },
+      "tool_use_id": "exec-d5983613-8041-4b10-bd72-5e3121b17d68"
+    },
+    "subagent_start": {
+      "session_id": "01a0d670-49c9-7741-b387-bc5d257d2352",
+      "turn_id": "01a0d670-6f34-7180-a317-9dc4de59447d",
+      "transcript_path": "/private/tmp/codex-agent-probe/home/sessions/2026/09/24/rollout-2026-09-24T19-41-27-01a0d670-6d6b-7b92-9d01-dd2119daf15c.jsonl",
+      "cwd": "/private/tmp/codex-agent-probe/work",
+      "hook_event_name": "SubagentStart",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "agent_id": "01a0d670-6d6b-7b92-9d01-dd2119daf15c",
+      "agent_type": "default"
+    },
+    "slack_send_pretooluse": {
+      "session_id": "01a0d66d-bfae-7d51-94fc-55e5703cc1fa",
+      "turn_id": "01a0d66d-c015-7de0-8e52-0912095f0754",
+      "transcript_path": "/private/tmp/codex-agent-probe/home/sessions/2026/09/24/rollout-2026-09-24T19-38-31-01a0d66d-bfae-7d51-94fc-55e5703cc1fa.jsonl",
+      "cwd": "/private/tmp/codex-agent-probe/work",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "mcp__slack__slack_send_message",
+      "tool_input": {
+        "channel_id": "C123",
+        "message": "probe"
+      },
+      "tool_use_id": "exec-f69fb241-be96-43c0-bf06-6767c00fa85a"
+    },
+    "stop": {
+      "session_id": "01a0d66d-0376-7dc2-9d3b-d3245b0c9809",
+      "turn_id": "01a0d66d-06e8-7831-bffb-ad3ad42f5ce1",
+      "transcript_path": "/private/tmp/codex-agent-probe/home/sessions/2026/09/24/rollout-2026-09-24T19-37-43-01a0d66d-0376-7dc2-9d3b-d3245b0c9809.jsonl",
+      "cwd": "/private/tmp/codex-agent-probe/work",
+      "hook_event_name": "Stop",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "stop_hook_active": false,
+      "last_assistant_message": "The subagent finished. The Slack message was not sent: automatic approval review rejected the call because the approval policy is set to “never.”"
+    },
+    "session_start": {
+      "session_id": "01a0d66d-0376-7dc2-9d3b-d3245b0c9809",
+      "transcript_path": "/private/tmp/codex-agent-probe/home/sessions/2026/09/24/rollout-2026-09-24T19-37-43-01a0d66d-0376-7dc2-9d3b-d3245b0c9809.jsonl",
+      "cwd": "/private/tmp/codex-agent-probe/work",
+      "hook_event_name": "SessionStart",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "source": "startup"
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "capture": {
+    "captured_at": "2026-09-24T19:33:14-07:00",
+    "codex_cli": "codex-cli 0.156.1; codex exec --skip-git-repo-check -s workspace-write --dangerously-bypass-hook-trust",
+    "how": "Probe hooks registered at PreToolUse and PostToolUse (matcher '.*') and UserPromptSubmit in a scratch git project's .codex/hooks.json, each dumping its raw stdin. The session was told to create sub/probe.py with apply_patch, change it with a second apply_patch, run `ls` with the shell tool's working-directory parameter set to sub/ (not cd), then `cat sub/probe.py`.",
+    "findings": [
+      "PostToolUse fires for apply_patch with tool_name 'apply_patch', the patch text in tool_input.command, and tool_response as a plain string.",
+      "UserPromptSubmit carries the prompt as the top-level `prompt` field.",
+      "Patch paths are relative to the payload's `cwd`: the probe's `sub/probe.py` was created under that cwd. codex-rs 0.156.1 sets hook `cwd` from TurnContext.cwd, which is the primary turn environment's cwd, the same directory the apply_patch handler resolves relative paths against.",
+      "Bash: the `ls` ran in sub/ via the workdir parameter, yet its payload has tool_input {command: 'ls'} and the session cwd. A shell tool's working directory is NOT in the payload.",
+      "transcript_path is the Codex rollout JSONL; per-request usage arrives as event_msg/token_count entries whose info.total_token_usage is cumulative for the session (the same cumulative total can repeat on consecutive entries)."
+    ],
+    "decision_probe": {
+      "how": "Second scratch project: a PreToolUse apply_patch hook answering 'ask' for ask_me.py and 'deny' for deny_me.py, and a PostToolUse apply_patch hook answering additionalContext for ctx_me.py. The model was asked to quote every PROBE- token it received.",
+      "ask": "tool call ran (ask_me.py was created) and the model received nothing: `ask` is inert on Codex",
+      "deny": "tool call blocked; the model received 'Command blocked by PreToolUse hook: PROBE-DENY-REASON-4412. ...'",
+      "post_tool_use_additional_context": "tool call ran; the model received 'PROBE-POST-CONTEXT-5590' verbatim"
+    }
+  },
+  "payloads": {
+    "user_prompt_submit": {
+      "session_id": "01a0d668-e899-7f41-a846-89224b324d06",
+      "turn_id": "01a0d668-ec62-7c90-90d4-2ea3d1a92ead",
+      "transcript_path": "/Users/alexandervyhmeister/.codex/sessions/2026/09/24/rollout-2026-09-24T19-33-14-01a0d668-e899-7f41-a846-89224b324d06.jsonl",
+      "cwd": "/private/tmp/scratch/codex-probe-l4fv",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "prompt": "Do exactly these steps, nothing else: 1) Use the apply_patch tool to create the file sub/probe.py containing the single line print(1). 2) Use apply_patch to change that line to print(2). 3) Run the shell command 'ls' with the tool's working-directory parameter set to the sub directory (do not use cd). 4) Run the shell command 'cat sub/probe.py'. Then reply DONE."
+    },
+    "pre_tool_use_apply_patch_add": {
+      "session_id": "01a0d668-e899-7f41-a846-89224b324d06",
+      "turn_id": "01a0d668-ec62-7c90-90d4-2ea3d1a92ead",
+      "transcript_path": "/Users/alexandervyhmeister/.codex/sessions/2026/09/24/rollout-2026-09-24T19-33-14-01a0d668-e899-7f41-a846-89224b324d06.jsonl",
+      "cwd": "/private/tmp/scratch/codex-probe-l4fv",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "apply_patch",
+      "tool_input": {
+        "command": "*** Begin Patch\n*** Add File: sub/probe.py\n+print(1)\n*** End Patch"
+      },
+      "tool_use_id": "exec-8fc49275-a0ed-4a7f-98e9-a78172db233e"
+    },
+    "post_tool_use_apply_patch_add": {
+      "session_id": "01a0d668-e899-7f41-a846-89224b324d06",
+      "turn_id": "01a0d668-ec62-7c90-90d4-2ea3d1a92ead",
+      "transcript_path": "/Users/alexandervyhmeister/.codex/sessions/2026/09/24/rollout-2026-09-24T19-33-14-01a0d668-e899-7f41-a846-89224b324d06.jsonl",
+      "cwd": "/private/tmp/scratch/codex-probe-l4fv",
+      "hook_event_name": "PostToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "apply_patch",
+      "tool_input": {
+        "command": "*** Begin Patch\n*** Add File: sub/probe.py\n+print(1)\n*** End Patch"
+      },
+      "tool_response": "Exit code: 0\nWall time: 0.1 seconds\nOutput:\nSuccess. Updated the following files:\nA sub/probe.py\n",
+      "tool_use_id": "exec-8fc49275-a0ed-4a7f-98e9-a78172db233e"
+    },
+    "pre_tool_use_apply_patch_update": {
+      "session_id": "01a0d668-e899-7f41-a846-89224b324d06",
+      "turn_id": "01a0d668-ec62-7c90-90d4-2ea3d1a92ead",
+      "transcript_path": "/Users/alexandervyhmeister/.codex/sessions/2026/09/24/rollout-2026-09-24T19-33-14-01a0d668-e899-7f41-a846-89224b324d06.jsonl",
+      "cwd": "/private/tmp/scratch/codex-probe-l4fv",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "apply_patch",
+      "tool_input": {
+        "command": "*** Begin Patch\n*** Update File: sub/probe.py\n@@\n-print(1)\n+print(2)\n*** End Patch"
+      },
+      "tool_use_id": "exec-26c54379-2b6c-4022-b147-93987635b6be"
+    },
+    "post_tool_use_apply_patch_update": {
+      "session_id": "01a0d668-e899-7f41-a846-89224b324d06",
+      "turn_id": "01a0d668-ec62-7c90-90d4-2ea3d1a92ead",
+      "transcript_path": "/Users/alexandervyhmeister/.codex/sessions/2026/09/24/rollout-2026-09-24T19-33-14-01a0d668-e899-7f41-a846-89224b324d06.jsonl",
+      "cwd": "/private/tmp/scratch/codex-probe-l4fv",
+      "hook_event_name": "PostToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "apply_patch",
+      "tool_input": {
+        "command": "*** Begin Patch\n*** Update File: sub/probe.py\n@@\n-print(1)\n+print(2)\n*** End Patch"
+      },
+      "tool_response": "Exit code: 0\nWall time: 0.1 seconds\nOutput:\nSuccess. Updated the following files:\nM sub/probe.py\n",
+      "tool_use_id": "exec-26c54379-2b6c-4022-b147-93987635b6be"
+    },
+    "pre_tool_use_bash_with_workdir": {
+      "session_id": "01a0d668-e899-7f41-a846-89224b324d06",
+      "turn_id": "01a0d668-ec62-7c90-90d4-2ea3d1a92ead",
+      "transcript_path": "/Users/alexandervyhmeister/.codex/sessions/2026/09/24/rollout-2026-09-24T19-33-14-01a0d668-e899-7f41-a846-89224b324d06.jsonl",
+      "cwd": "/private/tmp/scratch/codex-probe-l4fv",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls"
+      },
+      "tool_use_id": "exec-be98ae53-81f8-4ec7-909d-91a691cd4d1e"
+    },
+    "post_tool_use_bash_with_workdir": {
+      "session_id": "01a0d668-e899-7f41-a846-89224b324d06",
+      "turn_id": "01a0d668-ec62-7c90-90d4-2ea3d1a92ead",
+      "transcript_path": "/Users/alexandervyhmeister/.codex/sessions/2026/09/24/rollout-2026-09-24T19-33-14-01a0d668-e899-7f41-a846-89224b324d06.jsonl",
+      "cwd": "/private/tmp/scratch/codex-probe-l4fv",
+      "hook_event_name": "PostToolUse",
+      "model": "gpt-6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls"
+      },
+      "tool_response": "probe.py\n",
+      "tool_use_id": "exec-be98ae53-81f8-4ec7-909d-91a691cd4d1e"
+    }
+  },
+  "rollout_token_count_event": {
+    "timestamp": "2026-09-25T02:33:36.128Z",
+    "ordinal": 38,
+    "type": "event_msg",
+    "payload": {
+      "type": "token_count",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 132150,
+          "cached_input_tokens": 104960,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 229,
+          "reasoning_output_tokens": 51,
+          "total_tokens": 132379
+        },
+        "last_token_usage": {
+          "input_tokens": 26573,
+          "cached_input_tokens": 26368,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 6,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 26579
+        },
+        "model_context_window": 258400
+      }
+    }
+  }
+}

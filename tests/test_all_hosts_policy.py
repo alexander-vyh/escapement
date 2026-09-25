@@ -66,11 +66,18 @@ def test_surfaces_missing_a_host_fail_the_render(tmp_path):
     manifest_path = temp_root / "agent-surfaces" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     hooks = {hook["id"]: hook for hook in manifest["hooks"]}
-    # A hook Pi cannot derive from Codex, with its explicit exclusion removed.
+    # A hook Pi cannot derive from Codex, with its explicit Pi block removed.
     del hooks["review_nudge"]["hosts"]["pi"]
     # A Pi event the extension never translates.
     hooks["session_status"]["hosts"]["pi"] = {
         "status": "ready",
+        "events": [{"event": "SubagentStop", "matcher": "", "command": "python3 -B x.py", "timeout_seconds": 5}],
+        "fixtures": ["tests/test_all_hosts_policy.py"],
+    }
+    # A Pi gate whose file does not exist, so the Pi package cannot carry it.
+    hooks["stop_hook"]["hosts"]["pi"] = {
+        "status": "ready",
+        "source": "harness/bin/absent_pi_stop_hook.py",
         "events": [{"event": "Stop", "matcher": "", "command": "python3 -B x.py", "timeout_seconds": 5}],
         "fixtures": ["tests/test_all_hosts_policy.py"],
     }
@@ -92,7 +99,8 @@ def test_surfaces_missing_a_host_fail_the_render(tmp_path):
 
     assert result.returncode != 0
     assert "hook review_nudge: missing host pi" in result.stderr
-    assert "hook session_status: Pi event 'Stop' is not translated" in result.stderr
+    assert "hook session_status: Pi event 'SubagentStop' is not translated" in result.stderr
+    assert "hook stop_hook: Pi gate source does not exist" in result.stderr
     assert f"skill {manifest['skills'][0]['id']}: missing host pi" in result.stderr
     assert "mcp server serena: missing host codex" in result.stderr
     assert "rule claude/rules/undeclared-rule.md: not declared in manifest rules" in result.stderr
