@@ -1457,3 +1457,66 @@ OpenSpec validation, and renderer parity. Then invoke the public command against
 fresh disposable real remote/primary topology and inspect Git state. After merge,
 refresh both plugins and repeat the public-command probe from the installed Codex
 package before closing `escapement-uecm`.
+
+# Test Oracle Brief — Serena on every host; all hosts by default (`escapement-l4fv`)
+
+## Business invariant
+
+A user who installs Escapement on Claude Code, Codex or Pi gets working Serena
+symbol tools in any code project without configuring Serena by hand, and the
+Serena steering hooks (read gate, prompt guidance, Serena-edit coverage in the
+tdd and Test Oracle Brief gates) act on that host's own Serena tool spelling. A
+hook, skill or MCP server that silently omits a host is a defect; omission is
+legal only with an explicit `unsupported_reason`.
+
+## Independent source of truth
+
+The host itself: a live session on each host, in a scratch git repo containing
+`class Ledger` and `def reconcile`, calls Serena's `get_symbols_overview` on
+`ledger.py` and must return exactly those two symbols. Tool spellings are the
+ones the hosts emit (`mcp__plugin_escapement_serena__*` on Claude,
+`mcp__serena__*` on Codex, `escapement__serena_*` on Pi), captured from live
+sessions, not derived from our own code.
+
+## Negative control
+
+- Renderer validation rejects a manifest hook, skill or MCP server entry that
+  omits a host without `unsupported_reason`, and rejects a Pi event the
+  extension does not translate.
+- The read gate allows ranged reads, piped reads, small files and non-source
+  files, and stays silent outside Serena-onboarded projects; prompt guidance
+  stays silent outside code projects and does not repeat within a session.
+- The Pi prompt handler adds no text of its own beyond the two failure notices
+  (property check with a sudo-policy mutant).
+
+## Positive control
+
+- Full-file reads of a large source file are denied on Claude Read, Codex Bash
+  and Pi read/bash, and the denial names the file and `get_symbols_overview`.
+- Pi end-to-end: the real extension, driven through node, injects Serena
+  guidance once per session after PI.md and denies a large full read.
+- Live probes above pass on all three hosts.
+
+## Missing/unresolved handling
+
+Pi read and context gates fail open on dispatcher or config errors (advisory
+steering, not a safety brake); Pi bash/write gates keep failing closed. A
+user-level server named `serena` shadows the bundled one on Codex; the README
+tells users to remove hand-configured Serena servers.
+
+## Mutation challenge
+
+1. **Drop a host from a hook/skill/MCP server:** rejected by all-hosts renderer
+   validation and `tests/test_all_hosts_policy.py`.
+2. **Match only the Claude spelling:** rejected by `_serena_tools` spelling cases
+   and the Pi end-to-end denial.
+3. **Prose policy in the Pi prompt handler:** rejected by the literal allowlist.
+4. **Guidance on every prompt:** rejected by the once-per-session checks.
+5. **Legacy global gate no longer recognized after byte change:** rejected by
+   `tests/test_verify_codex_hook_runtime.py` overlap cases (new hash registered).
+
+## Final outcome verification
+
+Renderer `--check`, the full repository suite, the CI shell tests, and the live
+`get_symbols_overview` probes on Claude Code, Codex (local marketplace install)
+and Pi (pi-mcp-adapter package server, proxy then direct tools).
