@@ -163,7 +163,7 @@ def test_codex_plugin_wrapper_manifest_uses_current_ingestion_contract():
     manifest = json.loads(manifest_path.read_text())
 
     assert manifest["name"] == "escapement"
-    assert manifest["version"] == "1.0.0"
+    assert manifest["version"] == "0.1.0"
     assert manifest["skills"] == "./skills/"
     # Codex 0.144.1 ACCEPTS an explicit hooks key (escapement-z506) — verified by
     # installing a probe plugin declaring `"hooks": "./hooks/hooks.json"`. The old
