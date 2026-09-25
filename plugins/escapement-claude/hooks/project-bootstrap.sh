@@ -7,7 +7,7 @@
 #   1. Environment gate (optional root allowlist + git repo)
 #   2. Worktree detection
 #   3. Silent init (direnv, openspec)
-#   4. Announced init (beads, serena)
+#   4. Announced init (beads, outcome policy)
 #   5. Check-and-report (CLAUDE.md)
 #   6. Emit bootstrap context (JSON additionalContext)
 
@@ -198,19 +198,6 @@ repair_beads() {
   fi
 }
 
-bootstrap_serena() {
-  # Skip in worktrees — .serena/ lives at repo root
-  if [[ "$IS_WORKTREE" == "true" ]]; then
-    return 0
-  fi
-  if [[ -d "$CWD/.serena" ]]; then
-    return 0  # Already onboarded
-  fi
-  # Flag for Claude to handle interactively (serena onboarding is interactive)
-  ACTIONS+=("serena: needs onboarding")
-  REPORT+=("ACTION: Run serena onboarding for this project (set languages, project name)")
-}
-
 bootstrap_outcome() {
   # Per-project options manifest: the repo's intended outcome + auto-merge
   # authorization (repo-outcome-authorization). Skip in worktrees (.escapement/
@@ -257,7 +244,6 @@ bootstrap_direnv
 bootstrap_openspec
 bootstrap_beads
 repair_beads
-bootstrap_serena
 bootstrap_outcome
 check_claude_md
 

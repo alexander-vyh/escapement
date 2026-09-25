@@ -23,102 +23,77 @@ def _manifest() -> dict:
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
 
 
-def _pi_ready_bash_gates(manifest: dict) -> list[dict]:
+def _explicit_pi(hook: dict, event_name: str, matchers: set | None) -> list | None:
+    """Independent reading of an explicit `pi` block: it is the whole Pi
+    declaration for that hook, so it replaces any Codex-derived default."""
+    pi_host = hook.get("hosts", {}).get("pi")
+    if pi_host is None:
+        return None
+    if pi_host.get("status") != "ready":
+        return []
+    return [
+        event
+        for event in pi_host.get("events", [])
+        if event.get("event") == event_name
+        and (matchers is None or event.get("matcher") in matchers)
+    ][:1]
+
+
+def _entry(hook: dict, event: dict) -> dict:
+    return {"id": hook["id"], "source": hook["source"], "timeout_seconds": event["timeout_seconds"]}
+
+
+def _pi_gates(manifest: dict, pi_matchers: set | None, codex_matcher: str | None, event_name: str) -> list[dict]:
     adapter = manifest["adapters"]["pi"]
     gates = []
     for hook in manifest["hooks"]:
+        explicit = _explicit_pi(hook, event_name, pi_matchers)
+        if explicit is not None:
+            gates.extend(_entry(hook, event) for event in explicit)
+            continue
+        if codex_matcher is None:
+            continue
         host = hook["hosts"][adapter["gate_source_host"]]
         if host["status"] != "ready":
             continue
-        for event in host.get("events", []):
-            if (
-                event["event"] == adapter["source_event"]
-                and event["matcher"] == adapter["source_matcher"]
-            ):
-                gates.append(
-                    {
-                        "id": hook["id"],
-                        "source": hook["source"],
-                        "timeout_seconds": event["timeout_seconds"],
-                    }
-                )
+        gates.extend(
+            _entry(hook, event)
+            for event in host.get("events", [])
+            if event["event"] == event_name and event["matcher"] == codex_matcher
+        )
     return gates
+
+
+def _pi_ready_bash_gates(manifest: dict) -> list[dict]:
+    adapter = manifest["adapters"]["pi"]
+    return _pi_gates(manifest, {adapter["target_matcher"]}, adapter["source_matcher"], adapter["source_event"])
 
 
 def _pi_ready_file_gates(manifest: dict) -> list[dict]:
     """Recompute the file-gate selection independently of the renderer."""
     adapter = manifest["adapters"]["pi"]
-    file_targets = adapter.get("file_target_matchers", [])
-    gates = []
-    for hook in manifest["hooks"]:
-        pi_host = hook.get("hosts", {}).get("pi")
-        if pi_host and pi_host.get("status") == "ready":
-            pi_events = [
-                event
-                for event in pi_host.get("events", [])
-                if event.get("event") == adapter["source_event"]
-                and event.get("matcher") in file_targets
-            ]
-            if pi_events:
-                gates.append(
-                    {
-                        "id": hook["id"],
-                        "source": hook["source"],
-                        "timeout_seconds": pi_events[0]["timeout_seconds"],
-                    }
-                )
-            continue
-        host = hook.get("hosts", {}).get(adapter["gate_source_host"], {})
-        if host.get("status") != "ready":
-            continue
-        for event in host.get("events", []):
-            if (
-                event.get("event") == adapter["source_event"]
-                and event.get("matcher") == adapter["file_source_matcher"]
-            ):
-                gates.append(
-                    {
-                        "id": hook["id"],
-                        "source": hook["source"],
-                        "timeout_seconds": event["timeout_seconds"],
-                    }
-                )
-    return gates
-
-
-def test_pi_is_an_explicit_shared_root_adapter() -> None:
-    manifest = _manifest()
-
-    assert manifest["documents"]["hosts"]["pi"]["target"] == (
-        "plugins/escapement-pi/PI.md"
+    return _pi_gates(
+        manifest, set(adapter["file_target_matchers"]), adapter["file_source_matcher"], adapter["source_event"]
     )
-    assert manifest["adapters"]["pi"] == {
-        "gate_source_host": "codex",
-        "source_event": "PreToolUse",
-        "source_matcher": "Bash",
-        "target_event": "tool_call",
-        "target_matcher": "bash",
-        # Pi's file tools, captured from a live `pi --mode json` session.
-        # Pinned so inventing a tool name fails here instead of shipping a
-        # gate that silently never matches anything.
-        "file_source_matcher": "apply_patch",
-        "file_target_matchers": ["write", "edit"],
-    }
 
 
-def test_root_package_exposes_pi_resources_from_the_shared_root() -> None:
+def test_root_package_resources_resolve_inside_the_package() -> None:
+    """Pi loads extensions, skills and MCP config from these paths; a path that
+    does not resolve is a resource Pi silently never loads."""
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
 
     assert "pi-package" in package["keywords"]
-    assert package["pi"] == {
-        "extensions": ["./plugins/escapement-pi/extensions/index.ts"],
-    }
-    assert EXTENSION.is_file()
+    pi = package["pi"]
+    for entry in [*pi["extensions"], *pi["skills"], pi["mcp"]]:
+        assert (ROOT / entry).exists(), f"package.json pi entry does not resolve: {entry}"
+    assert any((ROOT / entry).glob("*/SKILL.md") for entry in pi["skills"]), "Pi skills dir holds no skills"
+    assert "serena" in json.loads((ROOT / pi["mcp"]).read_text(encoding="utf-8"))["mcpServers"]
     assert (PI_ROOT / "PI.md").is_file()
 
 
 def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> None:
     manifest = _manifest()
+    adapter = manifest["adapters"]["pi"]
     inventory = json.loads((PI_ROOT / "gates.json").read_text(encoding="utf-8"))
 
     assert inventory == {
@@ -126,6 +101,8 @@ def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> N
         "dispatcher": "claude/hooks/codex_pretool_dispatch.py",
         "gates": _pi_ready_bash_gates(manifest),
         "file_gates": _pi_ready_file_gates(manifest),
+        "read_gates": _pi_gates(manifest, {adapter["read_target_matcher"]}, None, adapter["source_event"]),
+        "context_gates": _pi_gates(manifest, None, None, adapter["context_source_event"]),
     }
     assert inventory["file_gates"], (
         "Pi must ship the file-write gates; an empty list means Pi has no brake "
@@ -135,7 +112,7 @@ def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> N
     # Every gate named must also be SHIPPED. gates.json names a gate by path and
     # the dispatcher opens it from the plugin root, so a gate listed but not
     # vendored reads as a healthy inventory with the brake missing.
-    for key in ("gates", "file_gates"):
+    for key in ("gates", "file_gates", "read_gates", "context_gates"):
         sources = [gate["source"] for gate in inventory[key]]
         assert len(sources) == len(set(sources)), f"Pi {key} must not duplicate gates"
         missing = [s for s in sources if not (PI_ROOT / s).is_file()]
@@ -208,9 +185,24 @@ def _assert_thin_pi_extension(source: str) -> None:
 
     assert source.count("spawn(") == 1, "one tool event must start one dispatcher"
     assert source.count('pi.on("tool_call"') == 1
-    assert source.count(
-        ': `${event.systemPrompt}\\n\\n${runtime.instructions}`,'
-    ) == 1
+
+    # The prompt handler composes host text, PI.md and gate context. A string
+    # literal of its own beyond the two failure notices is prose policy that
+    # lives only in Pi.
+    prompt_handler = source.split('pi.on("before_agent_start"', 1)[1].split("\n  });\n", 1)[0]
+    allowed_prompt_literals = {
+        "`${event.systemPrompt}\\n\\nEscapement Pi configuration error: ${runtime.message}`",
+        "`Escapement Pi prompt-context hooks failed: ${error}`",
+        '"UserPromptSubmit"',
+        '"string"',
+        '""',
+        '"\\n\\n"',
+    }
+    for literal in re.findall(r'`[^`]*`|"(?:[^"\\\\]|\\\\.)*"', prompt_handler):
+        assert literal in allowed_prompt_literals, (
+            f"prompt handler adds text of its own: {literal}. "
+            "Prompt policy belongs in PI.md or a context gate."
+        )
 
     # The extension must not read what the tool is doing. Every mutation that
     # smuggles policy into TypeScript has to look at the payload to decide.
@@ -227,7 +219,7 @@ def _assert_thin_pi_extension(source: str) -> None:
     handler = source.split('pi.on("tool_call"', 1)[1]
     allowed_reasons = {
         'hook.permissionDecisionReason || "Escapement blocked this Bash call"',
-        'hook.permissionDecisionReason || "Escapement blocked this file write"',
+        'hook.permissionDecisionReason || "Escapement blocked this file tool call"',
         '`Escapement Pi configuration error: ${runtime.message}`',
         '`Escapement Pi adapter error: ${error}`',
         '"Escapement received an invalid Pi Bash payload"',
@@ -267,10 +259,11 @@ def _assert_thin_pi_extension(source: str) -> None:
             f"{name} selects among gates; it must run the inventory as given"
         )
     inventory = json.loads((PI_ROOT / "gates.json").read_text(encoding="utf-8"))
-    for gate in [*inventory["gates"], *inventory.get("file_gates", [])]:
-        assert gate["id"] not in source, (
-            f"extension names {gate['id']}; the bridge must not know a gate by id"
-        )
+    for key in ("gates", "file_gates", "read_gates", "context_gates"):
+        for gate in inventory.get(key, []):
+            assert gate["id"] not in source, (
+                f"extension names {gate['id']}; the bridge must not know a gate by id"
+            )
 
     assert "codex_pretool_dispatch.py" not in source, (
         "the generated inventory, not TypeScript, owns the dispatcher path"
@@ -412,11 +405,11 @@ def test_pi_architecture_check_rejects_selective_typescript_policy() -> None:
         _assert_thin_pi_extension(transport_filter_mutant)
 
     prompt_policy_mutant = source.replace(
-        ': `${event.systemPrompt}\\n\\n${runtime.instructions}`,',
-        ': `${event.systemPrompt}\\n\\n${runtime.instructions}'
-        '\\n\\nPi-only policy: never execute sudo`,',
+        "if (added) sections.push(added);",
+        'if (added) sections.push(added);\n    sections.push("Pi-only policy: never execute sudo");',
         1,
     )
+    assert prompt_policy_mutant != source
     with pytest.raises(AssertionError):
         _assert_thin_pi_extension(prompt_policy_mutant)
 
@@ -511,13 +504,15 @@ console.log(JSON.stringify({ safe: safe ?? null, denied, injected }));
     assert output["safe"] is None
     assert output["denied"]["block"] is True
     assert "escapement-worktree create" in output["denied"]["reason"]
-    assert output["injected"]["systemPrompt"] == (
+    assert output["injected"]["systemPrompt"].startswith(
         "base prompt\n\n" + (PI_ROOT / "PI.md").read_text(encoding="utf-8")
     )
+    # One run for the prompt-context gates, then one per tool call.
     assert process_log.read_text(encoding="utf-8").splitlines() == [
         "dispatch",
         "dispatch",
-    ], "each Pi tool call must use exactly one shared dispatcher process"
+        "dispatch",
+    ], "each Pi event must use exactly one shared dispatcher process"
 
 
 def test_pi_extension_sends_one_stable_session_id_across_tool_calls(tmp_path) -> None:

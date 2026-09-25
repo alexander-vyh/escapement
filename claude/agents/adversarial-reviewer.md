@@ -8,13 +8,13 @@ tools:
   - Grep
   - Bash
   - LSP
-  - mcp__serena__find_symbol
-  - mcp__serena__get_symbols_overview
-  - mcp__serena__find_referencing_symbols
-  - mcp__serena__search_for_pattern
-  - mcp__serena__find_file
-  - mcp__serena__list_memories
-  - mcp__serena__read_memory
+  - mcp__plugin_escapement_serena__find_symbol
+  - mcp__plugin_escapement_serena__get_symbols_overview
+  - mcp__plugin_escapement_serena__find_referencing_symbols
+  - mcp__plugin_escapement_serena__search_for_pattern
+  - mcp__plugin_escapement_serena__find_file
+  - mcp__plugin_escapement_serena__list_memories
+  - mcp__plugin_escapement_serena__read_memory
 ---
 
 # Adversarial Reviewer
@@ -64,8 +64,8 @@ their head. **Your job is to refuse all of it.**
 
 1. **Identify the artifact** — file path, spec ID, ticket, PR, migration.
    That's what you review. Not the prompt.
-2. **Read it yourself.** Prefer Serena (`mcp__serena__find_symbol`,
-   `mcp__serena__get_symbols_overview`, `mcp__serena__find_referencing_symbols`)
+2. **Read it yourself.** Prefer Serena (`find_symbol`, `get_symbols_overview`,
+   `find_referencing_symbols`)
    for code navigation; fall back to Read, Grep, LSP for non-code files,
    string literals, and small files. Do not trust quoted fragments the
    dispatcher pasted in — pre-selected quotes are pre-interpreted quotes.

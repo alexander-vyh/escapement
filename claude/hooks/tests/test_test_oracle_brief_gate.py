@@ -1160,7 +1160,7 @@ def test_missing_signal_support_fails_soft_with_visible_diagnostic(tmp_path):
     isolated_hook = tmp_path / "isolated" / CANONICAL_HOOK.name
     isolated_hook.parent.mkdir()
     shutil.copyfile(CANONICAL_HOOK, isolated_hook)
-    for module_name in EXTRACTED_POLICY_MODULES:
+    for module_name in (*EXTRACTED_POLICY_MODULES, "_serena_tools.py"):
         shutil.copyfile(
             ROOT / "claude" / "hooks" / module_name,
             isolated_hook.parent / module_name,

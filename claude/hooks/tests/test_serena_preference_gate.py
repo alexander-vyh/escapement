@@ -2,221 +2,269 @@
 
 Business outcome the gate protects: when Serena (LSP-backed symbol tools) is
 onboarded for a project, the main thread should not burn context by reading an
-entire large source file top-to-bottom — it should use symbol tools instead.
-The gate enforces this by DENYING full-file Reads (and cat/head/tail bypasses)
-of large source files, redirecting to Serena's symbol tools.
+entire large source file top-to-bottom — on any host. Claude and Pi read files
+with a Read tool (Pi's adapter forwards the Claude Read shape); Codex reads them
+through the shell (`cat FILE`, `nl -ba FILE`). Each host's full read of a large
+source file is DENIED with a redirect that names the file; every cheaper read
+(ranged, small, non-source, not onboarded, subagent) passes.
 
-The gate is a tightrope: it must block the wasteful case while leaving every
-legitimate case alone. So the controls come in pairs.
-
-  Negative control — a full-file Read of a LARGE source file, in a project
-  that HAS .serena/memories, must be DENIED with a decision that redirects to
-  Serena's symbol tools (and the redirect must carry the file's path so it is
-  actionable). This is the one case the gate exists to catch.
-
-  Positive controls — each of the gate's documented exemptions must pass
-  through (return 0, no deny):
-    * targeted Read (offset/limit set) — already cheap
-    * non-source file (e.g. .md) — not Serena's domain
-    * small source file — full Read is cheap
-    * project WITHOUT .serena/memories — Serena not onboarded
-    * subagent context — subagents do their own exploration
-  Plus a Bash cat-bypass mirror of the negative control, so the shell path is
-  not silently un-guarded.
-
-All inputs are real on-disk fixtures (a genuine large .py file, a real
-.serena/memories dir) and the assertions read the externally-observable
-permission decision + redirect text, not the gate's private classifier
-helpers — so they are behavioral, not implementation echoes.
+The hook runs as a subprocess — the way every host invokes it — against real
+on-disk projects, and the assertions read the permission decision it prints.
 
 Run from anywhere:
-  python3 -m pytest claude/hooks/tests/test_serena_preference_gate.py -v
+  python3 -m pytest claude/hooks/tests/test_serena_preference_gate.py -q
 """
 
 from __future__ import annotations
 
-import io
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-_hooks_dir = Path(__file__).resolve().parent.parent
-if str(_hooks_dir) not in sys.path:
-    sys.path.insert(0, str(_hooks_dir))
-
-import serena_preference_gate as hook  # noqa: E402
-
+_HOOK = Path(__file__).resolve().parent.parent / "serena_preference_gate.py"
+_CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex_apply_patch_pretooluse.json"
 
 # Size that comfortably exceeds the gate's "small file" threshold (8 KiB).
 _LARGE_SOURCE = "def f():\n    return 1  # padding line to grow the file\n" * 600
 
+_SUBAGENT_VARS = (
+    "CLAUDE_AGENT_NAME", "CLAUDE_AGENT_TYPE", "CLAUDE_SUBAGENT",
+    "CLAUDE_TEAM_NAME", "CLAUDE_AGENT_ID",
+)
+
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures and drivers
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def serena_project(tmp_path, monkeypatch):
-    """A tmp project that is a git repo AND has a non-empty .serena/memories.
+def signal_dir(tmp_path):
+    return tmp_path / "signal"
 
-    This is the "Serena is onboarded here" state in which the gate is allowed
-    to fire. Also clears subagent env vars so the gate doesn't silently exempt
-    every test as a subagent run.
-    """
-    for var in (
-        "CLAUDE_AGENT_NAME", "CLAUDE_AGENT_TYPE", "CLAUDE_SUBAGENT",
-        "CLAUDE_TEAM_NAME", "CLAUDE_AGENT_ID",
-    ):
-        monkeypatch.delenv(var, raising=False)
 
-    (tmp_path / ".git").mkdir()  # project-root signal
-    memories = tmp_path / ".serena" / "memories"
+@pytest.fixture
+def serena_project(tmp_path):
+    """A git project with a non-empty .serena/memories: Serena is onboarded."""
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    memories = project / ".serena" / "memories"
     memories.mkdir(parents=True)
     (memories / "architecture.md").write_text("notes", encoding="utf-8")
-    return tmp_path
+    return project
 
 
 @pytest.fixture
-def bare_project(tmp_path, monkeypatch):
-    """A tmp project that is a git repo but has NO .serena/memories."""
-    for var in (
-        "CLAUDE_AGENT_NAME", "CLAUDE_AGENT_TYPE", "CLAUDE_SUBAGENT",
-        "CLAUDE_TEAM_NAME", "CLAUDE_AGENT_ID",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    (tmp_path / ".git").mkdir()
-    return tmp_path
+def bare_project(tmp_path):
+    """A git project with NO .serena/memories."""
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    return project
 
 
-def _run_read(file_path, cwd, *, offset=None, limit=None) -> tuple[int, dict]:
-    return _run("Read", {"file_path": str(file_path),
-                         **({"offset": offset} if offset is not None else {}),
-                         **({"limit": limit} if limit is not None else {})}, cwd)
+def _large(project: Path, relative: str) -> Path:
+    path = project / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_LARGE_SOURCE, encoding="utf-8")
+    return path
 
 
-def _run_bash(command, cwd) -> tuple[int, dict]:
-    return _run("Bash", {"command": command}, cwd)
+def _run(payload: dict, cwd: Path, signal_dir: Path, **extra_env: str) -> dict:
+    """Invoke the hook as the host does; return its parsed stdout ({} = allow)."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in _SUBAGENT_VARS and k != "BEADS_DIR"}
+    env["GATE_SIGNAL_FALLBACK_DIR"] = str(signal_dir)
+    env.update(extra_env)
+    result = subprocess.run(
+        [sys.executable, str(_HOOK)],
+        input=json.dumps(payload),
+        capture_output=True, text=True, cwd=cwd, env=env, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout.strip()
+    return json.loads(out) if out else {}
 
 
-def _run(tool_name, tool_input, cwd) -> tuple[int, dict]:
-    """Drive the gate's main() and return (exit_code, parsed_stdout_json).
-
-    The gate returns 0 in all paths and only *emits JSON* when it denies, so
-    the deny vs allow distinction is whether stdout carries a deny decision.
-    """
-    payload = {
+def _claude_read(file_path, cwd, **tool_input) -> dict:
+    return {
+        "session_id": "claude-session",
         "hook_event_name": "PreToolUse",
-        "tool_name": tool_name,
-        "tool_input": tool_input,
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(file_path), **tool_input},
         "cwd": str(cwd),
     }
-    stdout_capture = io.StringIO()
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch("sys.stdout", stdout_capture),
-        patch.object(hook, "_record_signal", lambda *a, **k: None),
-    ):
-        ret = hook.main()
-    exit_code = ret if ret is not None else 0
-    out = stdout_capture.getvalue().strip()
-    parsed = json.loads(out) if out else {}
-    return exit_code, parsed
 
 
-def _is_deny(parsed: dict) -> bool:
-    return parsed.get("hookSpecificOutput", {}).get(
-        "permissionDecision"
-    ) == "deny"
+def _pi_read(path, cwd, *, offset=None, limit=None) -> dict:
+    """What Pi's extension forwards for Pi `read` {path, offset, limit}."""
+    tool_input = {"file_path": str(path)}
+    if offset is not None:
+        tool_input["offset"] = offset
+    if limit is not None:
+        tool_input["limit"] = limit
+    return {
+        "session_id": "pi-session",
+        "cwd": str(cwd),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": tool_input,
+    }
+
+
+def _codex_bash(command: str, cwd: Path) -> dict:
+    """The captured Codex Bash payload, pointed at this command and project."""
+    captured = json.loads(_CODEX_FIXTURE.read_text(encoding="utf-8"))["payloads"]["bash"]
+    return {
+        **captured,
+        "session_id": "codex-session",
+        "hook_event_name": "PreToolUse",
+        "tool_input": {**captured["tool_input"], "command": command},
+        "cwd": str(cwd),
+    }
+
+
+def _deny_reason(parsed: dict) -> str | None:
+    output = parsed.get("hookSpecificOutput", {})
+    if output.get("permissionDecision") != "deny":
+        return None
+    return output["permissionDecisionReason"]
 
 
 # ---------------------------------------------------------------------------
-# Negative control: the case the gate exists to catch.
+# Negative controls: the full read the gate exists to catch, on every host.
 # ---------------------------------------------------------------------------
 
-def test_full_read_of_large_source_with_serena_is_denied(serena_project):
-    """Full-file Read of a large .py file in a Serena-onboarded project must
-    be DENIED and the denial must redirect to Serena symbol tools, naming the
-    file path so the redirect is actionable."""
-    big = serena_project / "campaign.py"
-    big.write_text(_LARGE_SOURCE, encoding="utf-8")
+def test_claude_full_read_of_large_source_is_denied(serena_project, signal_dir):
+    """A denied read names the file relative to cwd and redirects to Serena's
+    symbol tools; the decision lands in the gate-signal store."""
+    big = _large(serena_project, "pkg/campaign.py")
 
-    exit_code, parsed = _run_read(big, serena_project)
+    reason = _deny_reason(_run(_claude_read(big, serena_project), serena_project, signal_dir))
 
-    assert exit_code == 0  # gate signals via JSON, not exit code
-    assert _is_deny(parsed), "large source full-read must be denied"
+    assert reason is not None, "large source full-read must be denied"
+    assert "pkg/campaign.py" in reason, reason
+    assert "get_symbols_overview" in reason, reason
+    records = [
+        json.loads(line)
+        for line in (signal_dir / "gate-signal-fallback.jsonl").read_text().splitlines()
+    ]
+    assert any(
+        r.get("gate") == "serena_preference_gate" and r.get("decision") == "deny"
+        for r in records
+    ), records
 
-    reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
-    # Redirect must point at Serena's symbol tools (the actionable escape).
-    assert "mcp__serena__" in reason, reason
-    # And carry the file's name so the user can paste it into the call.
-    assert "campaign.py" in reason, reason
+
+def test_codex_full_cat_of_large_source_is_denied(serena_project, signal_dir):
+    _large(serena_project, "pkg/service.py")
+
+    reason = _deny_reason(
+        _run(_codex_bash("cat pkg/service.py", serena_project), serena_project, signal_dir)
+    )
+
+    assert reason is not None, "full-file `cat` of large source must be denied"
+    assert "pkg/service.py" in reason, reason
 
 
-def test_full_cat_of_large_source_with_serena_is_denied(serena_project):
-    """The shell bypass (cat/head/tail) must be guarded the same way — a
-    full `cat` of a large source file is denied and redirected."""
-    big = serena_project / "service.py"
-    big.write_text(_LARGE_SOURCE, encoding="utf-8")
+def test_codex_full_nl_of_large_source_is_denied(serena_project, signal_dir):
+    """Codex's habitual whole-file read, `nl -ba FILE`, is a full read too —
+    including after a `cd` into the package."""
+    _large(serena_project, "pkg/service.py")
 
-    exit_code, parsed = _run_bash(f"cat {big}", serena_project)
+    for command in ("nl -ba pkg/service.py", "cd pkg && nl -ba service.py"):
+        reason = _deny_reason(
+            _run(_codex_bash(command, serena_project), serena_project, signal_dir)
+        )
+        assert reason is not None, command
+        assert "service.py" in reason, reason
 
-    assert exit_code == 0
-    assert _is_deny(parsed), "full-file `cat` of large source must be denied"
-    reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
-    assert "service.py" in reason, reason
+
+def test_pi_read_of_large_source_is_denied(serena_project, signal_dir):
+    _large(serena_project, "src/engine.py")
+
+    reason = _deny_reason(
+        _run(_pi_read("src/engine.py", serena_project), serena_project, signal_dir)
+    )
+
+    assert reason is not None, "Pi full read of large source must be denied"
+    assert "src/engine.py" in reason, reason
 
 
 # ---------------------------------------------------------------------------
 # Positive controls: every documented exemption must pass through.
 # ---------------------------------------------------------------------------
 
-def test_targeted_read_passes(serena_project):
-    """A Read with offset/limit is already cheap — must NOT be denied even on
-    a large source file in a Serena project."""
-    big = serena_project / "campaign.py"
-    big.write_text(_LARGE_SOURCE, encoding="utf-8")
+def test_codex_ranged_sed_read_is_allowed(serena_project, signal_dir):
+    """Ranged shell reads are the shell's offset/limit: allowed on a large
+    source file, whether read directly or by piping a full read into a limiter."""
+    _large(serena_project, "pkg/service.py")
 
-    _, parsed = _run_read(big, serena_project, offset=100, limit=50)
-    assert not _is_deny(parsed)
-
-
-def test_non_source_file_passes(serena_project):
-    """A large markdown file is not Serena's domain — must pass through."""
-    doc = serena_project / "README.md"
-    doc.write_text(_LARGE_SOURCE, encoding="utf-8")  # large, but .md
-
-    _, parsed = _run_read(doc, serena_project)
-    assert not _is_deny(parsed)
+    for command in (
+        "sed -n '1,120p' pkg/service.py",
+        "nl -ba pkg/service.py | sed -n '200,260p'",
+        "head -n 80 pkg/service.py",
+        "tail -n 40 pkg/service.py",
+        "cat pkg/service.py | grep -n 'def '",
+    ):
+        parsed = _run(_codex_bash(command, serena_project), serena_project, signal_dir)
+        assert _deny_reason(parsed) is None, command
 
 
-def test_small_source_file_passes(serena_project):
-    """A small .py file is cheap to read fully — must pass through."""
+def test_pi_ranged_read_is_allowed(serena_project, signal_dir):
+    _large(serena_project, "src/engine.py")
+
+    parsed = _run(
+        _pi_read("src/engine.py", serena_project, offset=100, limit=50),
+        serena_project, signal_dir,
+    )
+    assert _deny_reason(parsed) is None
+
+
+def test_claude_targeted_read_is_allowed(serena_project, signal_dir):
+    big = _large(serena_project, "campaign.py")
+
+    parsed = _run(_claude_read(big, serena_project, offset=100, limit=50),
+                  serena_project, signal_dir)
+    assert _deny_reason(parsed) is None
+
+
+def test_non_source_file_is_allowed(serena_project, signal_dir):
+    """A large markdown file is not Serena's domain — on Read and on cat."""
+    _large(serena_project, "README.md")
+
+    assert _deny_reason(_run(_claude_read(serena_project / "README.md", serena_project),
+                             serena_project, signal_dir)) is None
+    assert _deny_reason(_run(_codex_bash("cat README.md", serena_project),
+                             serena_project, signal_dir)) is None
+
+
+def test_small_source_file_is_allowed(serena_project, signal_dir):
     small = serena_project / "tiny.py"
     small.write_text("def f():\n    return 1\n", encoding="utf-8")
 
-    _, parsed = _run_read(small, serena_project)
-    assert not _is_deny(parsed)
+    assert _deny_reason(_run(_claude_read(small, serena_project),
+                             serena_project, signal_dir)) is None
+    assert _deny_reason(_run(_codex_bash("cat tiny.py", serena_project),
+                             serena_project, signal_dir)) is None
 
 
-def test_large_source_without_serena_passes(bare_project):
-    """Same large source file, but the project has NO .serena/memories — the
-    gate must stay silent because Serena is not onboarded here."""
-    big = bare_project / "campaign.py"
-    big.write_text(_LARGE_SOURCE, encoding="utf-8")
+def test_project_without_serena_memories_is_allowed(bare_project, signal_dir):
+    """Serena not onboarded here: the gate stays silent on every host shape."""
+    _large(bare_project, "campaign.py")
 
-    _, parsed = _run_read(big, bare_project)
-    assert not _is_deny(parsed)
+    for payload in (
+        _claude_read(bare_project / "campaign.py", bare_project),
+        _pi_read("campaign.py", bare_project),
+        _codex_bash("cat campaign.py", bare_project),
+    ):
+        assert _deny_reason(_run(payload, bare_project, signal_dir)) is None
 
 
-def test_subagent_is_exempt(serena_project, monkeypatch):
-    """Subagents absorb research work — a full-file Read from a subagent must
-    pass through even on a large source file in a Serena project."""
-    monkeypatch.setenv("CLAUDE_AGENT_NAME", "explorer-1")
-    big = serena_project / "campaign.py"
-    big.write_text(_LARGE_SOURCE, encoding="utf-8")
+def test_subagent_is_exempt(serena_project, signal_dir):
+    big = _large(serena_project, "campaign.py")
 
-    _, parsed = _run_read(big, serena_project)
-    assert not _is_deny(parsed)
+    parsed = _run(_claude_read(big, serena_project), serena_project, signal_dir,
+                  CLAUDE_AGENT_NAME="explorer-1")
+    assert _deny_reason(parsed) is None

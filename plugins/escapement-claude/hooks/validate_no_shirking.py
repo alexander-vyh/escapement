@@ -226,37 +226,6 @@ _COMPILED_APPROVAL = [re.compile(p, re.IGNORECASE) for p in _APPROVAL_PATTERNS]
 
 
 # ---------------------------------------------------------------------------
-# Verification evidence (Level 3: require proof of outcome)
-# ---------------------------------------------------------------------------
-
-_CODE_MOD_TOOLS = frozenset({
-    "Edit", "Write", "NotebookEdit",
-    "mcp__serena__replace_symbol_body",
-    "mcp__serena__insert_after_symbol",
-    "mcp__serena__insert_before_symbol",
-    "mcp__serena__rename_symbol",
-})
-
-# Only Edit/Write target arbitrary file paths; NotebookEdit (.ipynb) and the
-# Serena symbol tools operate on code by construction, so they are always
-# code-mods. For Edit/Write we inspect the path: prose/docs edits are NOT code
-# modifications and must not demand a verification run (2026-06-01 false-positive:
-# the gate fired on a markdown-only memory edit). This mirrors the prose/docs
-# exemption in claude/rules/tdd-enforcement.md. Behavioral config (CI YAML, IaC,
-# manifests) is deliberately NOT exempt there, so it stays a code-mod here too —
-# the exemption is prose/docs ONLY, by file extension.
-_PATH_CHECKED_TOOLS = frozenset({"Edit", "Write"})
-_DOCS_EXTENSIONS = (".md", ".markdown", ".txt", ".rst", ".adoc")
-
-
-def _is_docs_path(file_path: str) -> bool:
-    """True iff file_path is a prose/docs file (exempt from the verification gate)."""
-    if not isinstance(file_path, str) or not file_path:
-        return False
-    return file_path.lower().endswith(_DOCS_EXTENSIONS)
-
-
-# ---------------------------------------------------------------------------
 # Transcript reading
 # ---------------------------------------------------------------------------
 

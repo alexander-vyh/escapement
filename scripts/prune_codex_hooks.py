@@ -26,6 +26,8 @@ LEGACY_REGISTRATIONS = {
         "sha256": {
             "1213b2981f7a78664b749da5c107ce454df4d585568bd699909e4ed897df9fdb",
             "d9b69df769e10fe12146c988f30f0a83d542a567e1a27eb5abe8802b32a13a43",
+            # Serena edits recognized in every host's spelling (escapement-l4fv)
+            "eb230b937e33d325c3893b0ba3a1ed4b4c8dd70738e20298392975e85c7d08d1",
         },
     },
     "implementation_echo_test_gate.py": {

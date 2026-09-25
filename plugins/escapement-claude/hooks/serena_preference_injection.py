@@ -1,78 +1,92 @@
 #!/usr/bin/env python3
-"""Claude Code hook: inject Serena-preference guidance at turn start.
+"""UserPromptSubmit hook (Claude, Codex, Pi): inject Serena guidance once per
+session.
 
-Fires on UserPromptSubmit. In projects where Serena has been onboarded
-(.serena/memories directory is populated), injects a short planning prompt
-that steers the model toward Serena's symbol tools for code navigation before
-it commits to an inline Read/Grep-heavy approach.
+Escapement bundles the Serena MCP server on every host, started with
+``--project-from-cwd``, so Serena is live in any code project. This steers the
+model toward Serena's symbol tools before it commits to a read-heavy approach,
+and nudges onboarding when the project has no Serena memories yet.
 
-Fires at most once per session — the injection becomes part of the conversation
-context, so repeated firing would just accumulate tokens without adding signal.
-
-Silent in projects without Serena onboarding.
+Fires at most once per session (keyed on the payload's ``session_id``) — the
+injection becomes part of the conversation context, so repeated firing would
+just accumulate tokens without adding signal. Silent outside code projects.
 
 Exit codes:
   0 — allow silently, OR emit additionalContext JSON to inject guidance
 """
 
+from __future__ import annotations
+
+import hashlib
 import json
 import os
+import re
 import sys
+import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _serena_tools import serena_guidance  # noqa: E402
+
+
+# Same project-root signals serena_preference_gate.py uses.
+_PROJECT_SIGNALS = (".git", "pyproject.toml", "package.json", "Gemfile",
+                    "Cargo.toml", "go.mod", ".serena/project.yml")
+_SAFE_SESSION_ID = re.compile(r"[A-Za-z0-9._-]{1,128}")
 
 
 # ---------------------------------------------------------------------------
 # Project / session discovery
 # ---------------------------------------------------------------------------
 
-def _session_flag_path() -> Path:
-    session_id = os.environ.get("CLAUDE_SESSION_ID") or str(os.getppid())
-    return Path(f"/tmp/serena_injection_{session_id}.flag")
+def _session_flag_path(session_id: str) -> Path:
+    if not _SAFE_SESSION_ID.fullmatch(session_id):
+        session_id = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return Path(tempfile.gettempdir()) / f"serena_injection_{session_id}.flag"
 
 
-def _has_serena_memories(start: Path) -> bool:
-    """Walk up from ``start`` looking for .serena/memories inside a project.
-
-    Uses the same project-root signals as serena_onboarding_check.sh. Returns
-    True if the directory exists and contains at least one file.
-    """
-    project_signals = (".git", "pyproject.toml", "package.json", "Gemfile",
-                       "Cargo.toml", "go.mod")
+def _project_root(start: Path) -> Path | None:
+    """The nearest ancestor of ``start`` that looks like a code project."""
     current = start.resolve() if start.exists() else start
     for directory in (current, *current.parents):
-        if any((directory / sig).exists() for sig in project_signals):
-            memories = directory / ".serena" / "memories"
-            if memories.is_dir():
-                try:
-                    return any(memories.iterdir())
-                except OSError:
-                    return False
-            return False
-        if directory == directory.parent:
-            break
-    return False
+        if any((directory / sig).exists() for sig in _PROJECT_SIGNALS):
+            return directory
+    return None
+
+
+def _has_serena_memories(root: Path) -> bool:
+    memories = root / ".serena" / "memories"
+    try:
+        return memories.is_dir() and any(memories.iterdir())
+    except OSError:
+        return False
 
 
 # ---------------------------------------------------------------------------
 # Injection content
 # ---------------------------------------------------------------------------
 
-_GUIDANCE = (
-    "Serena (LSP-backed semantic code tooling) is active for this project.\n\n"
-    "For **source code** navigation, prefer Serena's symbol tools over Read:\n"
-    "  - mcp__serena__get_symbols_overview(relative_path) — structure of a file\n"
-    "  - mcp__serena__find_symbol(name_path, relative_path) — fetch a class/method body\n"
-    "  - mcp__serena__find_referencing_symbols(name_path) — find callers of a symbol\n"
-    "  - mcp__serena__search_for_pattern(substring_pattern) — project-scoped pattern search\n\n"
-    "Use **Read** for: non-code files (markdown, YAML, JSON, logs, config), small "
-    "files, or targeted byte ranges (pass explicit offset+limit).\n\n"
-    "Use **Grep** for: literal strings, error messages, config keys — Serena is "
-    "semantic, Grep is textual.\n\n"
-    "Use **Glob** for: filename/path patterns.\n\n"
-    "Full-file Read on source code in this project is blocked by the "
-    "serena_preference_gate hook. If an investigation is large, dispatch an "
-    "explorer agent with a batch objective rather than reading inline."
-)
+def _guidance(onboarded: bool) -> str:
+    parts = [
+        "Serena (LSP-backed semantic code tooling) is available in this project.",
+        serena_guidance(),
+        "Serena memories are project knowledge: list_memories / read_memory for "
+        "what is relevant; write_memory for non-obvious facts you discover.\n"
+        "Read non-code files, small files, or explicit line ranges directly; use "
+        "text search for literal strings, error messages and config keys. When "
+        "dispatching subagents that will touch code, tell them to use Serena too.",
+    ]
+    if onboarded:
+        parts.append(
+            "Full-file reads of large source files are blocked here by the "
+            "serena_preference_gate hook."
+        )
+    else:
+        parts.append(
+            "Serena is not onboarded for this project yet (no .serena/memories): "
+            "run Serena's onboarding tool early."
+        )
+    return "\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -84,22 +98,25 @@ def main() -> int:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:
         return 0
+    if not isinstance(data, dict):
+        return 0
 
     hook_event = data.get("hook_event_name", "") or data.get("hookEventName", "")
     if hook_event != "UserPromptSubmit":
         return 0
 
     cwd_raw = data.get("cwd") or data.get("workingDirectory") or os.getcwd()
-    cwd = Path(cwd_raw)
-
-    if not _has_serena_memories(cwd):
+    root = _project_root(Path(cwd_raw))
+    if root is None:
         return 0
 
-    flag = _session_flag_path()
+    session_id = data.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        session_id = os.environ.get("CLAUDE_SESSION_ID") or str(os.getppid())
+    flag = _session_flag_path(session_id)
     if flag.exists():
-        # Already injected in this session — guidance is in context, no need to re-emit.
+        # Already injected in this session — guidance is in context.
         return 0
-
     try:
         flag.touch()
     except OSError:
@@ -108,7 +125,7 @@ def main() -> int:
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": _GUIDANCE,
+            "additionalContext": _guidance(_has_serena_memories(root)),
         }
     }))
     return 0

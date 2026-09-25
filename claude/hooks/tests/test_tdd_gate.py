@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 _hooks_dir = Path(__file__).resolve().parents[1]
 
 if str(_hooks_dir) not in sys.path:
@@ -37,11 +39,12 @@ is_exempt_file = tdd_gate.is_exempt_file
 # Helpers
 # ---------------------------------------------------------------------------
 
-_SERENA_EDIT_TOOLS = {
-    "mcp__serena__replace_symbol_body",
-    "mcp__serena__insert_after_symbol",
-    "mcp__serena__insert_before_symbol",
-}
+# The same Serena edit tool as each host spells it.
+_SERENA_REPLACE_BODY_SPELLINGS = (
+    "mcp__plugin_escapement_serena__replace_symbol_body",  # Claude plugin
+    "mcp__serena__replace_symbol_body",  # Codex / user-level Claude
+    "escapement__serena_replace_symbol_body",  # Pi
+)
 
 
 def _run(tool_name: str, file_path: str) -> tuple[bool, dict | None]:
@@ -51,7 +54,7 @@ def _run(tool_name: str, file_path: str) -> tuple[bool, dict | None]:
     'ask' permissionDecision. Returns (False, None) on allow (exit 0, no JSON).
     """
     # Serena tools use relative_path, not file_path.
-    path_key = "relative_path" if tool_name in _SERENA_EDIT_TOOLS else "file_path"
+    path_key = "relative_path" if "serena" in tool_name else "file_path"
     payload = {
         "hook_event_name": "PreToolUse",
         "tool_name": tool_name,
@@ -352,14 +355,23 @@ class TestMainTDDEnforcement:
 # ---------------------------------------------------------------------------
 
 class TestGatedSerenaTools:
-    def test_serena_replace_symbol_body_gated(self):
+    @pytest.mark.parametrize("tool_name", _SERENA_REPLACE_BODY_SPELLINGS)
+    def test_serena_replace_symbol_body_gated_on_every_host(self, tool_name):
         with (
             patch("tdd_gate.find_git_root", return_value="/repo"),
             patch("tdd_gate.has_tests_directory", return_value=True),
             patch("tdd_gate.get_modified_files", return_value=[]),
         ):
-            asked, _ = _run("mcp__serena__replace_symbol_body", "/repo/src/auth.py")
+            asked, _ = _run(tool_name, "/repo/src/auth.py")
         assert asked
+
+    def test_serena_read_tool_not_gated(self):
+        with (
+            patch("tdd_gate.find_git_root", return_value="/repo"),
+            patch("tdd_gate.has_tests_directory", return_value=True),
+            patch("tdd_gate.get_modified_files", return_value=[]),
+        ):
+            assert _run_allowed("mcp__plugin_escapement_serena__find_symbol", "/repo/src/auth.py")
 
     def test_serena_insert_after_symbol_gated(self):
         with (
@@ -367,7 +379,7 @@ class TestGatedSerenaTools:
             patch("tdd_gate.has_tests_directory", return_value=True),
             patch("tdd_gate.get_modified_files", return_value=[]),
         ):
-            asked, _ = _run("mcp__serena__insert_after_symbol", "/repo/src/models.py")
+            asked, _ = _run("mcp__plugin_escapement_serena__insert_after_symbol", "/repo/src/models.py")
         assert asked
 
     def test_serena_with_test_file_modified_allowed(self):
@@ -376,7 +388,7 @@ class TestGatedSerenaTools:
             patch("tdd_gate.has_tests_directory", return_value=True),
             patch("tdd_gate.get_modified_files", return_value=["tests/test_auth.py"]),
         ):
-            assert _run_allowed("mcp__serena__replace_symbol_body", "/repo/src/auth.py")
+            assert _run_allowed("escapement__serena_replace_symbol_body", "/repo/src/auth.py")
 
     def test_notebook_edit_gated(self):
         with (

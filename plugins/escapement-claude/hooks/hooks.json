@@ -487,15 +487,6 @@
       {
         "hooks": [
           {
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/serena_onboarding_check.sh\"",
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/harness/bin/session_watermark.py\"",
             "type": "command"
           }
