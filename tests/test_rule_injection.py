@@ -4,16 +4,17 @@ Business outcome
 ----------------
 A session starts already holding the rules that change what an agent does, and
 does not spend context on reference material it can read on demand. Before
-this, `inject-rules.sh` concatenated every `claude/rules/*.md` in full — the
+this, the injector concatenated every `claude/rules/*.md` in full — the
 same context cost for a 70-line worked example as for the sentence that changes
-the next action.
+the next action. Every host package (Claude, Codex, Pi) ships the same
+injector beside its own rules bundle, so each bundle is held to this oracle.
 
 Independent source of truth
 ---------------------------
-The generated hook's actual stdout, executed the way Claude Code executes it
-(bash, `CLAUDE_PLUGIN_ROOT` set, JSON on stdout). Not the renderer's template
-string, and not the marker constants re-derived here — those would be
-implementation echoes of the thing under test.
+The packaged hook's actual stdout, executed the way a host executes it
+(python, JSON on stdin and stdout). Not the renderer's template string, and
+not the marker constants re-derived here — those would be implementation
+echoes of the thing under test.
 
 Invalid solution classes this suite rejects
 -------------------------------------------
@@ -28,39 +29,57 @@ Invalid solution classes this suite rejects
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "escapement-claude"
-INJECTOR = PLUGIN / "hooks" / "inject-rules.sh"
-RULES = ROOT / "claude" / "rules"
+HOOK = ROOT / "claude" / "hooks" / "inject_rules.py"
+# Each host package's injector, found where that host runs it; rules are read
+# from ``<hook dir>/../rules``.
+PACKAGED_HOOKS = {
+    "claude": ROOT / "plugins" / "escapement-claude" / "hooks" / "inject_rules.py",
+    "codex": ROOT / "plugins" / "escapement" / "claude" / "hooks" / "inject_rules.py",
+    "pi": ROOT / "plugins" / "escapement-pi" / "claude" / "hooks" / "inject_rules.py",
+}
 
 
-def inject(plugin_root: Path) -> str:
-    """Run the generated hook and return the additionalContext it emits."""
+def inject(hook: Path) -> str:
+    """Run a hook and return the additionalContext it emits."""
     result = subprocess.run(
-        ["bash", str(INJECTOR)],
+        [sys.executable, "-B", str(hook)],
+        input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s"}),
         capture_output=True,
         text=True,
-        env={"CLAUDE_PLUGIN_ROOT": str(plugin_root), "PATH": "/usr/bin:/bin:/usr/local/bin"},
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     return payload["hookSpecificOutput"]["additionalContext"]
 
 
+@pytest.fixture(scope="module", params=sorted(PACKAGED_HOOKS))
+def host(request) -> tuple[str, Path]:
+    hook = PACKAGED_HOOKS[request.param]
+    return inject(hook), hook.parent.parent / "rules"
+
+
 @pytest.fixture(scope="module")
-def injected() -> str:
-    return inject(PLUGIN)
+def injected(host) -> str:
+    return host[0]
 
 
-def rule_titles() -> list[tuple[str, str]]:
+@pytest.fixture(scope="module")
+def rules(host) -> Path:
+    return host[1]
+
+
+def rule_titles(rules: Path) -> list[tuple[str, str]]:
     """(filename, H1 title) for every bundled rule."""
     out = []
-    for path in sorted(RULES.glob("*.md")):
+    for path in sorted(rules.glob("*.md")):
         first = next(
             (line for line in path.read_text(encoding="utf-8").splitlines()
              if line.startswith("# ")),
@@ -68,21 +87,22 @@ def rule_titles() -> list[tuple[str, str]]:
         )
         assert first, f"{path.name} has no H1 to identify it by"
         out.append((path.name, first[2:].strip()))
+    assert out, f"{rules} ships no rules"
     return out
 
 
-def marked_rules() -> list[Path]:
+def marked_rules(rules: Path) -> list[Path]:
     return [
-        p for p in sorted(RULES.glob("*.md"))
+        p for p in sorted(rules.glob("*.md"))
         if "escapement:detail:start" in p.read_text(encoding="utf-8")
     ]
 
 
 # --- No rule may vanish ----------------------------------------------------
 
-def test_every_rule_still_reaches_the_session(injected):
+def test_every_rule_still_reaches_the_session(injected, rules):
     """Positive control: holding back detail must never drop a whole rule."""
-    for name, title in rule_titles():
+    for name, title in rule_titles(rules):
         assert title in injected, f"{name}: rule missing from injected context"
 
 
@@ -92,14 +112,14 @@ def test_imperative_framing_survives(injected):
 
 # --- The saving is real ----------------------------------------------------
 
-def injected_slices(injected: str) -> dict[str, str]:
+def injected_slices(injected: str, rules: Path) -> dict[str, str]:
     """The injected context, cut back into per-rule pieces by H1 title.
 
     Checking a held-back line against the whole bundle gives false failures:
     two rules state the same anti-pattern verbatim, so a line withheld from one
     is legitimately present via the other. The question is per rule.
     """
-    titles = [(name, title) for name, title in rule_titles()]
+    titles = rule_titles(rules)
     marks = sorted(
         ((injected.index("# " + title), name) for name, title in titles
          if "# " + title in injected)
@@ -111,10 +131,10 @@ def injected_slices(injected: str) -> dict[str, str]:
     return slices
 
 
-def test_marked_detail_is_held_back(injected):
+def test_marked_detail_is_held_back(injected, rules):
     """Every marked region must be absent from ITS OWN rule's injected slice."""
-    slices = injected_slices(injected)
-    for path in marked_rules():
+    slices = injected_slices(injected, rules)
+    for path in marked_rules(rules):
         mine = slices[path.name]
         rest = path.read_text(encoding="utf-8")
         while "<!-- escapement:detail:start -->" in rest:
@@ -128,10 +148,10 @@ def test_marked_detail_is_held_back(injected):
                 )
 
 
-def test_marked_rules_are_actually_shortened(injected):
+def test_marked_rules_are_actually_shortened(injected, rules):
     """A marker that strips nothing is decoration. Each marked rule must shrink."""
-    slices = injected_slices(injected)
-    for path in marked_rules():
+    slices = injected_slices(injected, rules)
+    for path in marked_rules(rules):
         full = len(path.read_text(encoding="utf-8"))
         got = len(slices[path.name])
         assert got < full * 0.9, (
@@ -154,9 +174,9 @@ def test_injected_bundle_stays_within_budget(injected):
     )
 
 
-def test_held_back_rules_say_where_to_read_the_rest(injected):
+def test_held_back_rules_say_where_to_read_the_rest(injected, rules):
     """A rule whose detail is withheld must name the file that still holds it."""
-    for path in marked_rules():
+    for path in marked_rules(rules):
         assert path.name in injected, (
             f"{path.name}: detail held back with no path to read it — that is a gate "
             f"without a repair"
@@ -166,11 +186,14 @@ def test_held_back_rules_say_where_to_read_the_rest(injected):
 # --- Opt-in, and fail-open -------------------------------------------------
 
 def _fake_plugin(tmp_path: Path, files: dict[str, str]) -> Path:
+    """A package holding the injector and ``files`` as its rules bundle."""
     root = tmp_path / "plugin"
-    (root / "rules").mkdir(parents=True)
+    (root / "hooks").mkdir(parents=True)
+    shutil.copy2(HOOK, root / "hooks" / HOOK.name)
+    (root / "rules").mkdir()
     for name, body in files.items():
         (root / "rules" / name).write_text(body, encoding="utf-8")
-    return root
+    return root / "hooks" / HOOK.name
 
 
 def test_unmarked_rule_is_injected_whole(tmp_path):
@@ -209,7 +232,5 @@ def test_detail_region_is_removed_but_neighbours_survive(tmp_path):
 
 def test_missing_bundle_still_fails_loud(tmp_path):
     """A broken install must be visible, not a silently ruleless session."""
-    root = tmp_path / "empty"
-    (root / "rules").mkdir(parents=True)
-    context = inject(root)
+    context = inject(_fake_plugin(tmp_path, {}))
     assert "WARNING" in context and "NOT injected" in context

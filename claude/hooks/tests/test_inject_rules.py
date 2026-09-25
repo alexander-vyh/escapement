@@ -55,28 +55,6 @@ def test_claude_plugin_layout_reads_rules_beside_hooks(tmp_path):
     assert "MUST follow" in context
 
 
-def test_detail_regions_are_held_back_and_markup_stripped(tmp_path):
-    rule = (
-        "Always do X.\n"
-        "<!-- escapement:detail:start -->\nLong worked example.\n<!-- escapement:detail:end -->\n"
-        "Never do Y.\n<!-- support-claims: k=v -->\n"
-    )
-    hook = _install(tmp_path, "p/hooks", "p/rules", {"x.md": rule})
-    context = _run(hook)["additionalContext"]
-
-    assert "Always do X." in context and "Never do Y." in context
-    assert "Long worked example." not in context
-    assert "k=v" not in context
-    assert "read x.md" in context
-
-
-def test_missing_bundle_is_reported_not_silent(tmp_path):
-    hook = _install(tmp_path, "p/hooks", "p/rules", {})
-    context = _run(hook)["additionalContext"]
-
-    assert "WARNING" in context and "NOT injected" in context
-
-
 def test_codex_precompact_reinjection_names_its_event(tmp_path):
     hook = _install(tmp_path, "p/claude/hooks", "p/claude/rules", {"a.md": "Rule A.\n"})
     output = _run(hook, event="PreCompact")

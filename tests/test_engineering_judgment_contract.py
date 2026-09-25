@@ -124,10 +124,13 @@ def assert_simplifier_contract(root):
     for rel_path in (
         "claude/commands/review.md",
         "plugins/escapement-claude/commands/review.md",
+        ".agents/skills/escapement-review/SKILL.md",
+        "plugins/escapement/skills/escapement-review/SKILL.md",
+        "plugins/escapement-pi/prompts/review.md",
     ):
         text = (root / rel_path).read_text()
         simplifier = text.split("### Agent 3: code-simplifier\n", 1)[1]
-        strategy = simplifier.split("Review strategy:\n", 1)[1].split("\nYou are on team", 1)[0]
+        strategy = simplifier.split("Review strategy:\n", 1)[1].split("\n\n", 1)[0]
         assert SIMPLIFIER_QUESTION in strategy
         assert_no_loc_pressure(strategy)
 
@@ -136,6 +139,8 @@ def assert_sibling_smell(root):
     for rel_path in (
         "claude/skills/behavioral-test-oracle-review/SKILL.md",
         "plugins/escapement-claude/skills/behavioral-test-oracle-review/SKILL.md",
+        ".agents/skills/behavioral-test-oracle-review/SKILL.md",
+        "plugins/escapement/skills/behavioral-test-oracle-review/SKILL.md",
     ):
         section = markdown_section(root / rel_path, "Common Oracle Smells")
         assert SIBLING_SMELL in section
@@ -199,13 +204,13 @@ def test_outcome_must_be_a_user_outcome_not_a_green_run(tmp_path):
             assert_minimum_contract,
         ),
         (
-            "claude/commands/review.md",
+            "agent-surfaces/commands/review.md",
             SIMPLIFIER_QUESTION,
             '2. For each change, ask: "Could this be 3 lines instead of 30?"',
             assert_simplifier_contract,
         ),
         (
-            "claude/skills/behavioral-test-oracle-review/SKILL.md",
+            "agent-surfaces/skills/behavioral-test-oracle-review.md",
             SIBLING_SMELL,
             "- Reported path passes its regression test",
             assert_sibling_smell,
@@ -234,13 +239,13 @@ def test_weakened_contract_fails_after_regeneration(
             assert_minimum_contract,
         ),
         (
-            "claude/commands/review.md",
+            "agent-surfaces/commands/review.md",
             SIMPLIFIER_QUESTION,
             "\n2a. Prefer one line over several and minimize file count.",
             assert_simplifier_contract,
         ),
         (
-            "claude/skills/behavioral-test-oracle-review/SKILL.md",
+            "agent-surfaces/skills/behavioral-test-oracle-review.md",
             SIBLING_SMELL,
             (
                 "\n- A passing regression test for the reported path is sufficient; "
@@ -261,13 +266,13 @@ def test_weakened_contract_fails_after_regeneration(
             assert_minimum_contract,
         ),
         (
-            "claude/commands/review.md",
+            "agent-surfaces/commands/review.md",
             SIMPLIFIER_QUESTION,
             "\n2a. Prefer three lines to thirty when both work.",
             assert_simplifier_contract,
         ),
         (
-            "claude/skills/behavioral-test-oracle-review/SKILL.md",
+            "agent-surfaces/skills/behavioral-test-oracle-review.md",
             SIBLING_SMELL,
             "\n- A regression test for the reported path alone is enough",
             assert_sibling_smell,
