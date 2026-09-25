@@ -57,6 +57,26 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/gate_design_nudge.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/file_complexity_gate.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/review_gate.py\"",
             "timeout": 5,
             "type": "command"
@@ -107,16 +127,6 @@
       {
         "hooks": [
           {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/gate_design_nudge.py\"",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": "apply_patch"
-      },
-      {
-        "hooks": [
-          {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/no_direct_send_guard.py\"",
             "timeout": 5,
             "type": "command"
@@ -128,16 +138,6 @@
         "hooks": [
           {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/tdd-gate.py\"",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": "apply_patch"
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/file_complexity_gate.py\"",
             "timeout": 10,
             "type": "command"
           }
@@ -262,6 +262,16 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/serena_preference_injection.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/discovery-nudge.py\"",
             "timeout": 5,
             "type": "command"
@@ -273,16 +283,6 @@
         "hooks": [
           {
             "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/review_nudge.py\"",
-            "timeout": 5,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/serena_preference_injection.py\"",
             "timeout": 5,
             "type": "command"
           }
