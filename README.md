@@ -122,6 +122,36 @@ cd "$HOME/src/escapement"
 
 Restart Claude Code after an upgrade because an already-running process may retain an older versioned plugin root. `INSTALL.sh` is an optional compatibility installer for auxiliary assets; it is not the primary workflow installer.
 
+### OMP
+
+OMP keeps its own Escapement package, independently of Claude, Codex and Pi:
+
+```bash
+omp plugin install github:alexander-vyh/escapement
+./scripts/omp-plugin-update.sh
+```
+
+The updater uses OMP's supported upgrade command, preserves the registered
+dependency and plugin settings, compares installed shipped files with this
+checkout, and exercises the installed adapter with Bun. Virtual `xd://` device
+calls must pass while managed primary-checkout file writes remain blocked.
+Reload existing OMP sessions after an upgrade.
+
+### Deploy after merge
+
+The repository's declared deployment command refreshes Claude, Codex and OMP:
+
+```bash
+./scripts/deploy-plugins.sh
+```
+
+An absent OMP installation reports an explicit skip. A configured but broken,
+failed or stale OMP installation fails deployment. To verify OMP independently:
+
+```bash
+python3 scripts/verify_omp_plugin.py --source .
+```
+
 ## Architecture and operating doctrine
 
 ### Durable capability chain
