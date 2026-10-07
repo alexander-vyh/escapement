@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1297 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1263 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -41,7 +41,6 @@ from would_block_stop import (  # noqa: E402
     resolve_watermark,
     _load_json,
     _parse_iso,
-    _verification_passed_this_turn,
 )
 from thread_identity import state_identity  # noqa: E402
 import session_isolation  # noqa: E402  (per-session isolation steer, bead e9v.4)
@@ -853,47 +852,14 @@ def _check_wakeup_blockers(session_mode: dict, run_bd=None, thread_dir=None) -> 
     return ("allow", "wakeup_blockers_verified")
 
 
-# This block is reached from the green path AND from a registered wakeup, so it must
-# not assume the verify passed: it states the contract's real last result. Before,
-# it said "your contract verify passed" on a wakeup with a red (exit 1) contract.
 _IMPLICIT_QUEUE_DISPLAY = (
-    "continuation-harness: {verify_status}, and bd still has unfinished work in "
+    "continuation-harness: your contract verify passed, but bd still has unfinished work in "
     "this repo. If any of it is in this session's scope, keep going — do NOT stop to summarize "
     "or to ask the user what to do next. If the only open work is unrelated backlog from other "
     "sessions, do not drain it (that is scope creep): instead close out your own claimed tasks, "
     "or call ScheduleWakeup if you are waiting on something external. "
     "Hint: `bd list --status=in_progress` shows what is still claimed."
 )
-
-
-_OUTPUT_TAIL_CHARS = 300
-
-
-def _verify_status(state: dict) -> str:
-    """The contract's most recent verify result, as a sentence — never "passed"
-    unless the gate itself would count it as a pass."""
-    contract = state.get("contract") if isinstance(state, dict) else None
-    if not isinstance(contract, dict):
-        return "you have no contract declared"
-    last = contract.get("last_run")
-    if not isinstance(last, dict):
-        return "your contract verify has not been run"
-    code = last.get("exit_code")
-    expected = contract.get("expected_exit", 0)
-    when = last.get("timestamp", "an unknown time")
-    if _verification_passed_this_turn(contract) and not state.get("contract_binding_problem"):
-        return f"your contract verify passed (exit {code} at {when})"
-    if code == expected:
-        why = state.get("contract_binding_problem") or (
-            "it is stale or suppressed, so it does not count as this turn's pass"
-        )
-        return f"your contract verify has NOT passed this turn (last run exit {code} at {when}; {why})"
-    tail = (last.get("output_excerpt") or "").strip()[-_OUTPUT_TAIL_CHARS:]
-    tail_text = f"; output tail: {tail!r}" if tail else ""
-    return (
-        f"your contract verify FAILED — last run exited {code} at {when}, "
-        f"expected {expected}{tail_text}"
-    )
 
 
 def _created_at_in_scope(item: dict, watermark: "_dt2.datetime") -> bool:
@@ -1262,7 +1228,7 @@ def main() -> int:
         if winddown_display:
             display = winddown_display
         elif reason.startswith("implicit_queue_"):
-            display = _IMPLICIT_QUEUE_DISPLAY.format(verify_status=_verify_status(state))
+            display = _IMPLICIT_QUEUE_DISPLAY
         elif reason == "verification_suppressed":
             display = _VERIFICATION_SUPPRESSED_DISPLAY
         elif reason == "no_declaration":
