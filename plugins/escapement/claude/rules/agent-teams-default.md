@@ -1,7 +1,7 @@
 # Agent Teams as Default — Global Rule
 
 <!-- escapement:binding:start -->
-For any task beyond a single quick action — research, implementation, debugging, review — dispatch agents, in parallel where the work is independent. Every dispatched agent MUST be named so it can be addressed and coordinated; agents that will commit each get their own worktree. Subagents do not inherit these rules: put the continuation discipline in every agent prompt.
+For any task beyond a single quick action — research, implementation, debugging, review — dispatch agents, in parallel where the work is independent; "roundtable" never means simulated dialogue in your output. Every dispatched agent MUST be named so it can be addressed and coordinated; agents that will commit each get their own worktree. Subagents do not inherit these rules: put the continuation discipline in every agent prompt.
 <!-- escapement:binding:end -->
 
 ## Default to Agents

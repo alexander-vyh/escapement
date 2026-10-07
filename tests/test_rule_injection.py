@@ -31,6 +31,8 @@ Invalid solution classes this suite rejects
   -> ``test_rule_without_binding_is_named_loudly_with_its_path``
 - An index with no way to reach the full rule -> ``test_every_rule_names_its_full_file``
 - A broken install failing quietly -> ``test_missing_bundle_still_fails_loud``
+- A binding that drops a rule's hard prohibition
+  -> ``test_every_bold_prohibition_is_bound_or_explicitly_waived``
 """
 
 from __future__ import annotations
@@ -106,7 +108,9 @@ def test_payload_is_inlined_by_the_host_not_saved_to_a_file(host):
         f"injected {len(injected)} chars; Claude Code inlines at most {HOST_INLINE_LIMIT} "
         f"and shows only a 2,000-char preview of anything larger — tighten a binding region"
     )
-    assert "WARNING" not in injected, "a shipped bundle must fit without the over-budget path"
+    assert "[escapement] WARNING" not in injected, (
+        "a shipped bundle must fit without the over-budget path"
+    )
 
 
 def test_every_rule_names_its_full_file(host):
@@ -122,6 +126,67 @@ def test_imperative_framing_survives(host):
 
 def test_precompact_reinjects_the_same_index():
     assert inject(HOOK, "PreCompact") == inject(HOOK, "SessionStart")
+
+
+# --- Bindings keep the rules' teeth ----------------------------------------
+
+# Every bolded prohibition in a rule body, and how its binding carries it: a
+# phrase that must appear in that rule's binding region, or a waiver saying why
+# the agent can safely meet it only on reading the full rule. A new bolded
+# prohibition fails this test until someone makes that call.
+PROHIBITIONS: dict[tuple[str, str], tuple[str, str]] = {
+    ("agent-teams-default.md", '"Roundtable" NEVER means writing simulated dialogue in your output.'):
+        ("bound", "never means simulated dialogue"),
+    ("agent-teams-default.md", "Subagents do not inherit this rule."):
+        ("bound", "Subagents do not inherit"),
+    ("continuation-harness.md", 'merge and ship it live. Do NOT ask "want me to merge it now, or review the PR first?"'):
+        ("bound", "merge on green without asking"),
+    ("continuation-harness.md", "Attempt the merge; do not pre-judge repository authorization in conversation."):
+        ("bound", "do not pre-judge"),
+    ("molecule-awareness.md", "Do NOT use `bd mol show` to find formulas"):
+        ("waived", "formula-authoring procedure; only reached while creating a molecule, "
+                   "a task that sends the agent to the full rule"),
+    ("outcome-ownership.md", "merge it and ship it live; do not ask."):
+        ("bound", "merge it and ship it live; do not ask"),
+    ("research-findings-persistence.md", "never the payload."):
+        ("bound", "never the payload"),
+    ("tdd-enforcement.md", "Lint alone is forbidden as the verification for trigger / auth / deploy-gating changes."):
+        ("bound", "Lint alone is forbidden"),
+    ("why-drilling.md", "Mark it unconfirmed, name who/what would confirm it, and proceed — do not block."):
+        ("bound", "do not block"),
+    ("worktree-discipline.md", "never"):
+        ("bound", "never the isolation mechanism"),
+    ("worktree-discipline.md", "Never"):
+        ("bound", "never stash, checkout, clean, or discard WIP you did not write"),
+}
+_BOLD = re.compile(r"\*\*([^*]+?)\*\*", re.S)
+_PROHIBITION = re.compile(r"\b(forbidden|never|must not|do not)\b", re.I)
+
+
+def bold_prohibitions(rules: Path) -> set[tuple[str, str]]:
+    found = set()
+    for path in sorted(rules.glob("*.md")):
+        text = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)
+        text = BINDING.sub("", text)
+        for match in _BOLD.finditer(text):
+            phrase = " ".join(match.group(1).split())
+            if _PROHIBITION.search(phrase):
+                found.add((path.name, phrase))
+    return found
+
+
+def test_every_bold_prohibition_is_bound_or_explicitly_waived():
+    rules = ROOT / "claude" / "rules"
+    assert bold_prohibitions(rules) == set(PROHIBITIONS), (
+        "bolded prohibitions changed — bind each new one or waive it with a reason"
+    )
+    for (name, _), (kind, value) in PROHIBITIONS.items():
+        if kind == "waived":
+            assert len(value) >= 40, f"{name}: a waiver needs a real reason"
+            continue
+        assert value.lower() in binding_of(rules / name).lower(), (
+            f"{name}: binding drops the prohibition it must carry ({value!r})"
+        )
 
 
 # --- Synthetic bundles -----------------------------------------------------

@@ -1,7 +1,7 @@
 # Worktree Discipline — One Writer, One Worktree (Global Rule)
 
 <!-- escapement:binding:start -->
-One writer, one worktree. Before the first git-mutating action of any task, create your own worktree and branch with the bundled `escapement-worktree create` command and do all write work there — one small commit is no exemption. Treat the root checkout as read-only shared space: never checkout, stash, commit, rebase, or switch branches there, and leave others' WIP alone. Each writing agent gets its own worktree; verify branch and status before every git op.
+One writer, one worktree. Before the first git-mutating action of any task, create your own worktree and branch with the bundled `escapement-worktree create` command and do all write work there — one small commit is no exemption. Treat the root checkout as read-only shared space: never checkout, stash, commit, rebase, or switch branches there, and never stash, checkout, clean, or discard WIP you did not write. Each writing agent gets its own worktree; prompt-level file lanes are never the isolation mechanism. Verify branch and status before every git op.
 <!-- escapement:binding:end -->
 
 ## The unit of isolation is the WRITER, not the agent

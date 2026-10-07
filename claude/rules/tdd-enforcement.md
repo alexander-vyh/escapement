@@ -1,7 +1,7 @@
 # TDD Enforcement — Global Rule
 
 <!-- escapement:binding:start -->
-For any non-trivial change, go Outcome -> Oracle -> Constraints -> Tests -> Code. Before implementation, write a Test Oracle Brief: business invariant, independent source of truth, constraints, invalid solution classes, a fragile implementation the tests must reject, negative and positive controls, missing-data handling, and final outcome verification. Tests must reject plausible bad implementations; tests that echo implementation details are not accepted.
+For any non-trivial change, go Outcome -> Oracle -> Constraints -> Tests -> Code. Before implementation, write a Test Oracle Brief: business invariant, independent source of truth, constraints, invalid solution classes, a fragile implementation the tests must reject, negative and positive controls, missing-data handling, and final outcome verification. Tests must reject plausible bad implementations; tests that echo implementation details are not accepted. Lint alone is forbidden as the verification for trigger / auth / deploy-gating changes: observe the real behavior, or, when it cannot be reproduced locally, file a structured waiver that names the post-merge observation that will confirm it.
 <!-- escapement:binding:end -->
 
 ## Outcome -> Oracle -> Constraints -> Tests -> Code
