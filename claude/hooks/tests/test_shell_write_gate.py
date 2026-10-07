@@ -13,7 +13,10 @@ the Claude PostToolUse payload for it. Wrong implementations each case rejects:
   - firing on every Bash call: a later unrelated `ls` must be silent;
   - ignoring untracked files: a brand-new module must be reported;
   - treating tests/ as behaviour code: a test-only change owes no TDD nudge;
-  - firing on anything dirty: a docs change is the positive control.
+  - firing on anything dirty: a docs change is the positive control;
+  - blaming the checkout instead of the session: many sessions share one
+    checkout, so dirt that was there before this session's command, or that
+    another session wrote between its commands, is not this session's write.
 """
 
 from __future__ import annotations
@@ -83,25 +86,34 @@ def env(tmp_path: Path) -> dict:
 
 
 class Shell:
-    """One session: run a real shell command, then the hook on its payload."""
+    """One session: the hook before a real shell command, the command, the hook after.
 
-    def __init__(self, repo: Path, env: dict) -> None:
-        self.repo, self.env, self.session = repo, env, f"s-{uuid.uuid4()}"
+    `pre=False` is a host that delivers only the PostToolUse half.
+    """
 
-    def bash(self, command: str) -> dict | None:
-        subprocess.run(["bash", "-c", command], cwd=self.repo, check=True)
+    def __init__(self, repo: Path, env: dict, *, pre: bool = True) -> None:
+        self.repo, self.env, self.session, self.pre = repo, env, f"s-{uuid.uuid4()}", pre
+
+    def _hook(self, event: str, command: str) -> dict | None:
         payload = {
             "session_id": self.session,
             "cwd": str(self.repo),
-            "hook_event_name": "PostToolUse",
+            "hook_event_name": event,
             "tool_name": "Bash",
             "tool_input": {"command": command},
-            "tool_response": {"stdout": "", "stderr": "", "interrupted": False},
         }
+        if event == "PostToolUse":
+            payload["tool_response"] = {"stdout": "", "stderr": "", "interrupted": False}
         proc = subprocess.run([sys.executable, "-B", str(HOOK)], input=json.dumps(payload),
                               capture_output=True, text=True, env=self.env, timeout=60)
         assert proc.returncode == 0, proc.stderr
         return json.loads(proc.stdout) if proc.stdout.strip() else None
+
+    def bash(self, command: str) -> dict | None:
+        if self.pre:
+            assert self._hook("PreToolUse", command) is None, "the snapshot never blocks"
+        subprocess.run(["bash", "-c", command], cwd=self.repo, check=True)
+        return self._hook("PostToolUse", command)
 
 
 def _feedback(output: dict | None) -> str:
@@ -198,11 +210,70 @@ def test_outside_a_repo_is_silent(env, tmp_path):
 
 
 def test_without_tdd_gate_the_brief_is_still_owed(repo, env, tmp_path, monkeypatch):
-    """Open PR #250 retires tdd-gate: the brief check must not die with it."""
+    """Open PR #250 retires tdd-gate and _advisory_dedupe: the brief check must not die with them."""
     import shutil
     hooks = tmp_path / "hooks"
-    shutil.copytree(HOOK.parent, hooks, ignore=shutil.ignore_patterns("tdd-gate.py", "tests"))
+    shutil.copytree(HOOK.parent, hooks,
+                    ignore=shutil.ignore_patterns("tdd-gate.py", "_advisory_dedupe.py", "tests"))
     monkeypatch.setattr(sys.modules[__name__], "HOOK", hooks / HOOK.name)
     reason = _feedback(Shell(repo, env).bash(HEREDOC))
     assert "test-oracle-brief.md" in reason and "src/app.py" in reason
     assert "TDD" not in reason
+
+
+# --- Whose write is it? Many sessions share one checkout. -------------------
+
+def test_dirt_from_before_the_session_is_not_blamed(repo, env):
+    """Negative control: src/app.py was already dirty when this session started."""
+    (repo / "src" / "app.py").write_text("VALUE = 7\n")
+    (repo / "src" / "legacy.py").write_text("OLD = 1\n")
+    shell = Shell(repo, env)
+    assert shell.bash("ls") is None
+    assert shell.bash("echo more >> docs/README.md") is None
+
+
+def test_another_sessions_writes_are_not_blamed(repo, env):
+    """Session B writes between session A's commands; A's next command is innocent."""
+    a, b = Shell(repo, env), Shell(repo, env)
+    assert a.bash("ls") is None
+    assert "src/app.py" in _feedback(b.bash(HEREDOC)), "B wrote it, so B is told"
+    assert a.bash("ls") is None, "A must not be blamed for B's shell write"
+    (repo / "src" / "other.py").write_text("B = 1\n")  # B again, through its Edit tool
+    assert a.bash("git status --short") is None, "nor for B's edit-tool write"
+
+
+def test_this_sessions_heredoc_is_held_amid_foreign_dirt(repo, env):
+    """Positive control: foreign dirt exists, and this session's own write still reports."""
+    (repo / "src" / "legacy.py").write_text("OLD = 1\n")
+    reason = _feedback(Shell(repo, env).bash("cat > src/pricing.py <<'EOF'\nRATE = 2\nEOF"))
+    assert "src/pricing.py" in reason
+    assert "legacy.py" not in reason, "only this session's write is named"
+
+
+def test_dirty_before_then_changed_by_this_session_is_held(repo, env):
+    (repo / "src" / "app.py").write_text("VALUE = 7\n")
+    shell = Shell(repo, env)
+    assert shell.bash("ls") is None
+    reason = _feedback(shell.bash("echo 'VALUE = 8' > src/app.py"))
+    assert "src/app.py" in reason
+
+
+def test_without_a_pre_snapshot_the_first_observation_is_the_baseline(repo, env):
+    """A host that sends only PostToolUse: what is dirty at the first look is not
+    blamed, and every later shell write in that session still is."""
+    (repo / "src" / "legacy.py").write_text("OLD = 1\n")
+    shell = Shell(repo, env, pre=False)
+    assert shell.bash("ls") is None
+    reason = _feedback(shell.bash(HEREDOC))
+    assert "src/app.py" in reason and "legacy.py" not in reason
+    assert _feedback(shell.bash("echo 'OLD = 2' > src/legacy.py")), "pre-dirty, then changed here"
+
+
+def test_corrupt_session_state_fails_open(repo, env):
+    shell = Shell(repo, env)
+    assert shell.bash("ls") is None
+    for path in Path(env["HARNESS_ROOT"]).rglob("*"):
+        if path.is_file() and shell.session in str(path):
+            path.write_text("{not json")
+    shell.bash(HEREDOC)  # must not crash; the hook asserts exit 0
+    assert shell.bash("ls") is None

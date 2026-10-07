@@ -2383,12 +2383,18 @@
     },
     {
       "id": "shell_write_gate",
-      "description": "Hold files changed through the shell to the TDD and Test Oracle Brief requirements an Edit meets.",
+      "description": "Hold files this session changed through the shell to the TDD and Test Oracle Brief requirements an Edit meets; a PreToolUse snapshot keeps other sessions' dirt out of it.",
       "source": "claude/hooks/shell_write_gate.py",
       "hosts": {
         "codex": {
           "status": "ready",
           "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            },
             {
               "event": "PostToolUse",
               "matcher": "Bash",
@@ -2405,6 +2411,11 @@
           "status": "ready",
           "events": [
             {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B ~/.claude/hooks/shell_write_gate.py"
+            },
+            {
               "event": "PostToolUse",
               "matcher": "Bash",
               "command": "python3 -B ~/.claude/hooks/shell_write_gate.py"
@@ -2417,6 +2428,12 @@
         "pi": {
           "status": "ready",
           "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            },
             {
               "event": "PostToolUse",
               "matcher": "bash",

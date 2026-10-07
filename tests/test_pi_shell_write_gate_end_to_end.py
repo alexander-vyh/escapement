@@ -29,25 +29,33 @@ def _project(tmp_path: Path) -> Path:
     })
 
 
-def _ran(session: Session, repo: Path, command: str) -> dict:
-    """Pi's bash ran `command`: the change is on disk before tool_result."""
-    subprocess.run(["bash", "-c", command], cwd=repo, check=True)
+def _ran(plugin: Path, env: dict, session: Session, repo: Path, command: str) -> dict:
+    """Pi's tool_call, then bash runs `command`, then its tool_result.
+
+    The tool_call runs the PreToolUse snapshot, so it is delivered before the
+    change is on disk; the outcome returned is the tool_result's.
+    """
     arguments = {"command": command}
-    session.tool_call("bash", arguments)
-    return session.tool_result("bash", arguments, "done")
+    (call,) = run(plugin, [session.tool_call("bash", arguments)], env)
+    assert not (call["result"] or {}).get("block"), call
+    subprocess.run(["bash", "-c", command], cwd=repo, check=True)
+    (outcome,) = run(plugin, [session.tool_result("bash", arguments, "done")], env)
+    return outcome
 
 
 def test_pi_shell_write_without_tests_is_reported_in_the_result_once(plugin, tmp_path):
     repo = _project(tmp_path)
-    session = Session(repo)
-    write = _ran(session, repo, "python3 -c \"open('src/app.py','w').write('VALUE = 2\\n')\"")
-    later = _ran(session, repo, "ls")
+    (repo / "src" / "legacy.py").write_text("OLD = 1\n")  # another session's dirt
+    session, env = Session(repo), pi_env(tmp_path)
 
-    first, second = run(plugin, [write, later], pi_env(tmp_path))
+    first = _ran(plugin, env, session, repo,
+                 "python3 -c \"open('src/app.py','w').write('VALUE = 2\\n')\"")
+    second = _ran(plugin, env, session, repo, "ls")
 
     assert first["result"]["content"][0]["text"] == "done"
     report = appended_text(first["result"])
     assert "TDD" in report and "src/app.py" in report
+    assert "legacy.py" not in report, "dirt this session did not write is not its debt"
     assert "test-oracle-brief.md" in report
     assert second["result"] is None, "an unchanged debt is not repeated on every bash call"
 
@@ -55,8 +63,6 @@ def test_pi_shell_write_without_tests_is_reported_in_the_result_once(plugin, tmp
 def test_pi_shell_docs_write_is_silent(plugin, tmp_path):
     """Positive control: a docs change owes neither a test nor a brief."""
     repo = _project(tmp_path)
-    session = Session(repo)
-
-    (outcome,) = run(plugin, [_ran(session, repo, "echo more >> docs/README.md")], pi_env(tmp_path))
+    outcome = _ran(plugin, pi_env(tmp_path), Session(repo), repo, "echo more >> docs/README.md")
 
     assert outcome["result"] is None
