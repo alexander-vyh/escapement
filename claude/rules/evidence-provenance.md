@@ -1,6 +1,8 @@
 # Evidence Provenance — Global Rule
 
-Do not state an inference with the confidence of a verified fact.
+<!-- escapement:binding:start -->
+Do not state an inference with the confidence of a verified fact. For a load-bearing claim you did not verify, do exactly one of: verify it (the default when cheap), mark it (`[inferred]`, "likely"), ask, or placeholder it (`[PLACEHOLDER — verify: <claim>]`). Never write it as a flat assertion indistinguishable from something you measured.
+<!-- escapement:binding:end -->
 
 When a claim is load-bearing — a decision, design, or conclusion rests on it —
 the reader must be able to tell whether you *verified* it or *guessed* it. Prose

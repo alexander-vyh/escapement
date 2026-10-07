@@ -2,33 +2,41 @@
 
 Business outcome
 ----------------
-A session starts already holding the rules that change what an agent does, and
-does not spend context on reference material it can read on demand. Before
-this, the injector concatenated every `claude/rules/*.md` in full — the
-same context cost for a 70-line worked example as for the sentence that changes
-the next action. Every host package (Claude, Codex, Pi) ships the same
-injector beside its own rules bundle, so each bundle is held to this oracle.
+Every always-on rule's binding requirement reaches the agent at session start
+and after compaction, on Claude, Codex and Pi. Before this, the injector
+concatenated every rule (~42 KB). Claude Code inlines a hook's
+``additionalContext`` only up to 10,000 characters; past that it saves the text
+to a file and shows a 2,000-character preview (documented at
+https://code.claude.com/docs/en/hooks, "capped at 10,000 characters", and
+observed: 10/10 replay sessions got the preview, 0 opened the file). So 12 of
+13 rules never reached the model, silently.
 
 Independent source of truth
 ---------------------------
-The packaged hook's actual stdout, executed the way a host executes it
-(python, JSON on stdin and stdout). Not the renderer's template string, and
-not the marker constants re-derived here — those would be implementation
-echoes of the thing under test.
+Each rule file's own binding region (``escapement:binding`` markers), read
+from the package the host actually ships, and the packaged hook's stdout run
+the way a host runs it. The host limit is the documented constant above, not
+anything the hook declares.
 
 Invalid solution classes this suite rejects
 -------------------------------------------
-- A rule silently disappearing from the session -> ``test_every_rule_still_reaches_the_session``
-- Marked detail still being injected (no saving at all) -> ``test_marked_detail_is_held_back``
-- Held-back detail with no way to reach it -> ``test_held_back_rules_say_where_to_read_the_rest``
-- Truncating a rule that never opted in -> ``test_unmarked_rule_is_injected_whole``
-- Silently eating the tail on an unclosed marker -> ``test_unclosed_marker_injects_the_rule_intact``
+- Truncating the old concatenation to the limit (later rules vanish)
+  -> ``test_every_rules_binding_requirement_reaches_the_session``
+- A titles-only index -> same test (asserts the requirement text, not the title)
+- A size check that warns but still emits an oversized payload
+  -> ``test_oversized_bundle_fails_loud_and_still_fits``
+- Summaries hard-coded in the hook (a second source of truth)
+  -> ``test_binding_text_comes_from_the_rule_file``
+- A rule without a binding region silently dropped
+  -> ``test_rule_without_binding_is_named_loudly_with_its_path``
+- An index with no way to reach the full rule -> ``test_every_rule_names_its_full_file``
 - A broken install failing quietly -> ``test_missing_bundle_still_fails_loud``
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -41,17 +49,25 @@ HOOK = ROOT / "claude" / "hooks" / "inject_rules.py"
 # Each host package's injector, found where that host runs it; rules are read
 # from ``<hook dir>/../rules``.
 PACKAGED_HOOKS = {
+    "repo": HOOK,
     "claude": ROOT / "plugins" / "escapement-claude" / "hooks" / "inject_rules.py",
     "codex": ROOT / "plugins" / "escapement" / "claude" / "hooks" / "inject_rules.py",
     "pi": ROOT / "plugins" / "escapement-pi" / "claude" / "hooks" / "inject_rules.py",
 }
 
+# Claude Code's documented inline cap for a hook's additionalContext.
+HOST_INLINE_LIMIT = 10_000
 
-def inject(hook: Path) -> str:
+BINDING = re.compile(
+    r"<!-- escapement:binding:start -->(.*?)<!-- escapement:binding:end -->", re.S
+)
+
+
+def inject(hook: Path, event: str = "SessionStart") -> str:
     """Run a hook and return the additionalContext it emits."""
     result = subprocess.run(
         [sys.executable, "-B", str(hook)],
-        input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s"}),
+        input=json.dumps({"hook_event_name": event, "session_id": "s"}),
         capture_output=True,
         text=True,
     )
@@ -60,130 +76,55 @@ def inject(hook: Path) -> str:
     return payload["hookSpecificOutput"]["additionalContext"]
 
 
+def binding_of(path: Path) -> str:
+    regions = BINDING.findall(path.read_text(encoding="utf-8"))
+    assert len(regions) == 1, f"{path.name}: needs exactly one binding region, has {len(regions)}"
+    text = regions[0].strip()
+    assert len(text) > 40, f"{path.name}: binding region is too thin to bind anything"
+    return text
+
+
 @pytest.fixture(scope="module", params=sorted(PACKAGED_HOOKS))
 def host(request) -> tuple[str, Path]:
     hook = PACKAGED_HOOKS[request.param]
-    return inject(hook), hook.parent.parent / "rules"
+    rules = hook.parent.parent / "rules"
+    assert sorted(rules.glob("*.md")), f"{rules} ships no rules"
+    return inject(hook), rules
 
 
-@pytest.fixture(scope="module")
-def injected(host) -> str:
-    return host[0]
+# --- The shipped bundles ---------------------------------------------------
 
-
-@pytest.fixture(scope="module")
-def rules(host) -> Path:
-    return host[1]
-
-
-def rule_titles(rules: Path) -> list[tuple[str, str]]:
-    """(filename, H1 title) for every bundled rule."""
-    out = []
+def test_every_rules_binding_requirement_reaches_the_session(host):
+    injected, rules = host
     for path in sorted(rules.glob("*.md")):
-        first = next(
-            (line for line in path.read_text(encoding="utf-8").splitlines()
-             if line.startswith("# ")),
-            None,
-        )
-        assert first, f"{path.name} has no H1 to identify it by"
-        out.append((path.name, first[2:].strip()))
-    assert out, f"{rules} ships no rules"
-    return out
+        assert binding_of(path) in injected, f"{path.name}: binding requirement not injected"
 
 
-def marked_rules(rules: Path) -> list[Path]:
-    return [
-        p for p in sorted(rules.glob("*.md"))
-        if "escapement:detail:start" in p.read_text(encoding="utf-8")
-    ]
-
-
-# --- No rule may vanish ----------------------------------------------------
-
-def test_every_rule_still_reaches_the_session(injected, rules):
-    """Positive control: holding back detail must never drop a whole rule."""
-    for name, title in rule_titles(rules):
-        assert title in injected, f"{name}: rule missing from injected context"
-
-
-def test_imperative_framing_survives(injected):
-    assert "OVERRIDE default behavior" in injected
-
-
-# --- The saving is real ----------------------------------------------------
-
-def injected_slices(injected: str, rules: Path) -> dict[str, str]:
-    """The injected context, cut back into per-rule pieces by H1 title.
-
-    Checking a held-back line against the whole bundle gives false failures:
-    two rules state the same anti-pattern verbatim, so a line withheld from one
-    is legitimately present via the other. The question is per rule.
-    """
-    titles = rule_titles(rules)
-    marks = sorted(
-        ((injected.index("# " + title), name) for name, title in titles
-         if "# " + title in injected)
+def test_payload_is_inlined_by_the_host_not_saved_to_a_file(host):
+    injected, _ = host
+    assert len(injected) <= HOST_INLINE_LIMIT, (
+        f"injected {len(injected)} chars; Claude Code inlines at most {HOST_INLINE_LIMIT} "
+        f"and shows only a 2,000-char preview of anything larger — tighten a binding region"
     )
-    slices = {}
-    for n, (start, name) in enumerate(marks):
-        end = marks[n + 1][0] if n + 1 < len(marks) else len(injected)
-        slices[name] = injected[start:end]
-    return slices
+    assert "WARNING" not in injected, "a shipped bundle must fit without the over-budget path"
 
 
-def test_marked_detail_is_held_back(injected, rules):
-    """Every marked region must be absent from ITS OWN rule's injected slice."""
-    slices = injected_slices(injected, rules)
-    for path in marked_rules(rules):
-        mine = slices[path.name]
-        rest = path.read_text(encoding="utf-8")
-        while "<!-- escapement:detail:start -->" in rest:
-            _, rest = rest.split("<!-- escapement:detail:start -->", 1)
-            region, rest = rest.split("<!-- escapement:detail:end -->", 1)
-            lines = [ln.strip() for ln in region.splitlines() if len(ln.strip()) > 40]
-            assert lines, f"{path.name}: marked a region with nothing substantial in it"
-            for line in lines:
-                assert line not in mine, (
-                    f"{path.name}: held-back line still injected: {line[:60]}"
-                )
+def test_every_rule_names_its_full_file(host):
+    injected, rules = host
+    assert str(rules.resolve()) in injected
+    for path in sorted(rules.glob("*.md")):
+        assert path.name in injected, f"{path.name}: no path to read the full rule"
 
 
-def test_marked_rules_are_actually_shortened(injected, rules):
-    """A marker that strips nothing is decoration. Each marked rule must shrink."""
-    slices = injected_slices(injected, rules)
-    for path in marked_rules(rules):
-        full = len(path.read_text(encoding="utf-8"))
-        got = len(slices[path.name])
-        assert got < full * 0.9, (
-            f"{path.name}: injected {got} of {full} chars — the markers bought almost nothing"
-        )
+def test_imperative_framing_survives(host):
+    assert "OVERRIDE default behavior" in host[0]
 
 
-# The session-start context budget, in characters. This is a ratchet: it may
-# only ever go DOWN. Injection was 86,210 unbounded, which is what made a rule
-# bundle cost more than the code it governs. Holding back reference material
-# buys roughly a fifth; trimming the prose itself is what closes the rest, and
-# each trim should lower this number rather than bank the slack.
-INJECTED_BUDGET = 60_000
+def test_precompact_reinjects_the_same_index():
+    assert inject(HOOK, "PreCompact") == inject(HOOK, "SessionStart")
 
 
-def test_injected_bundle_stays_within_budget(injected):
-    assert len(injected) <= INJECTED_BUDGET, (
-        f"injected {len(injected)} chars exceeds the {INJECTED_BUDGET} budget — "
-        f"hold back reference material or trim the prose; do not raise the budget"
-    )
-
-
-def test_held_back_rules_say_where_to_read_the_rest(injected, rules):
-    """A rule whose detail is withheld must name the file that still holds it."""
-    for path in marked_rules(rules):
-        assert path.name in injected, (
-            f"{path.name}: detail held back with no path to read it — that is a gate "
-            f"without a repair"
-        )
-
-
-# --- Opt-in, and fail-open -------------------------------------------------
+# --- Synthetic bundles -----------------------------------------------------
 
 def _fake_plugin(tmp_path: Path, files: dict[str, str]) -> Path:
     """A package holding the injector and ``files`` as its rules bundle."""
@@ -196,38 +137,47 @@ def _fake_plugin(tmp_path: Path, files: dict[str, str]) -> Path:
     return root / "hooks" / HOOK.name
 
 
-def test_unmarked_rule_is_injected_whole(tmp_path):
-    """Negative control: the default must stay 'inject everything'."""
-    body = "# Plain Rule\n\nDo the thing.\n\nAnd then do the other thing entirely.\n"
-    context = inject(_fake_plugin(tmp_path, {"plain.md": body}))
-    assert "And then do the other thing entirely." in context
-    assert "held back" not in context
-
-
-def test_unclosed_marker_injects_the_rule_intact(tmp_path):
-    """A malformed marker must not silently eat the rest of the rule."""
-    body = (
-        "# Half Marked\n\nAlways do this.\n\n"
-        "<!-- escapement:detail:start -->\n\nA worked example that was never closed.\n"
+def _rule(title: str, binding: str, body: str = "Reference body.\n") -> str:
+    return (
+        f"# {title}\n\n<!-- escapement:binding:start -->\n{binding}\n"
+        f"<!-- escapement:binding:end -->\n\n{body}"
     )
-    context = inject(_fake_plugin(tmp_path, {"half.md": body}))
-    assert "A worked example that was never closed." in context
-    assert "Always do this." in context
 
 
-def test_detail_region_is_removed_but_neighbours_survive(tmp_path):
-    body = (
-        "# Bracketed\n\nImperative before.\n\n"
-        "<!-- escapement:detail:start -->\n"
-        "A long worked example that only matters once you are already doing it.\n"
-        "<!-- escapement:detail:end -->\n\n"
-        "Imperative after.\n"
-    )
-    context = inject(_fake_plugin(tmp_path, {"b.md": body}))
-    assert "Imperative before." in context
-    assert "Imperative after." in context
-    assert "only matters once you are already doing it" not in context
-    assert "b.md" in context, "must point at the file holding the rest"
+def test_binding_text_comes_from_the_rule_file(tmp_path):
+    hook = _fake_plugin(tmp_path, {
+        "zebra.md": _rule("Zebra Rule", "Always paint the stripes before the hooves dry."),
+    })
+    context = inject(hook)
+    assert "Always paint the stripes before the hooves dry." in context
+    assert "Zebra Rule" in context
+
+
+def test_reference_body_stays_on_disk(tmp_path):
+    hook = _fake_plugin(tmp_path, {
+        "a.md": _rule("A", "Do the binding thing every single time it applies.",
+                      "A long worked example that only matters once you are in it.\n"),
+    })
+    assert "only matters once you are in it" not in inject(hook)
+
+
+def test_rule_without_binding_is_named_loudly_with_its_path(tmp_path):
+    hook = _fake_plugin(tmp_path, {"plain.md": "# Plain Rule\n\nDo the thing.\n"})
+    context = inject(hook)
+    assert "WARNING" in context
+    assert "Plain Rule" in context and "plain.md" in context
+
+
+def test_oversized_bundle_fails_loud_and_still_fits(tmp_path):
+    files = {
+        f"r{n:02}.md": _rule(f"Rule {n}", f"Requirement {n}: " + "x" * 900)
+        for n in range(20)
+    }
+    context = inject(_fake_plugin(tmp_path, files))
+    assert len(context) <= HOST_INLINE_LIMIT, "over-budget output must still be inlined"
+    # The warning must land inside the 2,000-char preview a host would show.
+    assert "WARNING" in context[:2000]
+    assert "r19.md" in context, "every rule must stay reachable by path"
 
 
 def test_missing_bundle_still_fails_loud(tmp_path):

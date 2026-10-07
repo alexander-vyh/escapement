@@ -12,6 +12,13 @@ from pathlib import Path
 HOOK = Path(__file__).resolve().parents[1] / "inject_rules.py"
 
 
+def _rule(binding: str) -> str:
+    return (
+        "# Rule\n\n<!-- escapement:binding:start -->\n" + binding
+        + "\n<!-- escapement:binding:end -->\n\nReference detail.\n"
+    )
+
+
 def _install(root: Path, hooks_rel: str, rules_rel: str, rules: dict[str, str]) -> Path:
     hook = root / hooks_rel / HOOK.name
     hook.parent.mkdir(parents=True)
@@ -39,7 +46,7 @@ def _run(hook: Path, event: str = "SessionStart") -> dict:
 def test_codex_plugin_layout_injects_the_packages_own_rule_variants(tmp_path):
     hook = _install(
         tmp_path, "plugin/claude/hooks", "plugin/claude/rules",
-        {"teams.md": "Dispatch reviewers with spawn_agent.\n"},
+        {"teams.md": _rule("Dispatch reviewers with spawn_agent.")},
     )
     output = _run(hook)
 
@@ -48,7 +55,7 @@ def test_codex_plugin_layout_injects_the_packages_own_rule_variants(tmp_path):
 
 
 def test_claude_plugin_layout_reads_rules_beside_hooks(tmp_path):
-    hook = _install(tmp_path, "plugin/hooks", "plugin/rules", {"a.md": "Rule A body.\n", "b.md": "Rule B body.\n"})
+    hook = _install(tmp_path, "plugin/hooks", "plugin/rules", {"a.md": _rule("Rule A body."), "b.md": _rule("Rule B body.")})
     context = _run(hook)["additionalContext"]
 
     assert context.index("Rule A body.") < context.index("Rule B body.")
@@ -56,7 +63,7 @@ def test_claude_plugin_layout_reads_rules_beside_hooks(tmp_path):
 
 
 def test_codex_precompact_reinjection_names_its_event(tmp_path):
-    hook = _install(tmp_path, "p/claude/hooks", "p/claude/rules", {"a.md": "Rule A.\n"})
+    hook = _install(tmp_path, "p/claude/hooks", "p/claude/rules", {"a.md": _rule("Rule A.")})
     output = _run(hook, event="PreCompact")
 
     assert output["hookEventName"] == "PreCompact"

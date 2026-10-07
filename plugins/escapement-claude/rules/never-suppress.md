@@ -1,6 +1,8 @@
 # Never Suppress — Global Rule
 
-When something fails, fix why it fails. Never make the failure invisible.
+<!-- escapement:binding:start -->
+When something fails, fix why it fails. Never make the failure invisible — no skip or deny lists, `# noqa` / `# type: ignore`, errors downgraded to warnings, swallowed exceptions, unlinked `skip` / `xfail`, or `--no-verify`. Never make a test easier to pass by weakening what it proves: no removed controls, no implementation-detail assertion in place of a business outcome.
+<!-- escapement:binding:end -->
 
 This applies to every form of suppression:
 - Skip lists, exclusion lists, deny lists

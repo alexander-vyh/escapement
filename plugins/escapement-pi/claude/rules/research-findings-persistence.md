@@ -1,5 +1,9 @@
 # Durable Artifacts — Persist Before You Point (Global Rule)
 
+<!-- escapement:binding:start -->
+Every dispatched agent writes its complete artifact to a file before reporting back; its message is a pointer to that file, never the payload. Use a gitignored `.research/<topic>-<date>/<NN>-<agent>.md` (ensure `.research/` is gitignored first; not `docs/`, not `/tmp`) with a `## Findings` header. The lead checks each owed file exists and has substance before relying on it.
+<!-- escapement:binding:end -->
+
 Applies to **any** multi-agent dispatch — research, review roundtables, debug fan-outs.
 General agent-team hygiene, not research-specific. Home: `agent-teams-default.md` + the
 `dispatching-parallel-agents` skill.
@@ -27,8 +31,6 @@ catch a fleeting message. This survives both child exit and lead-transcript comp
   uncertainty tags live **inline in the file**, never only in the message.
 - **Retention:** on completion the lead **prints the path and offers cleanup** — no
   auto-delete.
-
-<!-- escapement:detail:start -->
 
 ## Enforcement — at the consumer's gate, not the producer's
 
@@ -66,6 +68,3 @@ a producer-side hook with an escape path in the denial (`write file OR send
 inline + --persist-waiver "<why>"`), `_gate_signal.record(gate=
 'research-persistence', …)`, and the same substance check. Behavior precedes
 belief — ship the rule + the lead-side contract first.
-
-
-<!-- escapement:detail:end -->

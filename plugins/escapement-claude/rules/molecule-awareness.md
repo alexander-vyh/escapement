@@ -1,5 +1,9 @@
 # Molecule Awareness — Global Rule
 
+<!-- escapement:binding:start -->
+At session start in a repo with `.beads/`, run `~/.beads/mol-status.sh` and act on it: announce the current phase (Design / Validate / Build) and run the next authorized step without asking. A molecule gate is only for an unresolved consequential choice — present just that decision; resolve routine progression from durable authority and continue. Never show bd commands, gate IDs, or molecule internals to the user.
+<!-- escapement:binding:end -->
+
 ## On Every Session Start
 
 If the current directory has a `.beads/` directory, run `~/.beads/mol-status.sh` and act on the output.
@@ -82,8 +86,6 @@ Present the highest-priority molecule first and mention the others exist ("Conti
 higher-priority Validate work (dark-mode); auth-refactor remains in Design."). Ask for
 priority only when the alternatives encode a real unresolved outcome trade-off.
 
-<!-- escapement:detail:start -->
-
 ## Creating New Molecules
 
 When the user delegates new feature work, create the standard molecule when that is the
@@ -117,8 +119,6 @@ Use `bd formula list` to see available formulas and `bd formula show <name>` for
 
 **Variable naming:** The `name` var should be kebab-case (e.g., "zoom-data-expansion"). The `problem` var is a one-sentence problem statement.
 
-
-<!-- escapement:detail:end -->
 ## Scope Change Detection
 
 During any conversation with an active molecule, listen for scope-change language:

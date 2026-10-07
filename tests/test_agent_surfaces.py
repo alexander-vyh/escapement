@@ -1479,26 +1479,21 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
     # Positive control: the surviving channel still delivers the sentinel AND every
     # bundled rule — the fix removed the duplicate, not the rules.
     #
-    # "Delivers" is no longer "verbatim in full": a rule may hold reference
-    # sections back behind detail markers, which the injector replaces with the
-    # rule's own path (see tests/test_rule_injection.py for that contract). What
-    # must not happen is a rule going missing, so assert on the rule's identity
-    # and on the pointer that makes the held-back part reachable.
+    # "Delivers" is each rule's binding requirement plus the path to the full file,
+    # not the verbatim body: whole bodies overflowed the host's inline limit (see
+    # tests/test_rule_injection.py for that contract). What must not happen is a
+    # rule going missing.
     assert channel_b.count(RULE_DEDUP_PHRASE) == 1
     for rule_file in sorted((CLAUDE_PLUGIN / "rules").glob("*.md")):
         body = rule_file.read_text()
-        title = next(ln for ln in body.splitlines() if ln.startswith("# "))
-        assert title in channel_b, (
+        binding = body.split("<!-- escapement:binding:start -->", 1)[1]
+        binding = binding.split("<!-- escapement:binding:end -->", 1)[0].strip()
+        assert binding in channel_b, (
             f"surviving channel dropped rule: {rule_file.name}"
         )
-        if "<!-- escapement:detail:start -->" in body:
-            assert rule_file.name in channel_b, (
-                f"{rule_file.name}: detail held back without a path to read it"
-            )
-        else:
-            assert body in channel_b, (
-                f"surviving channel dropped rule body: {rule_file.name}"
-            )
+        assert rule_file.name in channel_b, (
+            f"{rule_file.name}: no path to read the full rule"
+        )
 
 
 # escapement (this change): plugins/escapement-pi/PI.md is injected in full by

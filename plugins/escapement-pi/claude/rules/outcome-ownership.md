@@ -1,5 +1,9 @@
 # Outcome Ownership — Detailed Rules
 
+<!-- escapement:binding:start -->
+Done means the user's desired outcome is actually happening, verified by running the real workflow — not code that compiles, tests that pass, or children that closed. Own any defect that causally blocks the outcome within the delegated boundary; record adjacent discoveries without executing them. Stop only when the outcome is verified end to end, every remaining route is blocked on a consequential choice or access, or the user says stop. Never wind down by summarizing remaining work — do it.
+<!-- escapement:binding:end -->
+
 ## What "Done" Means
 
 Done = the actual desired business outcome is happening. Not "my code change
@@ -31,8 +35,6 @@ the current work to ask whether every discovered improvement should be included.
 Neither provenance ("pre-existing") nor component ownership excuses a blocker; the user
 wanted a working result. If it is genuinely adjacent, record it separately and keep
 delivering the delegated outcome.
-
-<!-- escapement:detail:start -->
 
 ### Wind-Down Anti-Patterns (The Silent Killer)
 
@@ -94,8 +96,6 @@ metadata is informational: it describes the standard declared landing path but n
 executes a deployment nor authorizes arbitrary commands. See `continuation-harness.md`
 § Per-repo outcome authorization.
 
-
-<!-- escapement:detail:end -->
 ## The Verification Test
 
 Before declaring done, answer honestly: (1) Did I run the exact command or workflow the

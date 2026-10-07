@@ -29,7 +29,7 @@ from render_agent_surfaces import CODEX_FORBIDDEN, CODEX_SKILL_FORBIDDEN  # noqa
 
 CANON_DIRS = ("agent-surfaces/rules", "agent-surfaces/commands")
 CLAUDE_PRIMITIVES = re.compile(r"SendMessage|TeamCreate|\bAgent\(|team_name")
-DETAIL_MARKER = re.compile(r"^<!-- escapement:detail:(start|end) -->$")
+BINDING_MARKER = re.compile(r"^<!-- escapement:binding:(start|end) -->$")
 
 
 def _canons() -> list[Path]:
@@ -41,7 +41,7 @@ CANON_IDS = [f"{p.parent.name}/{p.stem}" for p in CANONS]
 
 
 def _structure(text: str) -> list[str]:
-    """Headings and detail markers outside fenced code, in document order."""
+    """Headings and binding markers outside fenced code, in document order."""
     out: list[str] = []
     fenced = False
     for line in text.splitlines():
@@ -50,7 +50,7 @@ def _structure(text: str) -> list[str]:
             continue
         if fenced:
             continue
-        if re.match(r"^#{1,6} ", line) or DETAIL_MARKER.match(line):
+        if re.match(r"^#{1,6} ", line) or BINDING_MARKER.match(line):
             out.append(line.rstrip())
     return out
 
