@@ -41,6 +41,12 @@ Wrong implementations these tests reject
 - "a finished bead binds forever": after the claimed bead is closed, the agent
   cannot declare a contract for the unclaimed work that follows
   (test_closed_bead_releases_its_oracle).
+- "closing is a release": closing a claimed bead whose oracle never went green
+  lets the agent declare an easier contract (test_close_with_red_oracle_still_holds).
+- "no way out of a rewritten bead": removing or trivialising the bead's verify
+  block leaves --refreeze, init_contract and close all refusing, so the session is
+  stuck forever (test_oracle_removed_after_claim_recovers_via_refreeze,
+  test_closed_and_rewritten_bead_recovers_only_via_refreeze).
 - "a subagent's claim rebinds the parent": a subagent sharing the parent's
   thread dir claims a child bead and replaces the parent's contract
   (test_subagent_claim_does_not_rebind_parent).
@@ -309,15 +315,94 @@ def test_forged_command_with_genuine_labels_is_rejected(s: Session) -> None:
 
 
 def test_closed_bead_releases_its_oracle(s: Session) -> None:
-    """Once the claimed bead is closed, the next unclaimed work may be declared."""
+    """Once the claimed bead's oracle went green and it is closed, the next unclaimed
+    work may be declared."""
     s.bead("bd-a", "test -f done-a")
     s.claim("bd-a")
     (s.work / "done-a").write_text("x")
+    assert s.verify().returncode == 0
     s.close("bd-a")
 
     assert s.declare("test -f done-next").returncode == 0
     assert s.verify().returncode != 0, "the re-declared contract, not A's, is what runs"
     (s.work / "done-next").write_text("x")
+    assert s.verify().returncode == 0
+    assert s.stop() is None
+
+
+def test_close_with_red_oracle_still_holds(s: Session) -> None:
+    """Closing a bead whose oracle never passed is not an escape from it."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    assert s.verify().returncode != 0
+    s.close("bd-a")  # no work done
+
+    r = s.declare("test -d .")
+    assert r.returncode != 0, "init_contract must still refuse while A's oracle is red"
+    assert "bd-a" in r.stderr
+    forged = dict(s.contract(), verification_command="test -d .", source="agent-declared")
+    forged.pop("bead_id", None)
+    forged.pop("acceptance_sha256", None)
+    (s.thread / "contract.json").write_text(json.dumps(forged))
+    assert s.verify().returncode != 0, "a hand-written contract must not verify"
+    assert _blocked(s.stop())
+
+    # Positive control: doing the work and verifying releases it.
+    assert s.derive("bd-a").returncode == 0
+    (s.work / "done-a").write_text("x")
+    assert s.verify().returncode == 0
+    assert s.stop() is None
+    assert s.declare("test -f done-next").returncode == 0
+
+
+def _refreezes(s: Session) -> list:
+    return json.loads((s.thread / "active_bead.json").read_text()).get("refreezes") or []
+
+
+@pytest.mark.parametrize("rewritten", [None, "true"], ids=["removed", "trivial"])
+def test_oracle_removed_after_claim_recovers_via_refreeze(s: Session, rewritten) -> None:
+    """The bead's oracle is deleted or trivialised mid-work: --refreeze is the one
+    recorded way out, and nothing else releases the session."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    s.bead("bd-a", rewritten)
+
+    v = s.verify()
+    assert v.returncode != 0 and "changed" in (v.stdout + v.stderr).lower()
+    assert s.declare("test -d .").returncode != 0
+    assert s.derive("bd-a").returncode != 0, "plain re-derive must not adopt the rewrite"
+    assert _blocked(s.stop())
+
+    r = s.derive("bd-a", "--refreeze")
+    assert r.returncode == 0, r.stderr
+    log = _refreezes(s)
+    assert log and log[-1]["from_command"] == "test -f done-a"
+    assert log[-1]["to_command"] is None
+
+    # The bead no longer declares an oracle, so the agent declares the outcome.
+    assert s.declare("test -f done-a2").returncode == 0
+    assert s.verify().returncode != 0
+    (s.work / "done-a2").write_text("x")
+    s.close("bd-a")
+    assert s.verify().returncode == 0
+    assert s.stop() is None
+
+
+def test_closed_and_rewritten_bead_recovers_only_via_refreeze(s: Session) -> None:
+    """Closing a rewritten, never-green bead does not release it; --refreeze does."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    s.bead("bd-a", "test -d .")
+    s.close("bd-a")
+
+    assert s.declare("test -d .").returncode != 0
+    assert s.verify().returncode != 0
+    assert _blocked(s.stop())
+
+    r = s.derive("bd-a", "--refreeze")
+    assert r.returncode == 0, r.stderr
+    assert _refreezes(s)[-1]["to_command"] == "test -d ."
+    assert s.contract()["verification_command"] == "test -d ."
     assert s.verify().returncode == 0
     assert s.stop() is None
 

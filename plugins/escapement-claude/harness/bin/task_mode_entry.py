@@ -23,7 +23,6 @@ from typing import Optional
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from would_block_stop import InvalidActorIdentity, thread_dir_for_session, harness_home
-from derive_contract import bind_claimed_bead
 from task_session_mode import (
     extract_exact_claim_task_id,
     is_issue_id,
@@ -207,6 +206,8 @@ def main() -> int:
     subagent_on_parent_dir = bool(payload.get("agent_id")) and not os.environ.get("CLAUDE_AGENT_ID")
     try:
         if not subagent_on_parent_dir:
+            from derive_contract import bind_claimed_bead  # local: a broken import must not cost task mode
+
             bind_claimed_bead(thread_dir, task_id, session_id=session_id)
     except Exception as exc:  # noqa: BLE001 — never raise out of a PostToolUse hook
         print(f"task_mode_entry: could not bind claimed bead {task_id}: {exc}", file=sys.stderr)
