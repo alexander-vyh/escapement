@@ -33,6 +33,17 @@ Wrong implementations these tests reject
 - "bead switch ignored": a contract that went green for bead A still lets the
   session stop after it claims bead B — the l9lo defect
   (test_bead_switch_invalidates_previous_contract).
+- "only the current bead is remembered": claiming A, then B, rewriting A and
+  re-claiming A adopts the rewritten oracle (test_reclaim_after_detour_cannot_launder_rewrite).
+- "labels checked, command not": a forged contract that keeps bead_id and the
+  acceptance hash but swaps the command still verifies
+  (test_forged_command_with_genuine_labels_is_rejected).
+- "a finished bead binds forever": after the claimed bead is closed, the agent
+  cannot declare a contract for the unclaimed work that follows
+  (test_closed_bead_releases_its_oracle).
+- "a subagent's claim rebinds the parent": a subagent sharing the parent's
+  thread dir claims a child bead and replaces the parent's contract
+  (test_subagent_claim_does_not_rebind_parent).
 - "ad hoc sessions regress": with no bead bound, an agent-declared contract must
   still verify and release Stop (test_unbound_session_keeps_agent_contract).
 """
@@ -123,8 +134,9 @@ class Session:
             cwd=self.work, env=self.env, timeout=60,
         )
 
-    def claim(self, bead_id: str) -> None:
+    def claim(self, bead_id: str, **payload_extra) -> None:
         r = self._run([sys.executable, str(BIN / "task_mode_entry.py")], json.dumps({
+            **payload_extra,
             "session_id": SESSION,
             "hook_event_name": "PostToolUse",
             "tool_name": "Bash",
@@ -268,3 +280,54 @@ def test_unbound_session_keeps_agent_contract(s: Session) -> None:
     (s.work / "done").write_text("x")
     assert s.verify().returncode == 0
     assert s.stop() is None
+
+
+def test_reclaim_after_detour_cannot_launder_rewrite(s: Session) -> None:
+    """A -> B -> rewrite A -> A again: A's first freeze still governs."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    s.bead("bd-b", None)
+    s.claim("bd-b")
+    s.bead("bd-a", "test -d .")
+    s.claim("bd-a")
+
+    v = s.verify()
+    assert v.returncode != 0
+    assert "changed" in (v.stdout + v.stderr).lower()
+    assert _blocked(s.stop())
+
+
+def test_forged_command_with_genuine_labels_is_rejected(s: Session) -> None:
+    """Keeping bead_id and the hash does not make a different command the oracle."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    forged = dict(s.contract(), verification_command="test -d .")
+    (s.thread / "contract.json").write_text(json.dumps(forged))
+
+    assert s.verify().returncode != 0
+    assert _blocked(s.stop())
+
+
+def test_closed_bead_releases_its_oracle(s: Session) -> None:
+    """Once the claimed bead is closed, the next unclaimed work may be declared."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    (s.work / "done-a").write_text("x")
+    s.close("bd-a")
+
+    assert s.declare("test -f done-next").returncode == 0
+    assert s.verify().returncode != 0, "the re-declared contract, not A's, is what runs"
+    (s.work / "done-next").write_text("x")
+    assert s.verify().returncode == 0
+    assert s.stop() is None
+
+
+def test_subagent_claim_does_not_rebind_parent(s: Session) -> None:
+    """A subagent on the parent's thread dir claiming a child leaves the parent bound."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    s.bead("bd-child", "test -d .")
+    s.claim("bd-child", agent_id="sub-1", agent_type="general-purpose")
+
+    assert s.contract()["verification_command"] == "test -f done-a"
+    assert s.verify().returncode != 0

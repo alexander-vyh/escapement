@@ -202,8 +202,12 @@ def main() -> int:
     # escapement-l9lo: the claimed bead's oracle is the contract from now on,
     # and the previous bead's contract stops counting. Best-effort: a binding
     # failure must not cost the task-mode record below.
+    # A subagent without its own actor identity shares the parent's thread dir;
+    # its claim of a child bead must not rebind the parent's work.
+    subagent_on_parent_dir = bool(payload.get("agent_id")) and not os.environ.get("CLAUDE_AGENT_ID")
     try:
-        bind_claimed_bead(thread_dir, task_id, session_id=session_id)
+        if not subagent_on_parent_dir:
+            bind_claimed_bead(thread_dir, task_id, session_id=session_id)
     except Exception as exc:  # noqa: BLE001 — never raise out of a PostToolUse hook
         print(f"task_mode_entry: could not bind claimed bead {task_id}: {exc}", file=sys.stderr)
 
