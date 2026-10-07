@@ -199,6 +199,7 @@ def would_block_stop(thread_state: dict) -> Tuple[str, str]:
       contract:               dict | None    (parsed contract.json)
       scheduled:              list | None    (parsed scheduled.json — an array)
       recent_user_message:    str  | None    (most recent user message text)
+      contract_binding_problem: str | None  (why the contract does not cover the active bead)
 
     Returns (decision, reason) where decision is "allow" or "block".
     """
@@ -206,12 +207,18 @@ def would_block_stop(thread_state: dict) -> Tuple[str, str]:
     scheduled = thread_state.get("scheduled")
     recent_user_message = thread_state.get("recent_user_message")
 
-    if _verification_passed_this_turn(contract):
+    # escapement-l9lo: a green run of a contract that does not cover the active
+    # bead (another bead's, pre-claim, replaced, or rewritten oracle) is no proof.
+    binding_problem = thread_state.get("contract_binding_problem")
+
+    if _verification_passed_this_turn(contract) and not binding_problem:
         return ("allow", "verification_passed")
     if _user_released(recent_user_message):
         return ("allow", "user_released")
     if _wakeup_registered(scheduled):
         return ("allow", "wakeup_registered")
+    if binding_problem:
+        return ("block", "contract_not_for_active_work")
     if _suppressed_green(contract):
         # Fresh exit-0, but the verify command was gutted (|| true, bare true,
         # --no-verify, ...). Distinct reason so the block explains the COMMAND is
@@ -293,8 +300,17 @@ def load_thread_state(
             touched = code_touch.touched_code(transcript_path, cwd)
         except Exception:  # noqa: BLE001 — fail OPEN, never crash the Stop gate
             touched = False
+    binding_problem = None
+    if isinstance(contract, dict):
+        try:
+            from derive_contract import binding_problem as _binding_problem  # local: import cycle
+
+            binding_problem = _binding_problem(contract, thread_dir)
+        except Exception:  # noqa: BLE001 — fail OPEN, never crash the Stop gate
+            binding_problem = None
     return {
         "contract": contract,
+        "contract_binding_problem": binding_problem,
         "scheduled": _load_json(thread_dir / "scheduled.json"),
         "recent_user_message": recent_user_message,
         "touched_code": touched,

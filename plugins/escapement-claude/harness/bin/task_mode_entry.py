@@ -23,6 +23,7 @@ from typing import Optional
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from would_block_stop import InvalidActorIdentity, thread_dir_for_session, harness_home
+from derive_contract import bind_claimed_bead
 from task_session_mode import (
     extract_exact_claim_task_id,
     is_issue_id,
@@ -198,6 +199,14 @@ def main() -> int:
     # scope -> do not enter task mode; the contract gate still covers the session.
     if task_id is None:
         return 0
+    # escapement-l9lo: the claimed bead's oracle is the contract from now on,
+    # and the previous bead's contract stops counting. Best-effort: a binding
+    # failure must not cost the task-mode record below.
+    try:
+        bind_claimed_bead(thread_dir, task_id, session_id=session_id)
+    except Exception as exc:  # noqa: BLE001 — never raise out of a PostToolUse hook
+        print(f"task_mode_entry: could not bind claimed bead {task_id}: {exc}", file=sys.stderr)
+
     parent_id = _lookup_parent_id(task_id)
 
     entered_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

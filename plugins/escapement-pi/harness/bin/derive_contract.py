@@ -28,13 +28,27 @@ raises OracleNotDeclared and writes NOTHING. Derivation never invents a passing
 oracle; the same `is_trivial_oracle` guard that screens hand-authored contracts
 screens derived ones, so there is one definition of "real oracle".
 
+Claim binding (escapement-l9lo)
+-------------------------------
+A contract declared once used to keep passing for hours of unrelated later work,
+and the agent wrote it itself. Now a successful `bd update <id> --claim` binds
+the session to that bead (`active_bead.json`, latest claim wins) and freezes the
+bead's oracle as the contract, recording a sha256 of the acceptance text. Then
+`binding_problem` refuses a contract as proof when it is for another bead, was
+declared before the claim, replaces a bead oracle, or the acceptance text has
+changed since the freeze. Only an explicit `--refreeze` adopts rewritten text.
+Sessions that never claim a bead keep agent-declared contracts unchanged.
+
 Usage:
-  derive_contract.py --bead <issue-id>
+  derive_contract.py --bead <issue-id> [--refreeze]
+  derive_contract.py --check     # exit 3 + reason if the contract is not valid proof
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import hashlib
 import json
 import os
 import pathlib
@@ -109,13 +123,140 @@ def derive_contract(bead: dict, *, session_id: "str | None" = None) -> dict:
 
     goal = (bead.get("title") or "").strip()
     bead_id = bead.get("id")
-    return build_contract(
+    contract = build_contract(
         goal,
         oracle,
         source="bead-derived",
         session_id=session_id,
         thread_id=bead_id,
     )
+    contract["bead_id"] = bead_id
+    contract["acceptance_sha256"] = acceptance_sha256(bead)
+    return contract
+
+
+def acceptance_sha256(bead: dict) -> str:
+    text = bead.get("acceptance_criteria") or bead.get("acceptance") or ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+ACTIVE_BEAD = "active_bead.json"
+
+
+def _read_json(path: pathlib.Path) -> "dict | None":
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _write_json(path: pathlib.Path, value: dict) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2))
+    os.replace(tmp, path)
+
+
+def _parse_ts(value) -> "_dt.datetime | None":
+    try:
+        ts = _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=_dt.timezone.utc)
+
+
+def bind_claimed_bead(
+    thread_dir: pathlib.Path,
+    bead_id: str,
+    *,
+    session_id: "str | None" = None,
+    fetch=None,
+) -> None:
+    """Record a successful claim; freeze the bead's oracle as the contract.
+
+    Latest claim wins, unlike session_mode.json's first-claim scope: the active
+    bead is what the session is working on NOW. Re-claiming the bead that is
+    already active keeps the original freeze, so a re-claim cannot launder a
+    rewritten acceptance. A bead without an oracle still becomes active — that is
+    what retires the previous bead's contract — and leaves the agent to declare.
+    """
+    fetch = fetch or fetch_bead
+    thread_dir = pathlib.Path(thread_dir)
+    previous = _read_json(thread_dir / ACTIVE_BEAD)
+    if previous and previous.get("bead_id") == bead_id:
+        return
+    record = {
+        "bead_id": bead_id,
+        "claimed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "acceptance_sha256": None,
+    }
+    contract = None
+    try:
+        contract = derive_contract(fetch(bead_id), session_id=session_id)
+        record["acceptance_sha256"] = contract["acceptance_sha256"]
+    except (OracleNotDeclared, subprocess.CalledProcessError, ValueError, OSError):
+        pass
+    _write_json(thread_dir / ACTIVE_BEAD, record)
+    if contract is not None:
+        _write_json(thread_dir / "contract.json", contract)
+
+
+def binding_problem(contract, thread_dir: pathlib.Path, *, fetch=None) -> "str | None":
+    """Why `contract` cannot stand as proof for the session's active work, or None.
+
+    Fails open only on an unreadable bead (bd down must not trap a session);
+    every comparison that can be made is made.
+    """
+    if not isinstance(contract, dict):
+        return None
+    fetch = fetch or fetch_bead
+    active = _read_json(pathlib.Path(thread_dir) / ACTIVE_BEAD) or {}
+    active_id = active.get("bead_id")
+    frozen = active.get("acceptance_sha256")
+    bound_id = contract.get("bead_id")
+    if active_id:
+        if frozen:
+            if bound_id != active_id:
+                return (
+                    f"bead {active_id} declares its own ```verify oracle, so it is the "
+                    f"contract; this contract ({contract.get('source', 'unknown source')}"
+                    f"{', bead ' + bound_id if bound_id else ''}) cannot replace it. Run "
+                    f"`derive_contract.py --bead {active_id}` to restore it."
+                )
+            if contract.get("acceptance_sha256") != frozen:
+                return (
+                    f"this contract was not derived from bead {active_id}'s acceptance as "
+                    f"frozen at claim. Run `derive_contract.py --bead {active_id}` to "
+                    "restore it."
+                )
+        elif bound_id and bound_id != active_id:
+            return (
+                f"this contract proves bead {bound_id}, but the active bead is {active_id}. "
+                f"Declare {active_id}'s outcome (init_contract.py) or add a ```verify "
+                f"block to its acceptance and run `derive_contract.py --bead {active_id}`."
+            )
+        else:
+            declared = _parse_ts(contract.get("created_at"))
+            claimed = _parse_ts(active.get("claimed_at"))
+            if declared is None or (claimed is not None and declared < claimed):
+                return (
+                    f"this contract was declared before bead {active_id} was claimed, so "
+                    f"it describes earlier work. Declare {active_id}'s outcome "
+                    "(init_contract.py) or add a ```verify block to its acceptance."
+                )
+    if bound_id and contract.get("acceptance_sha256"):
+        try:
+            current = acceptance_sha256(fetch(bound_id))
+        except (OracleNotDeclared, subprocess.CalledProcessError, ValueError, OSError):
+            return None
+        if current != contract["acceptance_sha256"]:
+            return (
+                f"bead {bound_id}'s acceptance text changed since its oracle was frozen — "
+                "the oracle was rewritten mid-work. Restore the original acceptance, or "
+                f"adopt the new one by explicit decision: `derive_contract.py --bead "
+                f"{bound_id} --refreeze`."
+            )
+    return None
 
 
 def fetch_bead(bead_id: str) -> dict:
@@ -136,10 +277,28 @@ def fetch_bead(bead_id: str) -> dict:
 
 def main(argv: list[str], _fetch=fetch_bead) -> int:
     parser = argparse.ArgumentParser(description="Derive a harness contract from a bead.")
-    parser.add_argument("--bead", required=True, help="Beads issue id to derive from.")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--bead", help="Beads issue id to derive from.")
+    mode.add_argument("--check", action="store_true",
+                      help="Exit 3 with the reason if the contract is not proof for the active work.")
+    parser.add_argument("--refreeze", action="store_true",
+                        help="Adopt the bead's CURRENT acceptance text after it changed since claim.")
     args = parser.parse_args(argv)
 
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    try:
+        thread_dir = thread_dir_for_session(session_id, harness_home())
+    except InvalidActorIdentity as exc:
+        print(f"refusing to derive contract: invalid actor identity: {exc}", file=sys.stderr)
+        return 2
+
+    if args.check:
+        problem = binding_problem(_read_json(thread_dir / "contract.json"), thread_dir, fetch=_fetch)
+        if problem:
+            print(f"contract is not proof for the active work: {problem}", file=sys.stderr)
+            return 3
+        return 0
+
     try:
         bead = _fetch(args.bead)
         contract = derive_contract(bead, session_id=session_id)
@@ -152,15 +311,26 @@ def main(argv: list[str], _fetch=fetch_bead) -> int:
         print(f"could not read bead {args.bead!r}: {exc}", file=sys.stderr)
         return 1
 
-    try:
-        thread_dir = thread_dir_for_session(session_id, harness_home())
-    except InvalidActorIdentity as exc:
-        print(f"refusing to derive contract: invalid actor identity: {exc}", file=sys.stderr)
-        return 2
     thread_dir.mkdir(parents=True, exist_ok=True)
+    active_path = thread_dir / ACTIVE_BEAD
+    active = _read_json(active_path) or {}
+    frozen = active.get("acceptance_sha256") if active.get("bead_id") == args.bead else None
+    if frozen and frozen != contract["acceptance_sha256"]:
+        if not args.refreeze:
+            print(
+                f"refusing to derive contract: bead {args.bead}'s acceptance changed since "
+                "it was claimed, so its oracle was rewritten mid-work. Restore the original "
+                "text, or adopt the new oracle by explicit decision with --refreeze.",
+                file=sys.stderr,
+            )
+            return 2
+        contract["refrozen_from"] = frozen
+    if active.get("bead_id") == args.bead and frozen != contract["acceptance_sha256"]:
+        # A bead that gained an oracle after its claim now owns the contract too.
+        _write_json(active_path, dict(active, acceptance_sha256=contract["acceptance_sha256"]))
+
     out = thread_dir / "contract.json"
-    with out.open("w") as f:
-        json.dump(contract, f, indent=2)
+    _write_json(out, contract)
 
     print(f"contract derived from {args.bead} -> {out}")
     print(json.dumps(contract, indent=2))

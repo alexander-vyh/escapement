@@ -183,6 +183,21 @@ def main(argv: list[str]) -> int:
         return 2
     thread_dir.mkdir(parents=True, exist_ok=True)
 
+    # escapement-l9lo: a claimed bead's ```verify oracle IS the contract; the
+    # implementer may not swap in an exam of its own. Unbound sessions are free.
+    from derive_contract import ACTIVE_BEAD, _read_json  # local: derive imports us
+
+    active = _read_json(thread_dir / ACTIVE_BEAD) or {}
+    if active.get("acceptance_sha256"):
+        print(
+            f"refusing to write contract: active bead {active.get('bead_id')} declares its "
+            "own ```verify oracle, which is this session's contract. Change the oracle on "
+            "the bead by explicit decision (then derive_contract.py --bead <id> --refreeze), "
+            "or claim the bead this work belongs to.",
+            file=sys.stderr,
+        )
+        return 2
+
     contract = build_contract(
         args.goal,
         args.verify,

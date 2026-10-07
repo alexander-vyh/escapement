@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1252 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1263 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -160,6 +160,13 @@ _VERIFICATION_SUPPRESSED_DISPLAY = (
     "runs the check and propagates a real non-zero on failure, then re-run "
     "`~/.claude/harness/bin/verify`. If a hook is genuinely broken, FIX the hook — do not "
     "disable it in the verify command."
+)
+
+
+_CONTRACT_NOT_FOR_ACTIVE_WORK_DISPLAY = (
+    "continuation-harness: contract_not_for_active_work. Your contract is not proof for "
+    "the bead you are working on now: {problem} Then run `~/.claude/harness/bin/verify` "
+    "and have it exit 0. The user can release you by saying 'stop'."
 )
 
 
@@ -1226,6 +1233,10 @@ def main() -> int:
             display = _VERIFICATION_SUPPRESSED_DISPLAY
         elif reason == "no_declaration":
             display = _NO_DECLARATION_DISPLAY
+        elif reason == "contract_not_for_active_work":
+            display = _CONTRACT_NOT_FOR_ACTIVE_WORK_DISPLAY.format(
+                problem=state.get("contract_binding_problem")
+            )
         else:
             display = RESUMPTION_PROMPT.format(reason=reason)
         # bead e9v.4: if this red boundary is shared with a live concurrent session,

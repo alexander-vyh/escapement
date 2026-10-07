@@ -33,6 +33,14 @@ if [[ -z "$VERIFICATION_COMMAND" ]]; then
   exit 2
 fi
 
+# escapement-l9lo: a contract for another bead, from before the active claim, or
+# whose bead acceptance was rewritten since the freeze is not proof — say why
+# and do not run it, so no green last_run is recorded.
+if ! python3 "$SCRIPT_DIR/derive_contract.py" --check; then
+  echo "verify: FAIL (contract does not cover the active work)"
+  exit 3
+fi
+
 TMP_OUT="$(mktemp)"
 trap 'rm -f "$TMP_OUT"' EXIT
 
