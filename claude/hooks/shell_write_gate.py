@@ -33,13 +33,17 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _host_output  # noqa: E402
-from _advisory_dedupe import already_reported_any, clear  # noqa: E402
+try:
+    from _advisory_dedupe import already_reported_any, clear
+except ImportError:  # pragma: no cover - without memory every Bash call would repeat
+    already_reported_any = clear = None
 from _agent_dispatch import host as _host  # noqa: E402
 from test_oracle_brief_gate import block_message, record_decision_signal  # noqa: E402
 from test_oracle_brief_policy import brief_status, find_git_root, is_relevant_file  # noqa: E402
@@ -50,12 +54,23 @@ except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> bool:
         return False
 
-# tdd-gate's file name has a hyphen, so it is loaded by path.
-_spec = importlib.util.spec_from_file_location(
-    "tdd_gate", Path(__file__).resolve().with_name("tdd-gate.py")
-)
-tdd = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(tdd)
+
+def _load_tdd_gate():
+    """tdd-gate, loaded by path (its name has a hyphen); None once it is retired.
+
+    With no TDD gate there is no TDD requirement to hold a shell write to, so
+    the brief check carries on alone.
+    """
+    path = Path(__file__).resolve().with_name("tdd-gate.py")
+    spec = importlib.util.spec_from_file_location("tdd_gate", path)
+    if not path.is_file() or spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+tdd = _load_tdd_gate()
 
 # The memory tdd-gate keeps per session; sharing it means one nudge per file
 # whichever tool wrote it.
@@ -67,12 +82,30 @@ _ONCE = "This is reported once per file per session"
 
 def changed_files(repo_root: Path) -> list[str]:
     """Repo-relative files the working tree has changed, created, or staged."""
-    listed = dict.fromkeys(tdd.get_modified_files(str(repo_root)))
-    return [name for name in listed if (repo_root / name).is_file()]
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=str(repo_root), capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    names: list[str] = []
+    entries = iter(result.stdout.split("\0"))
+    for entry in entries:
+        if len(entry) < 4:
+            continue
+        names.append(entry[3:])
+        if entry[0] in "RC":
+            next(entries, None)  # the rename's source path
+    return [name for name in names if (repo_root / name).is_file()]
 
 
 def tdd_debt(repo_root: Path, changed: list[str], session_id: str) -> list[str]:
     """Implementation files changed with no test change beside them, not yet reported."""
+    if tdd is None:
+        return []
     if any(tdd.is_test_file(name) for name in changed):
         clear(_TDD_MEMORY, session_id)
         return []
@@ -112,6 +145,8 @@ def main() -> int:
         return 0
     hook_event = data.get("hook_event_name", "") or data.get("hookEventName", "")
     if hook_event != "PostToolUse" or data.get("tool_name") != "Bash":
+        return 0
+    if already_reported_any is None:
         return 0
     cwd = data.get("cwd")
     if not isinstance(cwd, str) or not cwd:

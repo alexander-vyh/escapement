@@ -195,3 +195,14 @@ def test_outside_a_repo_is_silent(env, tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert Shell(plain, env).bash("echo 'X = 1' > app.py") is None
+
+
+def test_without_tdd_gate_the_brief_is_still_owed(repo, env, tmp_path, monkeypatch):
+    """Open PR #250 retires tdd-gate: the brief check must not die with it."""
+    import shutil
+    hooks = tmp_path / "hooks"
+    shutil.copytree(HOOK.parent, hooks, ignore=shutil.ignore_patterns("tdd-gate.py", "tests"))
+    monkeypatch.setattr(sys.modules[__name__], "HOOK", hooks / HOOK.name)
+    reason = _feedback(Shell(repo, env).bash(HEREDOC))
+    assert "test-oracle-brief.md" in reason and "src/app.py" in reason
+    assert "TDD" not in reason
