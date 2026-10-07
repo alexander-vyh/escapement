@@ -2382,6 +2382,56 @@
       }
     },
     {
+      "id": "shell_write_gate",
+      "description": "Hold files changed through the shell to the TDD and Test Oracle Brief requirements an Edit meets.",
+      "source": "claude/hooks/shell_write_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_shell_write_gate.py::test_codex_shell_write_without_tests_reaches_the_model",
+            "claude/hooks/tests/test_codex_shell_write_gate.py::test_codex_shell_docs_write_is_silent"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B ~/.claude/hooks/shell_write_gate.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_shell_write_gate.py"
+          ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_shell_write_gate_end_to_end.py::test_pi_shell_write_without_tests_is_reported_in_the_result_once",
+            "tests/test_pi_shell_write_gate_end_to_end.py::test_pi_shell_docs_write_is_silent"
+          ]
+        }
+      }
+    },
+    {
       "id": "test_reminder",
       "description": "PostToolUse test reminder after code-file edits.",
       "source": "claude/hooks/test_reminder.py",

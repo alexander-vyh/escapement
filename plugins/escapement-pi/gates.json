@@ -179,6 +179,13 @@
     }
   ],
   "post_tool_gates": {
+    "bash": [
+      {
+        "id": "shell_write_gate",
+        "source": "claude/hooks/shell_write_gate.py",
+        "timeout_seconds": 10
+      }
+    ],
     "write": [
       {
         "id": "design_doc_location_guard",
