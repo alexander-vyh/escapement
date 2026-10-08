@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1324 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1326 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -1071,6 +1071,8 @@ def main() -> int:
                 reason=reason
             )
             _emit_block(display, thread_dir)
+        else:
+            _emit_allow_notice(thread_dir)
         return 0
 
     # Task mode: queue-drain is the session-scope stopping criterion.
@@ -1313,7 +1315,7 @@ def _emit_block(display: str, thread_dir) -> None:
 def _refreeze_notice(thread_dir) -> Optional[str]:
     """escapement-l9lo: an agent-run --refreeze is shown to the human, once."""
     try:
-        from derive_contract import refreeze_notice  # local: import cycle
+        from bead_binding import refreeze_notice  # local: import cycle
 
         return refreeze_notice(thread_dir)
     except Exception:  # noqa: BLE001 — never let the notice crash the Stop decision

@@ -185,7 +185,7 @@ def main(argv: list[str]) -> int:
 
     # escapement-l9lo: a claimed bead's ```verify oracle IS the contract; the
     # implementer may not swap in an exam of its own. Unbound sessions are free.
-    from derive_contract import oracle_in_force  # local: derive imports us
+    from bead_binding import oracle_in_force  # local: derive_contract imports us
 
     bound_bead = oracle_in_force(thread_dir)
     if bound_bead:

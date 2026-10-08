@@ -68,8 +68,18 @@ Wrong implementations these tests reject
   closed — the stale proof must not release it (test_red_run_after_proof_unproves).
 - "proof outlives a stronger rewrite": the oracle is rewritten after it passed and
   the bead closed (test_rewrite_after_proof_is_not_released).
-- "mark_proven is an API": calling it directly on a red contract records proof
-  (test_mark_proven_directly_on_red_contract_records_nothing).
+- "mark_proven is an API": calling it directly records proof without the on-disk
+  contract's last run being green (test_mark_proven_requires_on_disk_green_run).
+- "a pending freeze is dropped on switch": claim A while bd is down, claim a
+  throwaway B, declare an easy exam — A's never-frozen oracle silently vanishes
+  (test_switch_while_pending_keeps_the_debt[*]).
+- "no contract.json, no gate": a claim-time freeze that failed leaves no
+  contract.json, and Stop read that as a conversational allow
+  (test_pending_freeze_without_contract_blocks_stop).
+- "a late freeze is invisible": the oracle frozen after bd recovers was edited
+  after the claim, and nobody is told (test_late_freeze_of_edited_bead_reaches_human).
+- "a typo'd claim traps the session": bd positively says the bead does not
+  exist, yet it is bound as pending forever (test_claim_of_missing_bead_does_not_bind).
 - "whitespace-equal is equal": a forged command differing only by Unicode
   whitespace from the oracle verifies (test_unicode_whitespace_forgery_rejected).
 - "a subagent's claim rebinds the parent": a subagent sharing the parent's
@@ -104,8 +114,8 @@ FAKE_BD = textwrap.dedent(
         sys.exit(1)
     if args[:1] == ["show"] and len(args) >= 2:
         path = store / (args[1] + ".json")
-        if not path.exists():
-            print("[]")
+        if not path.exists():  # real bd: a JSON error on stdout, exit 1
+            print(json.dumps({"error": "no issues found matching the provided IDs"}))
             sys.exit(1)
         print(json.dumps([json.loads(path.read_text())]))
         sys.exit(0)
@@ -509,18 +519,6 @@ def _stop_raw(s: Session) -> dict:
     return json.loads(r.stdout) if r.stdout.strip() else {}
 
 
-def test_proven_cannot_be_asserted_without_a_green_run(s: Session) -> None:
-    """Re-review B1, the exact 7-step sequence: proof comes only from verify passing."""
-    s.bead("bd-a", "test -f done-a")
-    s.claim("bd-a")                                  # 1
-    assert s.verify().returncode != 0                # 2
-    s._run([sys.executable, str(BIN / "derive_contract.py"), "--proven"])  # 3
-    s.close("bd-a")                                  # 4
-    s.declare("test -d .")                           # 5
-    s.verify()                                       # 6
-    assert _blocked(s.stop()), "a red oracle must not become proven on request"  # 7
-
-
 def test_refreeze_notice_reaches_human_on_block(s: Session) -> None:
     """A refreeze notice on a blocked Stop goes to the human, not only the agent."""
     s.bead("bd-a", "test -f done-a")
@@ -563,6 +561,8 @@ def test_bd_down_at_claim_freezes_once_bd_recovers(s: Session) -> None:
         "tool_response": {"interrupted": False, "stdout": "", "stderr": ""}}))
     assert "bd-a" in r.stderr, "a failed claim-time freeze must be visible"
     assert s.declare("test -d .").returncode != 0, "no self-declared exam while the oracle is unknown"
+    held = s.stop()
+    assert _blocked(held) and "could not be read" in held["reason"], held
 
     (s.store / "_down").unlink()
     s.claim("bd-a")
@@ -611,18 +611,22 @@ def test_rewrite_after_proof_is_not_released(s: Session) -> None:
     assert _blocked(s.stop())
 
 
-def test_mark_proven_directly_on_red_contract_records_nothing(s: Session) -> None:
-    """Proof is a fact about a green run, not something a caller can assert."""
+def test_mark_proven_requires_on_disk_green_run(s: Session) -> None:
+    """mark_proven requires the on-disk contract's last run to be green. (Editing the
+    state files directly is the disclosed tamper class, not defended here.)"""
     s.bead("bd-a", "test -f done-a")
     s.claim("bd-a")
     assert s.verify().returncode != 0
     r = s._run([sys.executable, "-c", (
-        "import json,sys; sys.path.insert(0, %r); import derive_contract as d; "
-        "d.mark_proven(%r, json.load(open(%r)))"
-    ) % (str(BIN), str(s.thread), str(s.thread / "contract.json"))])
+        "import sys; sys.path.insert(0, %r); import bead_binding as b; b.mark_proven(%r)"
+    ) % (str(BIN), str(s.thread))])
     assert r.returncode == 0, r.stderr  # the call itself ran
     active = json.loads((s.thread / "active_bead.json").read_text())
     assert not active.get("proven"), active
+
+    (s.work / "done-a").write_text("x")  # positive control: a real green run proves
+    assert s.verify().returncode == 0
+    assert json.loads((s.thread / "active_bead.json").read_text()).get("proven")
 
 
 def test_unicode_whitespace_forgery_rejected(s: Session) -> None:
@@ -635,3 +639,91 @@ def test_unicode_whitespace_forgery_rejected(s: Session) -> None:
     assert s.verify().returncode != 0
     s.close("bd-a")
     assert _blocked(s.stop())
+
+
+def _down(s: Session, down: bool) -> None:
+    flag = s.store / "_down"
+    if down:
+        flag.write_text("")
+    elif flag.exists():
+        flag.unlink()
+
+
+@pytest.mark.parametrize("bd_down_at_switch", [False, True], ids=["bd-up", "bd-down"])
+def test_switch_while_pending_keeps_the_debt(s: Session, bd_down_at_switch: bool) -> None:
+    """Round-4 BLOCK-1: a never-frozen oracle is a debt like an owed one, so switching
+    to a throwaway bead and declaring an easy exam cannot discharge it."""
+    s.bead("bd-a", "test -f done-a")
+    _down(s, True)
+    s.claim("bd-a")
+    _down(s, bd_down_at_switch)
+    s.bead("bd-b", None)
+    s.claim("bd-b")
+    _down(s, False)
+    s.declare("test -d .")
+    s.close("bd-a")
+    s.close("bd-b")
+    v = s.verify()
+    assert v.returncode != 0 and "bd-a" in (v.stdout + v.stderr)
+    verdict = s.stop()
+    assert _blocked(verdict) and "bd-a" in verdict["reason"], verdict
+
+
+def test_pending_freeze_without_contract_blocks_stop(s: Session) -> None:
+    """Round-4 BLOCK-2: claim while bd is down, no contract.json is ever written, the
+    bead is closed and bd stays down — Stop must still block on the pending freeze."""
+    s.bead("bd-a", "test -f done-a")
+    _down(s, True)
+    s.claim("bd-a")
+    s.close("bd-a")
+    assert not (s.thread / "contract.json").exists()
+    verdict = s.stop()
+    assert _blocked(verdict), verdict
+    assert "bd-a" in verdict["reason"] and "could not be read" in verdict["reason"], verdict
+
+    _down(s, False)  # bd recovers: the oracle is frozen and is now the open debt
+    verdict = s.stop()
+    assert _blocked(verdict), verdict
+    assert s.contract()["verification_command"] == "test -f done-a"
+
+
+def test_late_freeze_of_edited_bead_reaches_human(s: Session) -> None:
+    """Round-4 CONCERN-2: the oracle frozen after bd recovers came from text edited
+    after the claim; the human is told, the same way as a refreeze."""
+    s.bead("bd-a", "test -f done-a")
+    _down(s, True)
+    s.claim("bd-a")
+    s.bead("bd-a", "test -f easier")
+    path = s.store / "bd-a.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()),
+                                    updated_at="2999-01-01T00:00:00Z")))
+    _down(s, False)
+    out = _stop_raw(s)
+    note = out.get("systemMessage", "")
+    assert "bd-a" in note and "late" in note.lower() and "test -f easier" in note, out
+    record = json.loads((s.thread / "active_bead.json").read_text())
+    assert record.get("frozen_at")
+
+
+def test_late_freeze_of_unedited_bead_is_quiet(s: Session) -> None:
+    """Negative control: a late freeze of text untouched since the claim is not news."""
+    s.bead("bd-a", "test -f done-a")
+    path = s.store / "bd-a.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()),
+                                    updated_at="2000-01-01T00:00:00Z")))
+    _down(s, True)
+    s.claim("bd-a")
+    _down(s, False)
+    out = _stop_raw(s)
+    assert "late" not in out.get("systemMessage", "").lower(), out
+    assert s.contract()["verification_command"] == "test -f done-a"
+
+
+def test_claim_of_missing_bead_does_not_bind(s: Session) -> None:
+    """Round-4 CONCERN-3: bd positively reports the bead does not exist (a typo or a
+    rejected claim) — nothing is bound, so nothing can trap the session."""
+    s.claim("bd-typo")
+    assert not (s.thread / "active_bead.json").exists()
+    assert s.declare("test -f done").returncode == 0
+    (s.work / "done").write_text("x")
+    assert s.verify().returncode == 0

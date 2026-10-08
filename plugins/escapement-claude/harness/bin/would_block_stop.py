@@ -300,14 +300,16 @@ def load_thread_state(
             touched = code_touch.touched_code(transcript_path, cwd)
         except Exception:  # noqa: BLE001 — fail OPEN, never crash the Stop gate
             touched = False
-    binding_problem = None
-    if isinstance(contract, dict):
-        try:
-            from derive_contract import binding_problem as _binding_problem  # local: import cycle
+    # Judged from active_bead.json even with no contract.json: a pending freeze or
+    # an owed oracle is a debt no missing contract can discharge (escapement-l9lo).
+    try:
+        from bead_binding import binding_problem as _binding_problem  # local: import cycle
 
-            binding_problem = _binding_problem(contract, thread_dir)
-        except Exception:  # noqa: BLE001 — fail OPEN, never crash the Stop gate
-            binding_problem = None
+        binding_problem = _binding_problem(
+            contract if isinstance(contract, dict) else None, thread_dir
+        )
+    except Exception:  # noqa: BLE001 — fail OPEN, never crash the Stop gate
+        binding_problem = None
     return {
         "contract": contract,
         "contract_binding_problem": binding_problem,

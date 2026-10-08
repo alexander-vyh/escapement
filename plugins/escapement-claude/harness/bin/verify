@@ -97,9 +97,9 @@ with open(path, "w") as f:
 # unsuppressed, exactly the frozen command); a red run clears earlier proof.
 sys.path.insert(0, script_dir)
 try:
-    from derive_contract import mark_proven
+    from bead_binding import mark_proven
 
-    mark_proven(thread_dir, c)
+    mark_proven(thread_dir)
 except Exception as exc:  # noqa: BLE001 — a failed mark leaves the oracle unproven
     print(f"verify: could not record the bead oracle's result: {exc}", file=sys.stderr)
 PY

@@ -206,7 +206,7 @@ def main() -> int:
     subagent_on_parent_dir = bool(payload.get("agent_id")) and not os.environ.get("CLAUDE_AGENT_ID")
     try:
         if not subagent_on_parent_dir:
-            from derive_contract import bind_claimed_bead  # local: a broken import must not cost task mode
+            from bead_binding import bind_claimed_bead  # local: a broken import must not cost task mode
 
             bind_claimed_bead(thread_dir, task_id, session_id=session_id)
     except Exception as exc:  # noqa: BLE001 — never raise out of a PostToolUse hook
