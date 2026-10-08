@@ -510,13 +510,14 @@ remove_plugin_owned_bootstrap_link() {
 replace_wrapper bin
 replace_wrapper schemas
 
-# The stable harness wrapper is the launchd execution authority. Install only
-# after that wrapper and every plugin-owned surface have converged; dry-run uses
-# the same installer planner without touching launchd or HOME.
+# escapement-lzp8: the continuation supervisor is retired. It resumed and injected
+# into Claude and Codex sessions on its own, including sessions the user was still
+# using. Every deploy unloads it and removes its plist; reintroducing any
+# auto-resume waits on the design review in escapement-2lty.
 if [[ "$DRY_RUN" == true ]]; then
-  "$supervisor_installer" --dry-run
-elif ! "$supervisor_installer"; then
-  fail_after_refresh "continuation supervisor installation failed"
+  echo "    [dry-run] retire continuation supervisor (uninstall)"
+elif ! "$supervisor_installer" --uninstall; then
+  fail_after_refresh "continuation supervisor retirement failed"
 fi
 if [[ "$DRY_RUN" != true ]]; then
   python3 -B "$TRANSACTION_HELPER" commit --journal "$TRANSACTION_JOURNAL"

@@ -283,6 +283,12 @@ exit 0
 STUB
 chmod +x "$BIN/uname" "$BIN/launchctl"
 
+# escapement-lzp8: start from a LOADED supervisor so the deploy must retire it.
+mkdir -p "$HOME_DIR/Library/LaunchAgents"
+SUP_PLIST="$HOME_DIR/Library/LaunchAgents/com.escapement.continuation-supervisor.plist"
+python3 -c "import plistlib,sys; plistlib.dump({'Label':'com.escapement.continuation-supervisor','ProgramArguments':['/bin/true']}, open(sys.argv[1],'wb'))" "$SUP_PLIST"
+chmod 644 "$SUP_PLIST"
+printf '%s\n' com.escapement.continuation-supervisor > "$HOME_DIR/launchctl.loaded"
 HOME="$HOME_DIR" PATH="$BIN:$PATH" bash "$UPDATER_REPO/scripts/plugin-update.sh" >"$TD/out.log" 2>&1 \
   || { cat "$TD/out.log"; bad "plugin-update.sh exited non-zero"; }
 
@@ -299,9 +305,17 @@ model="$(python3 -c "import json;print(json.load(open('$CLAUDE_DIR/settings.json
 [ "$(readlink "$CLAUDE_DIR/harness/schemas" 2>/dev/null)" = "$CACHE/harness/schemas" ] \
   && ok "harness/schemas converged to registry-selected plugin" \
   || bad "harness/schemas did not converge to $CACHE/harness/schemas"
-grep -q '^bootstrap ' "$HOME_DIR/launchctl.log" 2>/dev/null \
-  && ok "complete updater fixture reaches the supervisor load boundary" \
-  || bad "complete updater fixture never loaded the supervisor"
+# escapement-lzp8: the continuation supervisor is retired — a deploy unloads it,
+# removes its plist, and never loads it.
+! grep -q '^bootstrap ' "$HOME_DIR/launchctl.log" 2>/dev/null \
+  && ok "deploy never loads the retired continuation supervisor" \
+  || bad "deploy loaded the continuation supervisor"
+grep -q '^bootout ' "$HOME_DIR/launchctl.log" 2>/dev/null \
+  && ! grep -Fxq com.escapement.continuation-supervisor "$HOME_DIR/launchctl.loaded" \
+  && ok "deploy unloads a previously loaded continuation supervisor" \
+  || bad "a previously loaded continuation supervisor is still loaded after deploy"
+[ ! -e "$SUP_PLIST" ] && ok "deploy removes the continuation supervisor plist" \
+  || bad "continuation supervisor plist survived the deploy"
 
 for stale in \
   "$CLAUDE_DIR/skills/discovery" \

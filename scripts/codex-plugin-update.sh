@@ -143,15 +143,10 @@ ln -sfn "$plugin_root/harness/schemas" "$CODEX_RUNTIME_HOME/.schemas.next"
 promote_runtime_link "$CODEX_RUNTIME_HOME/.schemas.next" "$CODEX_RUNTIME_HOME/schemas"
 mkdir -p "$HARNESS_HOME/worktrees"
 chmod 700 "$HARNESS_HOME" "$HARNESS_HOME/worktrees" "$CODEX_RUNTIME_HOME"
+# escapement-lzp8: the continuation supervisor is retired (see plugin-update.sh);
+# a Codex deploy removes it rather than installing it.
 if [[ "${ESCAPEMENT_SKIP_SUPERVISOR_INSTALL:-0}" != "1" ]]; then
-  shared_waker="$HARNESS_HOME/bin/wakeup_waker.py"
-  if [[ -x "$shared_waker" ]] \
-    && [[ "$("$shared_waker" --capabilities 2>/dev/null)" == "cross-host-continuation-v1" ]]; then
-    bash "$REPO_DIR/scripts/continuation-supervisor-install.sh"
-  else
-    ESCAPEMENT_SUPERVISOR_WAKER="$CODEX_RUNTIME_HOME/bin/wakeup_waker.py" \
-      bash "$REPO_DIR/scripts/continuation-supervisor-install.sh"
-  fi
+  bash "$REPO_DIR/scripts/continuation-supervisor-install.sh" --uninstall
 fi
 
 source_skill="$plugin_root/skills/beads-execution/SKILL.md"

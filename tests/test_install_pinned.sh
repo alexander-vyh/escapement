@@ -212,26 +212,21 @@ fi
 assert_plugin_owned "$T1" "default install"
 assert_auxiliary_owned "$T1" "$PIN" "default install"
 
+# escapement-lzp8: the continuation supervisor is retired, so a default
+# deployment unloads it and leaves no launchd job behind.
 SUPERVISOR_PLIST="$T1/Library/LaunchAgents/com.escapement.continuation-supervisor.plist"
-if [ -f "$SUPERVISOR_PLIST" ] && python3 - "$SUPERVISOR_PLIST" "$T1/.claude/harness/bin/wakeup_waker.py" <<'PY'
-import plistlib
-import sys
-
-with open(sys.argv[1], "rb") as fh:
-    job = plistlib.load(fh)
-argv = job.get("ProgramArguments", [])
-assert argv == [sys.argv[2], "--fire"]
-assert job.get("RunAtLoad") is True
-assert type(job.get("StartInterval")) is int and job["StartInterval"] == 60
-PY
-then
-  ok "default deployment installs supervisor against the stable harness wrapper"
+[ ! -e "$SUPERVISOR_PLIST" ] \
+  && ok "default deployment leaves no supervisor plist" \
+  || bad "default deployment left a supervisor plist behind"
+grep -q '^bootout ' "$T1/launchctl.log" 2>/dev/null \
+  && ok "default deployment unloads the retired supervisor" \
+  || bad "default deployment never unloaded the retired supervisor"
+if grep -q '^bootstrap ' "$T1/launchctl.log" 2>/dev/null \
+  || grep -Fxq 'com.escapement.continuation-supervisor' "$T1/launchctl.loaded" 2>/dev/null; then
+  bad "default deployment loaded the retired supervisor"
 else
-  bad "default deployment did not install a stable --fire supervisor job"
+  ok "default deployment never loads the retired supervisor"
 fi
-grep -q '^bootstrap ' "$T1/launchctl.log" 2>/dev/null \
-  && ok "default deployment loads the supervisor after wrapper convergence" \
-  || bad "default deployment never loaded the supervisor"
 
 # Sequential regression: a later legacy update may refresh the auxiliary pin,
 # but it must leave plugin ownership intact.
