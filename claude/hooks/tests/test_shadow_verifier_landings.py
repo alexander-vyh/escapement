@@ -85,10 +85,14 @@ def test_positive_control_a_challenged_close_with_a_passing_oracle_would_pass(wo
     {"name": "review-challenger-tests", "subagent_type": "general-purpose"},
     {"name": "challenger-reviewer", "subagent_type": "general-purpose"},
     {"name": "outcome-verifier-review", "subagent_type": "Explore"},
+    {"name": "rereview-challenger-tests", "subagent_type": "general-purpose"},
+    {"name": "reviewer2-challenger", "subagent_type": "general-purpose"},
+    {"name": "rereview2-outcome-verifier", "subagent_type": "general-purpose"},
 ], ids=["code-reviewer", "adversarial-reviewer", "role-only-in-the-prompt",
         "reviewer-describing-the-challenger", "negated-name", "reviewer-named-as-verifier",
         "role-only-in-the-description", "review-in-the-name", "reviewer-in-the-name",
-        "review-in-a-verifier-name"])
+        "review-in-a-verifier-name", "rereview-in-the-name", "numbered-reviewer",
+        "numbered-rereview"])
 def test_a_dispatch_that_is_not_a_challenger_does_not_count(world, agent):
     world.answer(42)
     world.add_bead("proj-a1")
@@ -106,7 +110,11 @@ def test_a_dispatch_that_is_not_a_challenger_does_not_count(world, agent):
     {"name": "x", "subagent_type": "mutation-challenger"},
     {"name": "challenger-obwo", "subagent_type": "general-purpose"},
     {"name": "obwo_outcome_verifier"},
-], ids=["verifier-name", "challenger-type", "challenger-name-with-suffix", "snake-case-verifier"])
+    {"name": "mutationChallenger", "subagent_type": "general-purpose"},
+    {"name": "outcomeVerifier", "subagent_type": "general-purpose"},
+    {"name": "preview-challenger", "subagent_type": "general-purpose"},
+], ids=["verifier-name", "challenger-type", "challenger-name-with-suffix", "snake-case-verifier",
+        "camel-case-challenger", "camel-case-verifier", "preview-is-not-review"])
 def test_a_challenger_or_outcome_verifier_role_counts(world, agent):
     world.answer(42)
     world.add_bead("proj-a1")
@@ -133,7 +141,8 @@ def test_what_the_challenger_said_is_recorded(world):
 @pytest.mark.parametrize("task_name, expected", [
     ("outcome_verifier", "would-pass"),
     ("review_challenger_output", "would-block"),
-], ids=["verifier", "reviewer-of-the-challenger"])
+    ("rereview_challenger_output", "would-block"),
+], ids=["verifier", "reviewer-of-the-challenger", "rereviewer-of-the-challenger"])
 def test_a_codex_spawn_counts_only_when_named_for_the_role(world, task_name, expected):
     world.answer(42)
     world.add_bead("proj-a1")
@@ -354,3 +363,30 @@ def test_parallel_challenger_dispatches_are_all_kept(world):
 
     (rec,) = world.wait_final()
     assert len(rec["extras"]["challengers"]) == 12, [c["name"] for c in rec["extras"]["challengers"]]
+
+
+def test_a_runner_slow_to_fork_does_not_cost_the_next_landing_its_runner(world):
+    """One command, two landings. The first runner is held at interpreter start
+    past the hook's wait; the second landing must still be handed off."""
+    site = world.tmp / "slowsite"
+    site.mkdir()
+    gate = world.tmp / "first-runner-held"
+    (site / "sitecustomize.py").write_text(
+        "import os, sys, time\n"
+        "if '--runner' in sys.argv:\n"
+        "    try:\n"
+        f"        os.close(os.open({str(gate)!r}, os.O_CREAT | os.O_EXCL))\n"
+        "        time.sleep(3)\n"
+        "    except FileExistsError:\n"
+        "        pass\n")
+    world.env["PYTHONPATH"] = str(site)
+    world.env["SHADOW_VERIFIER_SYNC_SECONDS"] = "1"
+    _merged_pr(world)
+    world.add_bead("proj-a1")
+    world.challenge()
+
+    assert_silent(world.land("gh pr merge 12 && bd close proj-a1"))
+
+    finals = world.wait_final(count=2)
+    assert gate.exists(), "the first runner was never held: the test proves nothing"
+    assert sorted(r["extras"]["kind"] for r in finals) == ["close", "merge"], finals

@@ -31,8 +31,10 @@ from pathlib import Path
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
 _NEGATIONS = frozenset({"no", "not", "non", "without", "skip", "skipped", "never"})
 # A dispatch whose type OR name says review is a reviewer, whatever else it says:
-# "review-challenger-tests" reviews the challenger, it is not one.
-_REVIEW_TOKENS = frozenset({"review", "reviews", "reviewer", "reviewers", "reviewing", "reviewed"})
+# "review-challenger-tests" reviews the challenger, it is not one. Whole tokens,
+# so numbered and repeat reviewers count (rereview2, reviewer2) and "preview" does not.
+_REVIEW_TOKEN = re.compile(r"(?:re)?review(?:s|er|ers|ing|ed)?\d*")
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _BAD_IMPLEMENTATIONS_RE = re.compile(
     r"\b(?:bad|wrong|cheap|plausible|fragile|invalid)\b[\w\s,-]{0,30}\bimplementations?\b"
     r"|\bmutants?\b", re.IGNORECASE)
@@ -51,11 +53,13 @@ def _state_file(session_id: str) -> Path:
 
 
 def _tokens(value: object) -> list[str]:
-    return [token for token in _TOKEN_SPLIT.split(str(value or "").lower()) if token]
+    spaced = _CAMEL_BOUNDARY.sub(" ", str(value or ""))  # mutationChallenger -> mutation Challenger
+    return [token for token in _TOKEN_SPLIT.split(spaced.lower()) if token]
 
 
 def _role(dispatch: dict) -> str | None:
-    if any(_REVIEW_TOKENS & set(_tokens(dispatch.get(field))) for field in _IDENTITY_FIELDS):
+    if any(_REVIEW_TOKEN.fullmatch(token) for field in _IDENTITY_FIELDS
+           for token in _tokens(dispatch.get(field))):
         return None
     for field in _IDENTITY_FIELDS:
         tokens = _tokens(dispatch.get(field))

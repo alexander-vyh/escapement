@@ -184,7 +184,12 @@ def _spawn_runner(job: dict, deadline: float) -> None:
         cwd=job["repo_root"], start_new_session=True, close_fds=True,
     )
     # It forks and exits at once; every landing shares the hook's one sync limit.
-    runner.wait(timeout=max(_remaining(deadline), 0.5))
+    # A slow fork is left to finish on its own, and the next landing still gets
+    # its runner.
+    try:
+        runner.wait(timeout=max(_remaining(deadline), 0.5))
+    except subprocess.TimeoutExpired:
+        pass
 
 
 # --- the runner: judge the landed commit within the budget, write the verdict ---------
