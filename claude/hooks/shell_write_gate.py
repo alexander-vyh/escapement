@@ -68,11 +68,14 @@ leading command is not followed. A write into another working tree is seen
 only when a path in the command points into it (a gitignored .worktrees/<name>
 checkout, an absolute path in another clone); a script that writes there
 without naming the path is not, nor is a path built at run time (`$VAR`,
-`${PWD}/..`, `$HOME`, `os.path.join`). Past 64 path tokens (`token-cap`) or 6
+`${PWD}/..`, `$HOME`, `os.path.join`) or a glob in the target directory. A
+named repository git cannot confirm (timeout, safe.directory) records
+`unconfirmed`. Past 64 path tokens (`token-cap`) or 6
 repositories (`repo-cap`) the rest are not watched, and a named repository
 that cannot be snapshotted records its own blind. In a tree past
-_shell_snapshot.LARGE_INDEX, files inside untracked directories are not seen
-(`untracked-dirs`). An after-half whose snapshot is gone -- never taken, or
+_shell_snapshot.LARGE_INDEX, files inside untracked directories are not seen;
+an entry added, removed or renamed directly in one records `untracked-dirs`,
+an in-place edit deeper inside records nothing. An after-half whose snapshot is gone -- never taken, or
 swept as an hour-old orphan -- records `no-pending`.
 
 Exit codes:
@@ -248,6 +251,7 @@ def _before_half(data: dict, budget, session_dir: Path, call_id: str, started: f
     tool_input = data.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     roots = [root] if root is not None else []
+    unconfirmed = 0
     if isinstance(command, str) and isinstance(cwd, str) and cwd:
         named_repos, token_cap = snap.named_repos(command, cwd)
         if token_cap:
@@ -256,9 +260,12 @@ def _before_half(data: dict, budget, session_dir: Path, call_id: str, started: f
             # git, not the .git found on disk, says where the tree is: the same
             # answer, in the same spelling, the cwd's repository got.
             found = snap.repo_root(budget, str(named))
-            if found is not None and found not in roots:
+            if found is None:
+                unconfirmed += 1
+                _blind("unconfirmed")  # timed out, or refused (safe.directory): not watched
+            elif found not in roots:
                 roots.append(found)
-    if len(roots) > snap.MAX_REPOS:
+    if len(roots) + unconfirmed > snap.MAX_REPOS:
         _blind("repo-cap")  # repositories past the cap are not watched
     snaps: dict[str, dict] = {}
     for repo in roots[:snap.MAX_REPOS]:
@@ -301,8 +308,8 @@ def _after_half(data: dict, budget, root: Path, before: dict, primary: Path,
         _blind("out-of-time")  # a file the budget left no time to check
     if unreadable:
         _blind("unreadable")  # a dirty file that cannot be read, before or after
-    if after.get("untracked_dirs"):
-        _blind("untracked-dirs")  # a large tree: files in untracked directories are not listed
+    if (after.get("untracked_dirs") or {}) != (before.get("untracked_dirs") or {}):
+        _blind("untracked-dirs")  # a large tree: something in an untracked directory moved
     if not written:
         return ""
     changed = list(after["files"]) + committed

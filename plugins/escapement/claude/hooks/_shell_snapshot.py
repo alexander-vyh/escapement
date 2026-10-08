@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -60,7 +61,8 @@ LARGE_INDEX = 8 * 1024 * 1024
 # most this many path tokens; past either cap the gate records a blind signal.
 MAX_REPOS = 6
 MAX_TOKENS = 64
-_PATH_TOKEN = re.compile(r"[^\s'\"`<>|;&()=]*/[^\s'\"`<>|;&()=]*")
+# A token with a `/` and at least one other character: a bare `/` names nothing.
+_PATH_TOKEN = re.compile(r"(?=[^\s'\"`<>|;&()=]*[^\s'\"`<>|;&()=/])[^\s'\"`<>|;&()=]*/[^\s'\"`<>|;&()=]*")
 # The reflog subject of a commit this call made. Anything else moved HEAD for
 # someone else's reasons: pull, merge, rebase, reset, checkout.
 _COMMIT_SUBJECT = re.compile(r"commit(?: \((?:amend|initial)\))?: ")
@@ -99,20 +101,34 @@ def named_repos(command: str, cwd: str) -> tuple[list[Path], bool]:
     """(working trees a path in `command` points into, found on disk without
     git; whether path tokens past MAX_TOKENS went unread)."""
     found: dict[str, Path] = {}
-    tokens = _PATH_TOKEN.findall(command)
+    tokens = list(dict.fromkeys(_PATH_TOKEN.findall(command) + _quoted_paths(command)))
     for token in tokens[:MAX_TOKENS]:
         try:
             path = Path(os.path.expanduser(token))
             path = path if path.is_absolute() else Path(cwd) / path
             path = path.resolve(strict=False)
-            for directory in (path, *path.parents):
-                # Python 3.9 raises PermissionError under an unsearchable directory.
+        except (OSError, RuntimeError, ValueError):
+            continue
+        for directory in (path, *path.parents):
+            try:
+                # Python 3.9 raises PermissionError under an unsearchable directory;
+                # the walk goes on to the directories above it.
                 if (directory / ".git").exists():
                     found.setdefault(str(directory), directory)
                     break
-        except (OSError, RuntimeError, ValueError):
-            continue
+            except OSError:
+                continue
     return list(found.values()), len(tokens) > MAX_TOKENS
+
+
+def _quoted_paths(command: str) -> list[str]:
+    """Path words as the shell would split them, so a quoted path with spaces
+    stays one path; nothing when the command does not parse."""
+    try:
+        words = shlex.split(command, posix=True)
+    except ValueError:
+        return []
+    return [word for word in words if "/" in word and word.strip("/") and any(c.isspace() for c in word)]
 
 
 def _large(root: Path) -> bool:
@@ -145,6 +161,13 @@ def _dirty(budget: Budget, root: Path) -> tuple[list[str], list[str]] | None:
             next(entries, None)  # the rename's source path (staged, or an intent-to-add rename)
     dirs = [name for name in names if name.endswith("/")]
     return [name for name in names if (root / name).is_file()], dirs
+
+
+def _dir_print(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return -1
 
 
 def fingerprint(path: Path, method: str) -> str:
@@ -207,7 +230,9 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
         "files": files,
     }
     if untracked_dirs:
-        taken["untracked_dirs"] = untracked_dirs
+        # Each directory's own mtime: it moves when an entry is added, removed
+        # or renamed in it, which is cheap to see; an in-place edit deeper in is not.
+        taken["untracked_dirs"] = {name: _dir_print(root / name) for name in untracked_dirs}
     return taken
 
 

@@ -123,7 +123,7 @@ def test_a_large_tree_is_not_scanned_with_all_untracked_files(repo, env, monkeyp
     (repo / "newpkg" / "mod.py").write_text("M = 1\n")
     (repo / "src" / "app.py").write_text("VALUE = 2\n")
     after = snap.take(snap.Budget(), repo, before)
-    assert after["untracked_dirs"] == ["newpkg/"]
+    assert list(after["untracked_dirs"]) == ["newpkg/"]
     named, *_ = snap.written(snap.Budget(), repo, before, after, [])
     assert named == ["src/app.py"], "tracked changes are still seen in a large tree"
 
@@ -206,7 +206,8 @@ def test_a_named_repository_that_cannot_be_snapshotted_records_its_blind(repo, e
 
 def test_tokens_past_the_cap_record_token_cap(repo, env, tmp_path):
     other = _clone(tmp_path / "other")
-    noise = " ".join(["a/b"] * 64)
+    # Distinct tokens: repeats of one path are read once and do not use up the cap.
+    noise = " ".join(f"a/b{i}" for i in range(64))
     Shell(repo, env).bash(f"echo {noise} >/dev/null; echo 'X = 1' > {other}/src/x.py")
     assert _blind(env, "token-cap"), signals(env)
 
@@ -245,3 +246,72 @@ def test_a_write_into_an_existing_untracked_directory_of_a_large_tree_is_flagged
     env = dict(env, ESCAPEMENT_SHELL_WRITE_LARGE_INDEX="1")
     Shell(repo, env).bash("echo 'M = 1' > newpkg/mod.py")
     assert _blind(env, "untracked-dirs"), signals(env)
+
+
+# --- round 5: unconfirmed repositories, quoted paths, signal quality ---------
+
+
+def _pre_in_process(repo: Path, env: dict, monkeypatch, command: str) -> None:
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.syspath_prepend(str(Path(snap.__file__).parent))
+    import shell_write_gate as gate
+
+    gate.run({"session_id": f"s-{uuid.uuid4()}", "tool_use_id": f"toolu_{uuid.uuid4().hex}",
+              "cwd": str(repo), "tool_name": "Bash", "hook_event_name": "PreToolUse",
+              "tool_input": {"command": command}})
+
+
+def test_a_named_repository_git_cannot_confirm_records_unconfirmed(repo, env, tmp_path, monkeypatch):
+    """rev-parse timing out, or refused by safe.directory: not silently dropped."""
+    other = _clone(tmp_path / "other")
+    real = snap.repo_root
+    monkeypatch.setattr(snap, "repo_root",
+                        lambda budget, cwd: None if str(other.resolve()) in str(Path(cwd).resolve())
+                        else real(budget, cwd))
+    _pre_in_process(repo, env, monkeypatch, f"echo 'X = 1' > {other}/src/x.py")
+    assert _blind(env, "unconfirmed"), signals(env)
+
+
+def test_unconfirmed_repositories_count_toward_the_cap(repo, env, tmp_path, monkeypatch):
+    others = [_clone(tmp_path / f"o{i}") for i in range(6)]
+    real = snap.repo_root
+    monkeypatch.setattr(snap, "repo_root",
+                        lambda budget, cwd: None if "/o0" in str(cwd) else real(budget, cwd))
+    _pre_in_process(repo, env, monkeypatch, "ls " + " ".join(str(o) for o in others))
+    assert _blind(env, "repo-cap"), signals(env)
+
+
+def test_a_quoted_path_with_spaces_is_watched(repo, env, tmp_path):
+    other = _clone(tmp_path / "my repo")
+    reason = _feedback(Shell(repo, env).bash(f"echo 'X = 1' > '{other}/src/x.py'"))
+    assert "src/x.py" in reason and "my repo" in reason
+
+
+def test_an_unsearchable_parent_does_not_hide_the_repository_above_it(repo, monkeypatch):
+    """PermissionError on one directory of the walk: keep walking up."""
+    real_exists = Path.exists
+
+    def exists(self):
+        if self.parent.name == "locked":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    repos, _ = snap.named_repos("echo 1 > locked/inner/x.py", str(repo))
+    assert [p.resolve() for p in repos] == [repo.resolve()]
+
+
+def test_a_bare_slash_is_not_a_path_token():
+    assert snap._PATH_TOKEN.findall("a / b // c src/x.py") == ["src/x.py"]
+
+
+def test_untracked_dirs_is_quiet_when_no_dirty_path_could_be_inside_one(repo, env):
+    """A large tree whose untracked directories hold nothing this call touched:
+    the tracked change is named and no `untracked-dirs` blind is recorded."""
+    (repo / "newpkg").mkdir()
+    (repo / "newpkg" / "old.py").write_text("O = 1\n")
+    env = dict(env, ESCAPEMENT_SHELL_WRITE_LARGE_INDEX="1")
+    reason = _feedback(Shell(repo, env).bash("echo 'X = 1' >> src/app.py"))
+    assert "src/app.py" in reason
+    assert not _blind(env, "untracked-dirs"), signals(env)
