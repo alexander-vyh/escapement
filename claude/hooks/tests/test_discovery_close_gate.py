@@ -187,6 +187,9 @@ def _run_hook(hook_event="PreToolUse", tool_name="Bash", command="bd close my-1"
     try:
         with patch.dict(os.environ, env), patch("sys.stdin", io.StringIO(stdin_data)), \
                 patch("sys.stdout", out):
+            # The hook falls back to this env var; drop it so session identity
+            # comes only from the payload, as in CI (escapement-6k7a).
+            os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
             mod.main()
         return 0, out.getvalue()
     except SystemExit as exc:
