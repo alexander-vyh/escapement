@@ -192,6 +192,17 @@ def ready_mcp_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return gates
 
 
+def ready_ask_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Gates that judge omp's blocking `ask` before it opens. Pi-declared only:
+    Claude and Codex have no tool that freezes the whole lead."""
+    adapter = manifest["adapters"]["pi"]
+    gates: list[dict[str, Any]] = []
+    for hook in manifest.get("hooks", []):
+        explicit = _explicit_pi_events(hook, adapter["source_event"], {adapter["ask_target_matcher"]})
+        gates.extend(_gate(hook, event) for event in (explicit or [])[:1])
+    return gates
+
+
 def pi_tool_targets(adapter: dict[str, Any]) -> list[str]:
     """Every Pi tool the extension maps onto a Claude tool payload."""
     return [
@@ -200,6 +211,7 @@ def pi_tool_targets(adapter: dict[str, Any]) -> list[str]:
         adapter["read_target_matcher"],
         adapter["agent_target_matcher"],
         adapter["mcp_target_matcher"],
+        adapter["ask_target_matcher"],
     ]
 
 
@@ -240,6 +252,7 @@ def _pi_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
         *ready_read_gates(manifest),
         *ready_agent_gates(manifest),
         *ready_mcp_gates(manifest),
+        *ready_ask_gates(manifest),
         *ready_context_gates(manifest),
         *ready_session_gates(manifest),
         *ready_stop_gates(manifest),
@@ -315,6 +328,7 @@ def render_gate_inventory(manifest: dict[str, Any]) -> str:
         # direct tools and mcpScript calls arrive that way, so the MCP gates
         # judge them too. No MCP gate matches an extension tool that is not MCP.
         "unlisted_tool_gates": ready_mcp_gates(manifest),
+        "ask_gates": ready_ask_gates(manifest),
         "post_tool_gates": ready_post_tool_gates(manifest),
         "context_gates": ready_context_gates(manifest),
         "session_gates": ready_session_gates(manifest),
@@ -371,6 +385,9 @@ def validate_adapter(manifest: dict[str, Any]) -> list[str]:
         # pi-mcp-adapter's proxy tool `mcp` {tool, server, args} carries every
         # MCP call by default; it is mapped onto Claude's mcp__<server>__<tool>.
         "mcp_target_matcher": "mcp",
+        # omp's `ask` {questions: [{id, question, options, recommended}]}
+        # blocks the whole session until answered (escapement-fo4v).
+        "ask_target_matcher": "ask",
         # Finished tool calls: run as PostToolUse hooks at tool_result, whose
         # result content the extension may extend (Pi extension docs).
         "post_tool_source_event": "PostToolUse",

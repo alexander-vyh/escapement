@@ -17,7 +17,9 @@ import pathlib
 import time
 
 
-def record_gate_signal(decision: str, reason: str, session_id: str, notes: str = "") -> None:
+def record_gate_signal(
+    decision: str, reason: str, session_id: str, notes: str = "", gate: str = "continuation-harness"
+) -> None:
     try:
         beads = None
         env = os.environ.get("BEADS_DIR")
@@ -33,7 +35,7 @@ def record_gate_signal(decision: str, reason: str, session_id: str, notes: str =
             return
         line = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "gate": "continuation-harness",
+            "gate": gate,
             "decision": decision,
             "reason": reason,
             "session_id": session_id,

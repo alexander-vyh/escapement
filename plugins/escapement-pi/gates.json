@@ -188,6 +188,13 @@
       "timeout_seconds": 5
     }
   ],
+  "ask_gates": [
+    {
+      "id": "pi_ask_gate",
+      "source": "harness/bin/pi_ask_gate.py",
+      "timeout_seconds": 10
+    }
+  ],
   "post_tool_gates": {
     "bash": [
       {

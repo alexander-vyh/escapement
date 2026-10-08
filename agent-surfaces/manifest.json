@@ -55,6 +55,7 @@
       "session_target_event": "session_start",
       "agent_target_matcher": "subagent",
       "mcp_target_matcher": "mcp",
+      "ask_target_matcher": "ask",
       "post_tool_source_event": "PostToolUse",
       "post_tool_target_event": "tool_result",
       "stop_source_event": "Stop",
@@ -1714,6 +1715,38 @@
             "tests/test_pi_no_direct_send_guard_end_to_end.py::test_pi_slack_draft_runs",
             "tests/test_pi_no_direct_send_guard_end_to_end.py::test_pi_direct_and_scripted_slack_sends_are_blocked",
             "tests/test_pi_no_direct_send_guard_end_to_end.py::test_pi_unrelated_extension_tools_run"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pi_ask_gate",
+      "description": "Deny omp's blocking ask while lanes the lead started are still running, and require every ask to state its default if unanswered.",
+      "source": "harness/bin/pi_ask_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "unsupported",
+          "unsupported_reason": "omp's blocking `ask` is a Pi-host tool; Claude and Codex have no tool that freezes the whole lead until answered."
+        },
+        "claude": {
+          "status": "unsupported",
+          "unsupported_reason": "omp's blocking `ask` is a Pi-host tool; Claude and Codex have no tool that freezes the whole lead until answered."
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "ask",
+              "command": "python3 -B harness/bin/pi_ask_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "harness/tests/test_pi_ask_gate.py::test_ask_is_denied_while_dispatched_lanes_are_still_running",
+            "harness/tests/test_pi_ask_gate.py::test_negative_control_ask_runs_once_every_lane_has_reported",
+            "harness/tests/test_pi_ask_gate.py::test_negative_control_lone_lead_with_a_stated_default_may_ask",
+            "harness/tests/test_pi_ask_gate.py::test_reasoned_waiver_lets_the_ask_through_and_is_recorded"
           ]
         }
       }

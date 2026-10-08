@@ -84,6 +84,7 @@ function loadRuntime(): Runtime {
     ["read", optionalGates(parsed.read_gates)],
     ["subagent", optionalGates(parsed.agent_gates)],
     ["mcp", optionalGates(parsed.mcp_gates)],
+    ["ask", optionalGates(parsed.ask_gates)],
   ]);
   const unlistedToolGates = optionalGates(parsed.unlisted_tool_gates);
   const postToolGates = new Map<string, Gate[]>(
@@ -283,8 +284,14 @@ export default function escapementPi(pi: PiAPI): void {
     run: unknown,
   ): string | null => {
     const branch = context?.sessionManager?.getBranch?.();
+    // A custom_message entry (omp's `async-result` delivery of a background
+    // job) is kept as the "custom" message Pi's own context builds from it.
     return transcripts.write(sessionId, Array.isArray(branch)
-      ? branch.filter((entry) => entry?.type === "message").map((entry) => entry.message)
+      ? branch.flatMap((entry) => entry?.type === "message"
+        ? [entry.message]
+        : entry?.type === "custom_message"
+          ? [{ role: "custom", customType: entry.customType, content: entry.content, timestamp: entry.timestamp }]
+          : [])
       : Array.isArray(run) ? run : []);
   };
 

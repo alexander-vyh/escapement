@@ -102,7 +102,7 @@ def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> N
 
     tools = [
         adapter["target_matcher"], *adapter["file_target_matchers"], adapter["read_target_matcher"],
-        adapter["agent_target_matcher"], adapter["mcp_target_matcher"],
+        adapter["agent_target_matcher"], adapter["mcp_target_matcher"], adapter["ask_target_matcher"],
     ]
     post_tool = {
         tool: _pi_gates(manifest, {tool}, None, adapter["post_tool_source_event"]) for tool in tools
@@ -118,6 +118,8 @@ def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> N
         # An extension's tool (pi-mcp-adapter direct tools, mcpScript) has no
         # list of its own and is judged by the MCP gates.
         "unlisted_tool_gates": _pi_gates(manifest, {adapter["mcp_target_matcher"]}, None, adapter["source_event"]),
+        # omp's blocking `ask` has its own list (escapement-fo4v).
+        "ask_gates": _pi_gates(manifest, {adapter["ask_target_matcher"]}, None, adapter["source_event"]),
         "post_tool_gates": {tool: gates for tool, gates in post_tool.items() if gates},
         "context_gates": _pi_gates(manifest, None, None, adapter["context_source_event"]),
         "session_gates": _pi_gates(manifest, None, None, adapter["session_source_event"]),
