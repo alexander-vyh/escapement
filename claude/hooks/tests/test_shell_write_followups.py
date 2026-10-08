@@ -59,10 +59,11 @@ def test_a_committed_file_skipped_for_time_is_reported_not_named(repo):
     committed = snap.commits_during(snap.Budget(), repo, before["head"], after["head"])
     assert committed == ["src/theirs.py"]
 
-    names, unproven, out_of_time = snap.written(SpentAfterGit(), repo, before, after, committed)
+    names, unproven, out_of_time, unreadable = snap.written(
+        SpentAfterGit(), repo, before, after, committed)
     assert names == [], "no time to re-hash it: it cannot be named"
     assert out_of_time == ["src/theirs.py"], "and it must not vanish silently"
-    assert unproven == []
+    assert unproven == [] and unreadable == []
     # With time, the same comparison names it: the skip above was the budget's doing.
     assert snap.written(snap.Budget(), repo, before, after, committed)[0] == ["src/theirs.py"]
 

@@ -36,7 +36,10 @@ HASH_LIMIT = 1024 * 1024
 HASH_BUDGET = 64 * 1024 * 1024
 # Past this many dirty paths, or files in one call's commits, nothing is named.
 MAX_PATHS = 2000
+# A path that could not be read (dangling, permission-denied), and a path
+# left unhashed because the budget ran out: neither is ever named.
 UNREAD = "?"
+UNHASHED = "?unhashed"
 # A pending snapshot whose after-call half never came is dropped after this.
 _PENDING_TTL = 3600
 # The reflog subject of a commit this call made. Anything else moved HEAD for
@@ -132,7 +135,7 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
         if name in old:
             method = _method(old[name])
             if method == "hash" and out_of_time:
-                files[name] = UNREAD  # cannot compare it now; never named
+                files[name] = UNHASHED  # cannot compare it now; never named
                 continue
         else:
             try:
@@ -186,25 +189,29 @@ def _stat_size(print_: str) -> str:
 
 
 def written(budget: Budget, root: Path, before: dict, after: dict,
-            committed: list[str]) -> tuple[list[str], list[str], list[str]]:
-    """(paths the call created, changed or committed; paths that only might have;
-    paths that could not be checked).
+            committed: list[str]) -> tuple[list[str], list[str], list[str], list[str]]:
+    """(named: paths the call created, changed or committed; unproven: paths that
+    only might have; out of time: paths the budget left unchecked; unreadable).
 
     A file fingerprinted by stat whose size is unchanged but whose mtime moved
     might have been rewritten with the same length, or only touched: that is not
-    proof, so it goes in the second list and is not named. A path whose
-    fingerprint is UNREAD on either side (the budget ran out before it was
-    hashed, or it could not be read), or a committed file there is no time left
-    to re-hash (charged to `budget`), goes in the third list and is not named.
+    proof, so it is unproven. A path left UNHASHED after the call, or a
+    committed file there is no time left to re-hash (charged to `budget`), is
+    out of time. A path UNREAD on either side is unreadable. None of those is
+    named.
     """
     old, new = before["files"], after["files"]
     names: list[str] = []
     unproven: list[str] = []
     out_of_time: list[str] = []
+    unreadable: list[str] = []
     for name, print_ in new.items():
         was = old.get(name)
-        if UNREAD in (print_, was):
+        if print_ == UNHASHED:
             out_of_time.append(name)
+            continue
+        if UNREAD in (print_, was):
+            unreadable.append(name)
             continue
         if was == print_:
             continue
@@ -216,13 +223,16 @@ def written(budget: Budget, root: Path, before: dict, after: dict,
         if name in new or name in names:
             continue
         if name in old:  # dirty before the call: committed as it was, or changed by it?
-            if old[name] == UNREAD or budget.left() <= 0.05:
+            if old[name] == UNREAD:
+                unreadable.append(name)
+                continue
+            if budget.left() <= 0.05:
                 out_of_time.append(name)
                 continue
             if fingerprint(root / name, _method(old[name])) == old[name]:
                 continue
         names.append(name)
-    return names, unproven, out_of_time
+    return names, unproven, out_of_time, unreadable
 
 
 # --- this session's own state ------------------------------------------------
