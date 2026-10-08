@@ -198,6 +198,23 @@ def main() -> int:
     # scope -> do not enter task mode; the contract gate still covers the session.
     if task_id is None:
         return 0
+    # escapement-l9lo: the claimed bead's oracle is the contract from now on,
+    # and the previous bead's contract stops counting. Best-effort: a binding
+    # failure must not cost the task-mode record below.
+    # A subagent without its own actor identity shares the parent's thread dir;
+    # its claim of a child bead must not rebind the parent's work.
+    subagent_on_parent_dir = bool(payload.get("agent_id")) and not os.environ.get("CLAUDE_AGENT_ID")
+    try:
+        if not subagent_on_parent_dir:
+            from bead_binding import bind_claimed_bead  # local: a broken import must not cost task mode
+
+            claim_cwd = payload.get("cwd")
+            if not (isinstance(claim_cwd, str) and os.path.isdir(claim_cwd)):
+                claim_cwd = os.getcwd()
+            bind_claimed_bead(thread_dir, task_id, cwd=claim_cwd, session_id=session_id)
+    except Exception as exc:  # noqa: BLE001 — never raise out of a PostToolUse hook
+        print(f"task_mode_entry: could not bind claimed bead {task_id}: {exc}", file=sys.stderr)
+
     parent_id = _lookup_parent_id(task_id)
 
     entered_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

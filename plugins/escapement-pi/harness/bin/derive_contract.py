@@ -28,13 +28,23 @@ raises OracleNotDeclared and writes NOTHING. Derivation never invents a passing
 oracle; the same `is_trivial_oracle` guard that screens hand-authored contracts
 screens derived ones, so there is one definition of "real oracle".
 
+Claim binding (escapement-l9lo)
+-------------------------------
+A successful `bd update <id> --claim` binds the session to that bead and freezes
+its oracle as the contract; bead_binding.py owns that binding and the invariant
+that only a passing oracle, a recorded --refreeze/--retire, or the user saying
+stop retires it. Sessions that never claim a bead keep agent-declared contracts.
+
 Usage:
-  derive_contract.py --bead <issue-id>
+  derive_contract.py --bead <issue-id> [--refreeze]
+  derive_contract.py --check     # exit 3 + reason if the contract is not valid proof
+  derive_contract.py --retire    # end the bead binding by explicit, reported decision
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -57,6 +67,10 @@ _VERIFY_BLOCK_RE = re.compile(
     r"```[ \t]*verify[ \t]*\r?\n(.*?)\r?\n```",
     re.DOTALL | re.IGNORECASE,
 )
+
+
+class BeadNotFound(Exception):
+    """bd positively reports the bead does not exist (not an outage)."""
 
 
 class OracleNotDeclared(Exception):
@@ -109,59 +123,98 @@ def derive_contract(bead: dict, *, session_id: "str | None" = None) -> dict:
 
     goal = (bead.get("title") or "").strip()
     bead_id = bead.get("id")
-    return build_contract(
+    contract = build_contract(
         goal,
         oracle,
         source="bead-derived",
         session_id=session_id,
         thread_id=bead_id,
     )
+    contract["bead_id"] = bead_id
+    contract["acceptance_sha256"] = acceptance_sha256(bead)
+    return contract
 
 
-def fetch_bead(bead_id: str) -> dict:
-    """Fetch a bead record via `bd show <id> --json` (first element)."""
+def acceptance_sha256(bead: dict) -> str:
+    """Hash of the bead's verify COMMAND (not the whole acceptance text), so a prose
+    edit is not a rewrite but any change to what actually runs is."""
+    oracle = extract_verify_oracle(bead.get("acceptance_criteria") or bead.get("acceptance")) or ""
+    return hashlib.sha256(oracle.encode("utf-8")).hexdigest()
+
+
+def fetch_bead(bead_id: str, *, cwd: "str | None" = None, timeout: float = 10) -> dict:
+    """Fetch a bead record via `bd show <id> --json` (first element), run in `cwd`.
+
+    bd resolves its database from the working directory, so "no such bead" is
+    only meaningful in the bead's own repo.
+    """
     proc = subprocess.run(
         ["bd", "show", bead_id, "--json"],
         capture_output=True,
         text=True,
-        check=True,
+        cwd=cwd,
+        timeout=timeout,
     )
-    data = json.loads(proc.stdout)
-    if isinstance(data, list):
-        if not data:
-            raise OracleNotDeclared(f"bead {bead_id!r} not found")
-        return data[0]
-    return data
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        data = None
+    # bd answers a missing id with a JSON error and exit 1; an outage prints no JSON.
+    if (isinstance(data, dict) and "no issue" in str(data.get("error", "")).lower()) or data == []:
+        raise BeadNotFound(f"bead {bead_id!r} not found")
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, proc.args, proc.stdout, proc.stderr)
+    if data is None:
+        raise ValueError(f"bd show {bead_id} did not return JSON")
+    return data[0] if isinstance(data, list) else data
 
 
 def main(argv: list[str], _fetch=fetch_bead) -> int:
     parser = argparse.ArgumentParser(description="Derive a harness contract from a bead.")
-    parser.add_argument("--bead", required=True, help="Beads issue id to derive from.")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--bead", help="Beads issue id to derive from.")
+    mode.add_argument("--check", action="store_true",
+                      help="Exit 3 with the reason if the contract is not proof for the bound bead.")
+    mode.add_argument("--retire", action="store_true",
+                      help="End this session's bead binding by explicit decision (shown to the user).")
+    parser.add_argument("--refreeze", action="store_true",
+                        help="Adopt the bound bead's CURRENT oracle after it changed since claim.")
     args = parser.parse_args(argv)
+    import bead_binding  # local: bead_binding imports this module
 
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
-    try:
-        bead = _fetch(args.bead)
-        contract = derive_contract(bead, session_id=session_id)
-    except OracleNotDeclared as exc:
-        # Fail closed: write nothing, non-zero exit. The Stop gate stays blocked
-        # rather than unlocking on a phantom oracle.
-        print(f"refusing to derive contract: {exc}", file=sys.stderr)
-        return 2
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-        print(f"could not read bead {args.bead!r}: {exc}", file=sys.stderr)
-        return 1
-
     try:
         thread_dir = thread_dir_for_session(session_id, harness_home())
     except InvalidActorIdentity as exc:
         print(f"refusing to derive contract: invalid actor identity: {exc}", file=sys.stderr)
         return 2
     thread_dir.mkdir(parents=True, exist_ok=True)
-    out = thread_dir / "contract.json"
-    with out.open("w") as f:
-        json.dump(contract, f, indent=2)
 
+    if args.check:
+        contract = bead_binding.read_json(thread_dir / "contract.json")
+        problem = bead_binding.binding_problem(contract, thread_dir)
+        if problem:
+            print(f"contract is not proof for the bound bead: {problem}", file=sys.stderr)
+            return 3
+        return 0
+    if args.retire:
+        return bead_binding.retire(thread_dir)
+    if (bead_binding.read_json(thread_dir / bead_binding.ACTIVE_BEAD) or {}).get("bead_id"):
+        return bead_binding.derive_bound(
+            thread_dir, args.bead, refreeze=args.refreeze, session_id=session_id)
+
+    try:
+        contract = derive_contract(_fetch(args.bead), session_id=session_id)
+    except OracleNotDeclared as exc:
+        # Fail closed: write nothing, non-zero exit. The Stop gate stays blocked
+        # rather than unlocking on a phantom oracle.
+        print(f"refusing to derive contract: {exc}", file=sys.stderr)
+        return 2
+    except (BeadNotFound, subprocess.SubprocessError, ValueError) as exc:
+        print(f"could not read bead {args.bead!r}: {exc}", file=sys.stderr)
+        return 1
+    out = thread_dir / "contract.json"
+    bead_binding.write_json(out, contract)
     print(f"contract derived from {args.bead} -> {out}")
     print(json.dumps(contract, indent=2))
     return 0

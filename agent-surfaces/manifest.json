@@ -2711,7 +2711,8 @@
             {
               "event": "PostToolUse",
               "matcher": "Bash",
-              "command": "python3 -B ~/.claude/harness/bin/task_mode_entry.py"
+              "command": "python3 -B ~/.claude/harness/bin/task_mode_entry.py",
+              "timeout_seconds": 30
             }
           ],
           "fixtures": [

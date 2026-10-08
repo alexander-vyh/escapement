@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1252 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1326 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -41,6 +41,7 @@ from would_block_stop import (  # noqa: E402
     resolve_watermark,
     _load_json,
     _parse_iso,
+    _verification_passed_this_turn,
 )
 from thread_identity import state_identity  # noqa: E402
 import session_isolation  # noqa: E402  (per-session isolation steer, bead e9v.4)
@@ -74,7 +75,8 @@ RESUMPTION_PROMPT = (
     "that wind-down is the exact failure this gate exists to prevent. Continue now with the "
     "next concrete in-scope action. The only ways to actually finish this turn: "
     "(1) run `~/.claude/harness/bin/verify` and have it exit 0 "
-    "(declare a contract via init_contract.py first if you haven't); "
+    "(with no contract yet: `derive_contract.py --bead <id>` for a claimed bead with a "
+    "```verify oracle, otherwise init_contract.py); "
     "(2) call the ScheduleWakeup tool because you are blocked on an external event. "
     "The user can release you by saying 'stop' — but do not solicit that by halting."
 )
@@ -160,6 +162,13 @@ _VERIFICATION_SUPPRESSED_DISPLAY = (
     "runs the check and propagates a real non-zero on failure, then re-run "
     "`~/.claude/harness/bin/verify`. If a hook is genuinely broken, FIX the hook — do not "
     "disable it in the verify command."
+)
+
+
+_CONTRACT_NOT_FOR_ACTIVE_WORK_DISPLAY = (
+    "continuation-harness: contract_not_for_active_work. Your contract is not proof for "
+    "the bead you are working on now: {problem} Then run `~/.claude/harness/bin/verify` "
+    "and have it exit 0. The user can release you by saying 'stop'."
 )
 
 
@@ -845,14 +854,47 @@ def _check_wakeup_blockers(session_mode: dict, run_bd=None, thread_dir=None) -> 
     return ("allow", "wakeup_blockers_verified")
 
 
+# This block is reached from the green path AND from a registered wakeup, so it must
+# not assume the verify passed: it states the contract's real last result. Before,
+# it said "your contract verify passed" on a wakeup with a red (exit 1) contract.
 _IMPLICIT_QUEUE_DISPLAY = (
-    "continuation-harness: your contract verify passed, but bd still has unfinished work in "
+    "continuation-harness: {verify_status}, and bd still has unfinished work in "
     "this repo. If any of it is in this session's scope, keep going — do NOT stop to summarize "
     "or to ask the user what to do next. If the only open work is unrelated backlog from other "
     "sessions, do not drain it (that is scope creep): instead close out your own claimed tasks, "
     "or call ScheduleWakeup if you are waiting on something external. "
     "Hint: `bd list --status=in_progress` shows what is still claimed."
 )
+
+
+_OUTPUT_TAIL_CHARS = 300
+
+
+def _verify_status(state: dict) -> str:
+    """The contract's most recent verify result, as a sentence — never "passed"
+    unless the gate itself would count it as a pass."""
+    contract = state.get("contract") if isinstance(state, dict) else None
+    if not isinstance(contract, dict):
+        return "you have no contract declared"
+    last = contract.get("last_run")
+    if not isinstance(last, dict):
+        return "your contract verify has not been run"
+    code = last.get("exit_code")
+    expected = contract.get("expected_exit", 0)
+    when = last.get("timestamp", "an unknown time")
+    if _verification_passed_this_turn(contract) and not state.get("contract_binding_problem"):
+        return f"your contract verify passed (exit {code} at {when})"
+    if code == expected:
+        why = state.get("contract_binding_problem") or (
+            "it is stale or suppressed, so it does not count as this turn's pass"
+        )
+        return f"your contract verify has NOT passed this turn (last run exit {code} at {when}; {why})"
+    tail = (last.get("output_excerpt") or "").strip()[-_OUTPUT_TAIL_CHARS:]
+    tail_text = f"; output tail: {tail!r}" if tail else ""
+    return (
+        f"your contract verify FAILED — last run exited {code} at {when}, "
+        f"expected {expected}{tail_text}"
+    )
 
 
 def _created_at_in_scope(item: dict, watermark: "_dt2.datetime") -> bool:
@@ -1002,6 +1044,7 @@ def main() -> int:
             "was_correct": None,
             "notes": "universal_override",
         })
+        _emit_allow_notice(thread_dir)
         return 0
 
     # The delegated adapter owns trusted exact-session context loading. Existing
@@ -1027,7 +1070,9 @@ def main() -> int:
             display = _TASK_MODE_DISPLAY.get(reason) or RESUMPTION_PROMPT.format(
                 reason=reason
             )
-            print(json.dumps({"decision": "block", "reason": display}))
+            _emit_block(display, thread_dir)
+        else:
+            _emit_allow_notice(thread_dir)
         return 0
 
     # Task mode: queue-drain is the session-scope stopping criterion.
@@ -1070,7 +1115,7 @@ def main() -> int:
                     display = _TASK_MODE_DISPLAY.get(task_reason) or RESUMPTION_PROMPT.format(
                         reason=task_reason
                     )
-                    print(json.dumps({"decision": "block", "reason": display}))
+                    _emit_block(display, thread_dir)
                     return 0
                 wakeup_blocker_decision, wakeup_blocker_reason = _check_wakeup_blockers(
                     session_mode, thread_dir=thread_dir
@@ -1088,7 +1133,7 @@ def main() -> int:
                         _TASK_MODE_DISPLAY.get(wakeup_blocker_reason)
                         or RESUMPTION_PROMPT.format(reason=wakeup_blocker_reason)
                     )
-                    print(json.dumps({"decision": "block", "reason": display}))
+                    _emit_block(display, thread_dir)
                     return 0
             # Tag a legacy wakeup-allow as scope_wakeup_pause so half-life review
             # can count pacing pauses. Managed execution wakes are handled above.
@@ -1100,6 +1145,7 @@ def main() -> int:
                 "was_correct": None,
                 "notes": "scope_wakeup_pause",
             })
+            _emit_allow_notice(thread_dir)
             return 0
         decision, reason = _check_task_mode_queue(session_mode)
         _log_incident({
@@ -1112,7 +1158,7 @@ def main() -> int:
         })
         if decision == "block":
             display = _TASK_MODE_DISPLAY.get(reason) or RESUMPTION_PROMPT.format(reason=reason)
-            print(json.dumps({"decision": "block", "reason": display}))
+            _emit_block(display, thread_dir)
             return 0
         # A drained queue is TASK STATE, not completion proof (escapement-b81u).
         # This used to `return 0` unconditionally, so a scoped task-mode session
@@ -1221,11 +1267,15 @@ def main() -> int:
         if winddown_display:
             display = winddown_display
         elif reason.startswith("implicit_queue_"):
-            display = _IMPLICIT_QUEUE_DISPLAY
+            display = _IMPLICIT_QUEUE_DISPLAY.format(verify_status=_verify_status(state))
         elif reason == "verification_suppressed":
             display = _VERIFICATION_SUPPRESSED_DISPLAY
         elif reason == "no_declaration":
             display = _NO_DECLARATION_DISPLAY
+        elif reason == "contract_not_for_active_work":
+            display = _CONTRACT_NOT_FOR_ACTIVE_WORK_DISPLAY.format(
+                problem=state.get("contract_binding_problem")
+            )
         else:
             display = RESUMPTION_PROMPT.format(reason=reason)
         # bead e9v.4: if this red boundary is shared with a live concurrent session,
@@ -1241,11 +1291,35 @@ def main() -> int:
                 steer = None
             if steer:
                 display = display + steer
-        out = {"decision": "block", "reason": display}
-        print(json.dumps(out))
+        _emit_block(display, thread_dir)
         return 0
 
+    _emit_allow_notice(thread_dir)
     return 0
+
+
+def _emit_allow_notice(thread_dir) -> None:
+    notice = _refreeze_notice(thread_dir)
+    if notice:
+        print(json.dumps({"systemMessage": notice}))
+
+
+def _emit_block(display: str, thread_dir) -> None:
+    out = {"decision": "block", "reason": display}
+    notice = _refreeze_notice(thread_dir)
+    if notice:
+        out["systemMessage"] = notice  # the human must see it, not only the agent
+    print(json.dumps(out))
+
+
+def _refreeze_notice(thread_dir) -> Optional[str]:
+    """escapement-l9lo: an agent-run --refreeze is shown to the human, once."""
+    try:
+        from bead_binding import refreeze_notice  # local: import cycle
+
+        return refreeze_notice(thread_dir)
+    except Exception:  # noqa: BLE001 — never let the notice crash the Stop decision
+        return None
 
 
 if __name__ == "__main__":

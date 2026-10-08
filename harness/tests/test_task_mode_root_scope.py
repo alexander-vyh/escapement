@@ -378,7 +378,9 @@ def test_malformed_or_failed_lookup_persists_safe_scope_and_still_blocks(
 
     assert entry.returncode == 0
     assert state["parent_id"] == expected_scope
-    lines = entry.stderr.splitlines()
+    # The parent walk degrades with exactly ONE signal; a failed lookup may also
+    # carry derive_contract's separate "oracle not frozen" warning (escapement-l9lo).
+    lines = [line for line in entry.stderr.splitlines() if line.startswith("task_mode_entry:")]
     assert len(lines) == 1
     assert diagnostic_fragment in lines[0].lower()
     assert stop.returncode == 0

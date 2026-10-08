@@ -21,7 +21,7 @@ CONTRACT="$THREAD_DIR/contract.json"
 
 if [[ ! -f "$CONTRACT" ]]; then
   echo "verify: no contract.json at $CONTRACT" >&2
-  echo "verify: declare a contract first (e.g. via init_contract.py)" >&2
+  echo "verify: declare a contract first: derive_contract.py --bead <id> for a claimed bead with a verify oracle, otherwise init_contract.py" >&2
   exit 2
 fi
 
@@ -33,6 +33,14 @@ if [[ -z "$VERIFICATION_COMMAND" ]]; then
   exit 2
 fi
 
+# escapement-l9lo: a contract for another bead, from before the active claim, or
+# whose bead acceptance was rewritten since the freeze is not proof — say why
+# and do not run it, so no green last_run is recorded.
+if ! HARNESS_ROOT="$HARNESS_ROOT" python3 "$SCRIPT_DIR/derive_contract.py" --check; then
+  echo "verify: FAIL (contract does not cover the active work)"
+  exit 3
+fi
+
 TMP_OUT="$(mktemp)"
 trap 'rm -f "$TMP_OUT"' EXIT
 
@@ -40,11 +48,13 @@ bash -c "$VERIFICATION_COMMAND" >"$TMP_OUT" 2>&1
 ACTUAL_EXIT=$?
 TIMESTAMP="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
 
-python3 - "$CONTRACT" "$ACTUAL_EXIT" "$TIMESTAMP" "$TMP_OUT" <<'PY'
+python3 - "$CONTRACT" "$ACTUAL_EXIT" "$TIMESTAMP" "$TMP_OUT" "$SCRIPT_DIR" "$THREAD_DIR" <<'PY'
 import json
+import os
 import sys
 
 path, exit_code, timestamp, out_path = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+script_dir, thread_dir = sys.argv[5], sys.argv[6]
 
 # Keep the tail of the history bounded: a long-lived contract must not grow
 # without limit, and the recent runs are the ones that answer "is this oracle
@@ -60,6 +70,9 @@ run = {
     "exit_code": exit_code,
     "timestamp": timestamp,
     "output_excerpt": excerpt,
+    # Where the oracle ran: a bead's oracle proves its outcome only inside the
+    # bead's own repo (escapement-l9lo).
+    "cwd": os.getcwd(),
 }
 
 # `last_run` stays the MOST RECENT run, because the Stop gate reads it
@@ -82,6 +95,17 @@ c["runs"] = history[-MAX_RUNS:]
 
 with open(path, "w") as f:
     json.dump(c, f, indent=2)
+
+# escapement-l9lo: record what this run says about a claimed bead's oracle.
+# mark_proven derives proof from the last_run just written (fresh, passing,
+# unsuppressed, exactly the frozen command); a red run clears earlier proof.
+sys.path.insert(0, script_dir)
+try:
+    from bead_binding import mark_proven
+
+    mark_proven(thread_dir)
+except Exception as exc:  # noqa: BLE001 — a failed mark leaves the oracle unproven
+    print(f"verify: could not record the bead oracle's result: {exc}", file=sys.stderr)
 PY
 
 cat "$TMP_OUT"
