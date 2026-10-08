@@ -233,6 +233,11 @@
       "timeout_seconds": 5
     },
     {
+      "id": "inject_timestamp",
+      "source": "claude/hooks/inject_timestamp.py",
+      "timeout_seconds": 5
+    },
+    {
       "id": "review_nudge",
       "source": "claude/hooks/review_nudge.py",
       "timeout_seconds": 5

@@ -1330,6 +1330,54 @@
       }
     },
     {
+      "id": "inject_timestamp",
+      "description": "Tell the model the current local time on every prompt.",
+      "source": "claude/hooks/inject_timestamp.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/inject_timestamp.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_inject_timestamp.py::test_codex_prompt_gets_true_local_time"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B ~/.claude/hooks/inject_timestamp.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_inject_timestamp.py::test_claude_prompt_gets_true_local_time"
+          ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/inject_timestamp.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_inject_timestamp_end_to_end.py::test_pi_every_prompt_carries_the_local_time"
+          ]
+        }
+      }
+    },
+    {
       "id": "discovery_input_gate",
       "description": "Gate solution artifacts on a confirmed problem framing.",
       "source": "claude/hooks/discovery_input_gate.py",

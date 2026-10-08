@@ -86,6 +86,8 @@ commands, rules, skills, `harness/bin`. Remaining work is subtraction:
 - Migrate the 6 settings-only hooks, or classify as personal (`jixia_send_bounce.py`,
   `external_comment_gate.py` look personal; `oracle_downgrade_stop.py`,
   `pre-compact-save.sh`, `inject-timestamp.sh`, `project-bootstrap.sh` look core).
+  Migrated: `inject-timestamp.sh` is now the plugin-owned
+  `claude/hooks/inject_timestamp.py` on Claude, Codex and Pi (`escapement-hhz6`).
 - Fix version resolution so updates occur (`escapement-9mki`).
 
 ### 2. Codex: plugin owns the gates too
