@@ -811,7 +811,11 @@
           "fixtures": [
             "tests/test_pi_stop_hook_end_to_end.py::test_pi_undeclared_code_change_continues_the_run_once",
             "tests/test_pi_stop_hook_end_to_end.py::test_pi_following_the_block_releases_the_stop",
-            "tests/test_pi_stop_hook_end_to_end.py::test_pi_user_stop_releases_the_session"
+            "tests/test_pi_stop_hook_end_to_end.py::test_pi_user_stop_releases_the_session",
+            "tests/test_pi_worker_release_end_to_end.py::test_parent_stop_over_irc_releases_the_worker",
+            "tests/test_pi_worker_release_end_to_end.py::test_worker_that_handed_back_its_work_may_stop",
+            "tests/test_pi_worker_release_end_to_end.py::test_worker_with_no_handoff_blocks_until_the_livelock_backstop",
+            "tests/test_pi_worker_release_end_to_end.py::test_lead_with_unverified_contract_still_blocks"
           ]
         }
       }

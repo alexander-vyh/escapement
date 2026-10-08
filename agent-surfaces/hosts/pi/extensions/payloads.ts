@@ -243,6 +243,50 @@ export function textOf(content: unknown): string {
   return texts.join("\n");
 }
 
+// The messages on a session branch, as Pi's own context builds them. A
+// custom_message entry (omp's `async-result` delivery of a background job) is
+// kept as the "custom" message it is -- a host notice, not speech -- with one
+// exception: a delegated worker's user is its parent session, and omp delivers
+// the parent's words over IRC (`irc:incoming`, `details.fromParent`). Those are
+// the worker's user speaking, so without this a worker's transcript never shows
+// its parent saying "stop" (escapement-by3e). A sibling's IRC stays a notice.
+export function branchMessages(branch: unknown[]): unknown[] {
+  const messages: unknown[] = [];
+  for (const entry of branch) {
+    if (!entry || typeof entry !== "object" || !("type" in entry)) continue;
+    const timestamp = "timestamp" in entry ? entry.timestamp : undefined;
+    if (entry.type === "message" && "message" in entry) {
+      messages.push(entry.message);
+    } else if (entry.type === "custom_message") {
+      const customType = "customType" in entry ? entry.customType : undefined;
+      const details = "details" in entry ? entry.details : undefined;
+      const parentSaid = customType === "irc:incoming" && details && typeof details === "object"
+        && "fromParent" in details && details.fromParent === true
+        && "message" in details && typeof details.message === "string"
+        ? details.message
+        : undefined;
+      messages.push(parentSaid !== undefined
+        ? { role: "user", content: parentSaid, timestamp }
+        : { role: "custom", customType, content: "content" in entry ? entry.content : undefined, timestamp });
+    }
+  }
+  return messages;
+}
+
+// The parent session a delegated worker was spawned from, from the session
+// header omp writes (`parentSession`); "" for a session nobody delegated.
+export function parentSessionOf(context: unknown): string {
+  if (!context || typeof context !== "object" || !("sessionManager" in context)) return "";
+  const manager = context.sessionManager;
+  if (!manager || typeof manager !== "object" || !("getHeader" in manager)) return "";
+  const getHeader = manager.getHeader;
+  if (typeof getHeader !== "function") return "";
+  const header = getHeader.call(manager);
+  return header && typeof header === "object" && "parentSession" in header && typeof header.parentSession === "string"
+    ? header.parentSession
+    : "";
+}
+
 // Pi's per-turn token usage (pi-ai `Usage`) under Claude's transcript names.
 const CLAUDE_USAGE: Record<string, string> = {
   input: "input_tokens",

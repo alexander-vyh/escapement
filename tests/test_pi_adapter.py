@@ -187,6 +187,12 @@ EXPECTED_TS_FUNCTIONS = {
     # Bash tool already declares. It reads no command text and decides nothing;
     # resolving a `cd` prefix stays in the dispatcher.
     "cwdOf",
+    # Transcript and host identity (escapement-by3e): a worker's parent speaks
+    # over IRC, which the transcript must carry as the user it is; and the
+    # session header's parentSession is forwarded so pi_stop_hook -- not the
+    # bridge -- decides what a delegated worker owes.
+    "branchMessages",
+    "parentSessionOf",
 }
 
 

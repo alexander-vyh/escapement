@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { claudeToolCall, claudeToolCalls, cwdOf, sessionIdOf, textOf, TranscriptFiles } from "./payloads.ts";
+import {
+  branchMessages, claudeToolCall, claudeToolCalls, cwdOf, parentSessionOf, sessionIdOf, textOf, TranscriptFiles,
+} from "./payloads.ts";
 
 type Handler = (event: any, context: any) => any;
 type PiAPI = {
@@ -284,14 +286,8 @@ export default function escapementPi(pi: PiAPI): void {
     run: unknown,
   ): string | null => {
     const branch = context?.sessionManager?.getBranch?.();
-    // A custom_message entry (omp's `async-result` delivery of a background
-    // job) is kept as the "custom" message Pi's own context builds from it.
     return transcripts.write(sessionId, Array.isArray(branch)
-      ? branch.flatMap((entry) => entry?.type === "message"
-        ? [entry.message]
-        : entry?.type === "custom_message"
-          ? [{ role: "custom", customType: entry.customType, content: entry.content, timestamp: entry.timestamp }]
-          : [])
+      ? branchMessages(branch)
       : Array.isArray(run) ? run : []);
   };
 
@@ -482,6 +478,9 @@ export default function escapementPi(pi: PiAPI): void {
           cwd: context?.cwd,
           hook_event_name: "Stop",
           stop_hook_active: stopHookActive,
+          // Not in Claude's Stop payload: a delegated worker is held to its
+          // delegated scope, not its parent's outcome (escapement-by3e).
+          parent_session: parentSessionOf(context),
           last_assistant_message: textOf(lastAssistant?.content),
           transcript_path: transcriptOf(context, sessionId, run),
         },
