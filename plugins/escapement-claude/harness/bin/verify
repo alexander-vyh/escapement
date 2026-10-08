@@ -50,6 +50,7 @@ TIMESTAMP="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.ti
 
 python3 - "$CONTRACT" "$ACTUAL_EXIT" "$TIMESTAMP" "$TMP_OUT" "$SCRIPT_DIR" "$THREAD_DIR" <<'PY'
 import json
+import os
 import sys
 
 path, exit_code, timestamp, out_path = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
@@ -69,6 +70,9 @@ run = {
     "exit_code": exit_code,
     "timestamp": timestamp,
     "output_excerpt": excerpt,
+    # Where the oracle ran: a bead's oracle proves its outcome only inside the
+    # bead's own repo (escapement-l9lo).
+    "cwd": os.getcwd(),
 }
 
 # `last_run` stays the MOST RECENT run, because the Stop gate reads it

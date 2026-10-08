@@ -208,7 +208,10 @@ def main() -> int:
         if not subagent_on_parent_dir:
             from bead_binding import bind_claimed_bead  # local: a broken import must not cost task mode
 
-            bind_claimed_bead(thread_dir, task_id, session_id=session_id)
+            claim_cwd = payload.get("cwd")
+            if not (isinstance(claim_cwd, str) and os.path.isdir(claim_cwd)):
+                claim_cwd = os.getcwd()
+            bind_claimed_bead(thread_dir, task_id, cwd=claim_cwd, session_id=session_id)
     except Exception as exc:  # noqa: BLE001 — never raise out of a PostToolUse hook
         print(f"task_mode_entry: could not bind claimed bead {task_id}: {exc}", file=sys.stderr)
 

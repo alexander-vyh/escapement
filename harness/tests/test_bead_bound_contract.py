@@ -80,6 +80,22 @@ Wrong implementations these tests reject
   after the claim, and nobody is told (test_late_freeze_of_edited_bead_reaches_human).
 - "a typo'd claim traps the session": bd positively says the bead does not
   exist, yet it is bound as pending forever (test_claim_of_missing_bead_does_not_bind).
+- "bd's 'missing' retires a debt": bd answers from the cwd's database, so a bead
+  is "missing" from any other repo; init_contract, Stop or a claim run there, or
+  a deleted bead, must never clear a pending or frozen debt
+  (test_missing_from_another_repo_never_releases[*],
+  test_second_claim_cannot_replace_a_pending_debt, test_deleted_bead_is_held_until_retired).
+- "late freeze of a bead left behind is silent": A pending, a claim of B, A edited,
+  bd recovers — the human is told (test_late_freeze_after_switch_reaches_human).
+- "partial id never matches": `l9lo` resolves to `proj-l9lo` in bd, but the binding
+  keeps the typed id and rejects the bead's own oracle forever
+  (test_partial_id_binds_the_canonical_bead).
+- "a hanging bd stalls Stop": Stop must hold, and finish within ~15s
+  (test_hanging_bd_holds_without_stalling_stop).
+- "with bd down, any command passes": a forged command with the genuine labels
+  verifies while the bead is unreadable (test_forged_command_rejected_while_bd_down).
+- "proof from another checkout": the oracle passes in a different directory
+  (test_oracle_run_outside_the_repo_is_not_proof).
 - "whitespace-equal is equal": a forged command differing only by Unicode
   whitespace from the oracle verifies (test_unicode_whitespace_forgery_rejected).
 - "a subagent's claim rebinds the parent": a subagent sharing the parent's
@@ -109,12 +125,23 @@ FAKE_BD = textwrap.dedent(
     import json, os, pathlib, sys
     store = pathlib.Path(os.environ["FAKE_BD_STORE"])
     args = sys.argv[1:]
+    if (store / "_hang").exists():
+        import time
+        time.sleep(60)
     if (store / "_down").exists():
         sys.stderr.write("bd: database unavailable\\n")
         sys.exit(1)
+    repo = (store / "_repo").read_text() if (store / "_repo").exists() else None
+    here = os.path.realpath(os.getcwd())
+    in_repo = repo is None or here == repo or here.startswith(repo + os.sep)
     if args[:1] == ["show"] and len(args) >= 2:
+        # Like real bd: the database is found from the cwd (another repo's has no
+        # such bead), and a unique id suffix resolves to the full id.
         path = store / (args[1] + ".json")
-        if not path.exists():  # real bd: a JSON error on stdout, exit 1
+        if not path.exists():
+            hits = [p for p in store.glob("*.json") if p.stem.endswith("-" + args[1])]
+            path = hits[0] if len(hits) == 1 else path
+        if not in_repo or not path.exists():  # real bd: a JSON error on stdout, exit 1
             print(json.dumps({"error": "no issues found matching the provided IDs"}))
             sys.exit(1)
         print(json.dumps([json.loads(path.read_text())]))
@@ -144,6 +171,9 @@ class Session:
         self.thread.mkdir()
         self.store = tmp / "beads"
         self.store.mkdir()
+        (self.store / "_repo").write_text(os.path.realpath(self.work))
+        self.other = tmp / "other-repo"  # a different repository: bd knows none of these beads
+        self.other.mkdir()
         fakebin = tmp / "fakebin"
         fakebin.mkdir()
         bd = fakebin / "bd"
@@ -172,14 +202,14 @@ class Session:
         path = self.store / f"{bead_id}.json"
         path.write_text(json.dumps(dict(json.loads(path.read_text()), status="closed")))
 
-    def _run(self, argv: list[str], stdin: str = "") -> subprocess.CompletedProcess:
+    def _run(self, argv: list[str], stdin: str = "", cwd=None) -> subprocess.CompletedProcess:
         return subprocess.run(
             argv, input=stdin, capture_output=True, text=True,
-            cwd=self.work, env=self.env, timeout=60,
+            cwd=cwd or self.work, env=self.env, timeout=120,
         )
 
-    def claim(self, bead_id: str, **payload_extra) -> None:
-        r = self._run([sys.executable, str(BIN / "task_mode_entry.py")], json.dumps({
+    def claim(self, bead_id: str, cwd=None, **payload_extra) -> subprocess.CompletedProcess:
+        r = self._run([sys.executable, str(BIN / "task_mode_entry.py")], cwd=cwd, stdin=json.dumps({
             **payload_extra,
             "session_id": SESSION,
             "hook_event_name": "PostToolUse",
@@ -188,21 +218,31 @@ class Session:
             "tool_response": {"interrupted": False, "stdout": "", "stderr": ""},
         }))
         assert r.returncode == 0, r.stderr
+        return r
 
-    def declare(self, command: str) -> subprocess.CompletedProcess:
+    def declare(self, command: str, cwd=None) -> subprocess.CompletedProcess:
         return self._run([
             sys.executable, str(BIN / "init_contract.py"),
             "--goal", "agent goal", "--verify", command,
-        ])
+        ], cwd=cwd)
 
     def derive(self, bead_id: str, *extra: str) -> subprocess.CompletedProcess:
         return self._run([sys.executable, str(BIN / "derive_contract.py"), "--bead", bead_id, *extra])
 
-    def verify(self) -> subprocess.CompletedProcess:
-        return self._run(["bash", str(BIN / "verify")])
+    def verify(self, cwd=None) -> subprocess.CompletedProcess:
+        return self._run(["bash", str(BIN / "verify")], cwd=cwd)
 
-    def stop(self) -> dict | None:
-        r = self._run([sys.executable, str(BIN / "stop_hook.py")], json.dumps({
+    def without_task_mode(self) -> None:
+        """Drop the task-mode record so only the contract gate decides Stop (task
+        mode's own root check would otherwise block first on an open bead)."""
+        (self.thread / "session_mode.json").unlink(missing_ok=True)
+
+    def bound(self) -> "str | None":
+        path = self.thread / "active_bead.json"
+        return json.loads(path.read_text()).get("bead_id") if path.exists() else None
+
+    def stop(self, cwd=None) -> dict | None:
+        r = self._run([sys.executable, str(BIN / "stop_hook.py")], cwd=cwd, stdin=json.dumps({
             "session_id": SESSION, "transcript_path": "", "stop_hook_active": False,
         }))
         assert r.returncode == 0, r.stderr
@@ -462,18 +502,19 @@ def test_subagent_claim_does_not_rebind_parent(s: Session) -> None:
 
 
 def test_close_red_then_claim_throwaway_cannot_swap_exam(s: Session) -> None:
-    """Review NO-SHIP repro: an unproven oracle stays owed across a bead switch."""
+    """Review NO-SHIP repro: claiming a throwaway does not rebind away from an
+    unproven oracle — A stays the contract."""
     s.bead("bd-a", "test -f done-a")
     s.claim("bd-a")
     assert s.verify().returncode != 0
     s.close("bd-a")
     s.bead("bd-throwaway", None)
-    s.claim("bd-throwaway")
+    r = s.claim("bd-throwaway")
+    assert "bd-a" in r.stderr and "not bound" in r.stderr, r.stderr
     s.close("bd-throwaway")
-    s.declare("test -d .")
-    v = s.verify()
-    assert v.returncode != 0, "A's red oracle is still owed"
-    assert "bd-a" in (v.stdout + v.stderr)
+    assert s.declare("test -d .").returncode != 0
+    assert s.bound() == "bd-a"
+    assert s.verify().returncode != 0, "A's red oracle is still the contract"
     assert _blocked(s.stop())
 
     # Positive control: going back and actually proving A settles the debt.
@@ -530,23 +571,26 @@ def test_refreeze_notice_reaches_human_on_block(s: Session) -> None:
     assert "test -f done-a-v2" in out.get("systemMessage", ""), out
 
 
-def test_owed_bead_retired_by_recorded_refreeze(s: Session) -> None:
-    """The owed message's route works for a non-active bead, and is recorded."""
+def test_retire_is_the_recorded_exit(s: Session) -> None:
+    """Moving to other work while A is unproven goes through --retire, which the
+    human sees at Stop."""
     s.bead("bd-a", "test -f done-a")
     s.claim("bd-a")
     s.bead("bd-b", "test -f done-b")
     s.claim("bd-b")
-    v = s.verify()
-    assert v.returncode != 0 and "bd-a" in (v.stdout + v.stderr)
+    assert s.bound() == "bd-a"
+    assert s.derive("bd-b").returncode != 0
 
-    assert s.derive("bd-a", "--refreeze").returncode == 0
-    assert s.contract()["verification_command"] == "test -f done-b", "B stays the contract"
+    r = s._run([sys.executable, str(BIN / "derive_contract.py"), "--retire"])
+    assert r.returncode == 0, r.stderr
+    s.claim("bd-b")
+    assert s.contract()["verification_command"] == "test -f done-b"
     (s.work / "done-b").write_text("x")
     s.close("bd-b")
-    s.close("bd-a")
-    assert s.verify().returncode == 0, "A's debt is retired"
+    s.close("bd-a")  # task mode is rooted at the first claim
+    assert s.verify().returncode == 0
     out = _stop_raw(s)
-    assert "decision" not in out
+    assert "decision" not in out, out
     note = out.get("systemMessage", "")
     assert "bd-a" in note and "test -f done-a" in note and "never passed" in note, out
 
@@ -651,8 +695,8 @@ def _down(s: Session, down: bool) -> None:
 
 @pytest.mark.parametrize("bd_down_at_switch", [False, True], ids=["bd-up", "bd-down"])
 def test_switch_while_pending_keeps_the_debt(s: Session, bd_down_at_switch: bool) -> None:
-    """Round-4 BLOCK-1: a never-frozen oracle is a debt like an owed one, so switching
-    to a throwaway bead and declaring an easy exam cannot discharge it."""
+    """Round-4 BLOCK-1: a never-frozen oracle holds the binding, so switching to a
+    throwaway bead and declaring an easy exam cannot discharge it."""
     s.bead("bd-a", "test -f done-a")
     _down(s, True)
     s.claim("bd-a")
@@ -660,13 +704,12 @@ def test_switch_while_pending_keeps_the_debt(s: Session, bd_down_at_switch: bool
     s.bead("bd-b", None)
     s.claim("bd-b")
     _down(s, False)
-    s.declare("test -d .")
+    assert s.declare("test -d .").returncode != 0
     s.close("bd-a")
     s.close("bd-b")
-    v = s.verify()
-    assert v.returncode != 0 and "bd-a" in (v.stdout + v.stderr)
-    verdict = s.stop()
-    assert _blocked(verdict) and "bd-a" in verdict["reason"], verdict
+    assert s.bound() == "bd-a"
+    assert s.verify().returncode != 0
+    assert _blocked(s.stop())
 
 
 def test_pending_freeze_without_contract_blocks_stop(s: Session) -> None:
@@ -727,3 +770,132 @@ def test_claim_of_missing_bead_does_not_bind(s: Session) -> None:
     assert s.declare("test -f done").returncode == 0
     (s.work / "done").write_text("x")
     assert s.verify().returncode == 0
+
+
+@pytest.mark.parametrize("action", ["declare", "stop", "verify"])
+def test_missing_from_another_repo_never_releases(s: Session, action: str) -> None:
+    """Round-5 r1/r7: from another repo bd reports the bead "missing". That is
+    never proof of deletion: the pending debt holds, and freezes in its own repo.
+    (A claim from another repo declines before touching the binding; r1b covers it.)"""
+    s.declare("test -d .")  # an earlier ad hoc contract, so verify reaches the binding check
+    s.bead("bd-a", "test -f done-a")
+    _down(s, True)
+    s.claim("bd-a")
+    _down(s, False)
+    if action == "declare":
+        assert s.declare("test -d .", cwd=s.other).returncode != 0
+    elif action == "stop":
+        assert _blocked(s.stop(cwd=s.other))
+    else:
+        assert s.verify(cwd=s.other).returncode != 0
+    assert s.bound() == "bd-a"
+    # Had the debt been released, this easy exam would now verify and stop clean.
+    s.close("bd-a")
+    s.declare("test -d .")
+    s.verify()
+    assert _blocked(s.stop())
+    assert s.contract()["verification_command"] == "test -f done-a"
+
+
+def test_second_claim_cannot_replace_a_pending_debt(s: Session) -> None:
+    """Round-5 r1b: further claims — in this repo while bd is down, or from another
+    repo after it recovers — neither rebind nor erase a pending debt."""
+    s.bead("bd-a", "test -f done-a")
+    s.bead("bd-b", None)
+    _down(s, True)
+    s.claim("bd-a")
+    s.claim("bd-b")
+    _down(s, False)
+    s.claim("bd-b", cwd=s.other)
+    assert s.bound() == "bd-a"
+    s.without_task_mode()
+    verdict = s.stop(cwd=s.other)
+    assert _blocked(verdict) and "bd-a" in verdict["reason"], verdict
+
+
+def test_deleted_bead_is_held_until_retired(s: Session) -> None:
+    """Round-5 C3: a pending bead deleted from bd stays owed; --retire is the exit."""
+    s.bead("bd-a", "test -f done-a")
+    _down(s, True)
+    s.claim("bd-a")
+    (s.store / "bd-a.json").unlink()
+    _down(s, False)
+    s.without_task_mode()
+    verdict = s.stop()
+    assert _blocked(verdict) and "bd-a" in verdict["reason"], verdict
+    assert s.bound() == "bd-a"
+
+    r = s._run([sys.executable, str(BIN / "derive_contract.py"), "--retire"])
+    assert r.returncode == 0, r.stderr
+    assert s.bound() is None
+    assert s.declare("test -f done").returncode == 0
+
+
+def test_late_freeze_after_switch_reaches_human(s: Session) -> None:
+    """Round-5 r3: A pending, a claim of B (held off), A edited after its claim,
+    bd recovers — the late freeze is shown to the human."""
+    s.bead("bd-a", "test -f done-a")
+    s.bead("bd-b", None)
+    _down(s, True)
+    s.claim("bd-a")
+    s.claim("bd-b")
+    s.bead("bd-a", "test -f easier")
+    path = s.store / "bd-a.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()),
+                                    updated_at="2999-01-01T00:00:00Z")))
+    _down(s, False)
+    note = _stop_raw(s).get("systemMessage", "")
+    assert "bd-a" in note and "late freeze" in note and "test -f easier" in note, note
+
+
+def test_partial_id_binds_the_canonical_bead(s: Session) -> None:
+    """Round-5 C1: a claim by unique suffix binds bd's canonical id, and the bead's
+    own oracle then proves it."""
+    s.bead("proj-l9lo", "test -f done")
+    s.claim("l9lo")
+    assert s.bound() == "proj-l9lo"
+    s.without_task_mode()
+    (s.work / "done").write_text("x")
+    s.close("proj-l9lo")
+    assert s.verify().returncode == 0
+    assert _allowed(s.stop())
+
+
+def test_hanging_bd_holds_without_stalling_stop(s: Session) -> None:
+    """Round-5 C2: with bd hanging, the binding's bd time is capped: Stop holds the
+    pending debt and returns within ~15s (task-mode's own bd calls removed here)."""
+    import time
+
+    s.bead("bd-a", "test -f done-a")
+    _down(s, True)
+    s.claim("bd-a")
+    _down(s, False)
+    (s.store / "_hang").write_text("")
+    s.without_task_mode()
+    started = time.monotonic()
+    verdict = s.stop()
+    elapsed = time.monotonic() - started
+    assert _blocked(verdict) and "bd-a" in verdict["reason"], verdict
+    assert elapsed <= 15, f"Stop took {elapsed:.1f}s under a hanging bd"
+
+
+def test_forged_command_rejected_while_bd_down(s: Session) -> None:
+    """The frozen command is compared even when the bead cannot be read."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    _down(s, True)
+    forged = dict(s.contract(), verification_command="test -d .")
+    (s.thread / "contract.json").write_text(json.dumps(forged))
+    assert s.verify().returncode != 0
+    assert _blocked(s.stop())
+
+
+def test_oracle_run_outside_the_repo_is_not_proof(s: Session) -> None:
+    """The frozen oracle proves the outcome only when it ran inside the bead's repo."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    (s.other / "done-a").write_text("x")  # satisfied elsewhere, not here
+    s.verify(cwd=s.other)
+    assert not json.loads((s.thread / "active_bead.json").read_text()).get("proven")
+    s.close("bd-a")
+    assert _blocked(s.stop())

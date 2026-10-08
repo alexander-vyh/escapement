@@ -50,6 +50,7 @@
         "hooks": [
           {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/harness/bin/task_mode_entry.py\"",
+            "timeout": 30,
             "type": "command"
           }
         ],

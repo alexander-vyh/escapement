@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
-"""A claimed bead's frozen oracle, and the debts it leaves (escapement-l9lo).
+"""A claimed bead's frozen oracle is the session's contract (escapement-l9lo).
 
-derive_contract.py turns a bead into a contract; this module keeps the session's
-binding to beads in `active_bead.json` and decides when a contract may stand as
-proof for the work.
+INVARIANT. Once a bead is bound in a session, its debt is retired only by
+  (a) its frozen oracle passing in `verify`, run inside the bead's own repo;
+  (b) an explicit, recorded `derive_contract.py --refreeze` or `--retire`,
+      shown to the human at Stop;
+  (c) the user saying "stop".
+Nothing bd reports — missing, deleted, closed, unreadable, timed out — retires
+or erases a debt; it only means "cannot settle now, keep holding".
 
-State, one file per thread dir:
-  bead_id / claimed_at       the active bead (latest successful claim wins)
-  acceptance_sha256, command its oracle as frozen at claim (frozen_at: when)
-  freeze_pending             bd could not be read at claim; frozen on the next read
-  proven / proven_sha256     the frozen oracle's last verify run was green
-  frozen                     every bead's first freeze this session (no laundering)
-  owed                       beads left behind whose oracle never passed, or was
-                             never readable (`pending`) — debts exactly like the
-                             active bead's own
-  refreezes                  explicit --refreeze and late-freeze audit entries,
-                             shown to the human once
+One binding at a time, in `active_bead.json`:
+  bead_id, repo, claimed_at   the bound bead (bd's canonical id) and the repo
+                              every bd call for it runs in
+  acceptance_sha256, command  its oracle, frozen at claim (frozen_at)
+  freeze_pending              bd could not be read at claim; frozen when it can
+  proven, proven_sha256       the frozen oracle's last verify run was green
+  refreezes                   audit entries (refreeze, retire, late freeze),
+                              shown to the human once
 
-A pending freeze or an owed oracle blocks Stop whether or not contract.json
-exists. While bd stays unreadable the only exits are the user saying "stop" or,
-once bd answers, an explicit `derive_contract.py --bead <id> --refreeze`; a bead
-bd positively reports as missing (a typo, a rejected claim) is never bound.
+Claiming another bead while the bound one is unproven does not rebind: the
+agent is told to pass it or retire it. A claim of an id bd reports missing in
+the claim's own repo (a typo, a rejected claim) is not bound.
+
+bd time per process is capped at BD_BUDGET_SECONDS in total, and each bead is
+looked up at most once per process, so a hanging bd holds the session rather
+than stalling Stop.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from derive_contract import (  # noqa: E402
@@ -39,26 +44,29 @@ from derive_contract import (  # noqa: E402
     OracleNotDeclared,
     acceptance_sha256,
     derive_contract,
-    extract_verify_oracle,
     fetch_bead,
 )
 
 ACTIVE_BEAD = "active_bead.json"
+BD_BUDGET_SECONDS = 10.0
+
+_LOOKUPS: "dict[tuple, tuple]" = {}
+_SPENT = [0.0]
 
 
 def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat()
 
 
-def _read_json(path: pathlib.Path) -> "dict | None":
+def read_json(path: pathlib.Path) -> "dict | None":
     try:
-        value = json.loads(path.read_text())
+        value = json.loads(pathlib.Path(path).read_text())
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
 
 
-def _write_json(path: pathlib.Path, value: dict) -> None:
+def write_json(path: pathlib.Path, value: dict) -> None:
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
     with os.fdopen(fd, "w") as f:
         json.dump(value, f, indent=2)
@@ -73,442 +81,336 @@ def _parse_ts(value) -> "_dt.datetime | None":
     return ts if ts.tzinfo else ts.replace(tzinfo=_dt.timezone.utc)
 
 
-_FETCH_ERRORS = (
-    OracleNotDeclared,
-    subprocess.CalledProcessError,
-    subprocess.TimeoutExpired,
-    ValueError,
-    OSError,
-)
-
-
-def _lookup(fetch, bead_id: str) -> "tuple[dict | None, bool]":
-    """(bead, missing): missing only when bd positively reports no such bead."""
+def repo_root(cwd: str) -> str:
+    """The git top level of `cwd`, or `cwd` itself outside a repository."""
     try:
-        bead = fetch(bead_id)
-    except BeadNotFound:
-        return None, True
-    except _FETCH_ERRORS:
-        return None, False
-    return (bead if isinstance(bead, dict) else None), False
+        r = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd,
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            return os.path.realpath(r.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return os.path.realpath(cwd)
 
 
-def _fetch_or_none(fetch, bead_id: str) -> "dict | None":
-    return _lookup(fetch, bead_id)[0]
+def _in_repo(path, repo) -> bool:
+    if not path or not repo:
+        return False
+    path, repo = os.path.realpath(path), os.path.realpath(repo)
+    return path == repo or path.startswith(repo.rstrip(os.sep) + os.sep)
 
 
-def _oracle_of(bead: "dict | None") -> "str | None":
-    bead = bead or {}
-    return extract_verify_oracle(bead.get("acceptance_criteria") or bead.get("acceptance"))
+def lookup(bead_id: str, repo: "str | None") -> "tuple[dict | None, bool]":
+    """(bead, missing) from bd run in `repo`; once per bead per process, within budget.
 
-
-def bind_claimed_bead(
-    thread_dir: pathlib.Path,
-    bead_id: str,
-    *,
-    session_id: "str | None" = None,
-    fetch=None,
-) -> None:
-    """Record a successful claim; freeze the bead's oracle as the contract.
-
-    Latest claim wins, unlike session_mode.json's first-claim scope: the active
-    bead is what the session is working on NOW. Every bead's first freeze is kept
-    for the life of the session (`frozen`), so re-claiming a bead — directly or
-    after detouring through another — cannot launder a rewritten acceptance. The
-    bead being left behind keeps its debt: an unproven oracle, or one never
-    readable, moves to `owed`. A bead without an oracle still becomes active —
-    that is what retires the previous bead's contract — and leaves the agent to
-    declare.
+    `missing` is True only when bd positively reports no such bead. Only the
+    claim acts on it; after a claim it never retires anything.
     """
-    fetch = fetch or fetch_bead
-    thread_dir = pathlib.Path(thread_dir)
-    previous = _read_json(thread_dir / ACTIVE_BEAD) or {}
-    if previous.get("bead_id") == bead_id:
-        if previous.get("freeze_pending"):
-            _settle_pending(thread_dir, fetch, session_id=session_id)
-        return
-    bead, missing = _lookup(fetch, bead_id)
-    if missing:
-        print(
-            f"derive_contract: bd reports no bead {bead_id}, so the claim is not bound; "
-            "the session's binding is unchanged.",
-            file=sys.stderr,
-        )
-        return
-    if previous.get("freeze_pending"):
-        _settle_pending(thread_dir, fetch, session_id=session_id)
-        previous = _read_json(thread_dir / ACTIVE_BEAD) or {}
-    owed = dict(previous.get("owed") or {})
-    prev_id = previous.get("bead_id")
-    if prev_id and previous.get("freeze_pending"):
-        owed[prev_id] = {"pending": True, "claimed_at": previous.get("claimed_at")}
-    elif prev_id and previous.get("acceptance_sha256") and not previous.get("proven"):
-        # Leaving a bead whose frozen oracle never passed does not cancel it:
-        # closing it and claiming a throwaway would hand the agent its own exam.
-        owed[prev_id] = {
-            "acceptance_sha256": previous["acceptance_sha256"],
-            "command": previous.get("command"),
-        }
-    owed.pop(bead_id, None)  # active again: its debt is the active record's
-    frozen = dict(previous.get("frozen") or {})
-    record = {
-        "bead_id": bead_id,
-        "claimed_at": _now(),
-        "acceptance_sha256": frozen.get(bead_id),
-        "frozen": frozen,
-        "owed": owed,
-        "refreezes": list(previous.get("refreezes") or []),
-        "freeze_pending": True,
-    }
-    _write_json(thread_dir / ACTIVE_BEAD, record)
-    if not _settle_pending(thread_dir, fetch, session_id=session_id, bead=bead, at_claim=True):
-        print(
-            f"derive_contract: could not read bead {bead_id} at claim, so its ```verify "
-            "oracle is not frozen yet. It will be frozen on the next check once bd answers; "
-            "until then Stop stays blocked and no agent-declared contract is accepted for it.",
-            file=sys.stderr,
-        )
+    key = (bead_id, repo)
+    if key in _LOOKUPS:
+        return _LOOKUPS[key]
+    left = BD_BUDGET_SECONDS - _SPENT[0]
+    result: tuple = (None, False)
+    if left >= 0.5:
+        started = time.monotonic()
+        try:
+            bead = fetch_bead(bead_id, cwd=repo, timeout=left)
+            result = (bead if isinstance(bead, dict) else None, False)
+        except BeadNotFound:
+            result = (None, True)
+        except (OracleNotDeclared, subprocess.SubprocessError, ValueError, OSError):
+            result = (None, False)
+        _SPENT[0] += time.monotonic() - started
+    _LOOKUPS[key] = result
+    return result
 
 
-def _late_entry(bead_id: str, bead: dict, claimed_at, command: "str | None") -> "dict | None":
-    """An audit entry when a late freeze adopted text edited after the claim."""
-    updated = _parse_ts(bead.get("updated_at"))
-    claimed = _parse_ts(claimed_at)
+def _active(thread_dir) -> dict:
+    return read_json(pathlib.Path(thread_dir) / ACTIVE_BEAD) or {}
+
+
+def _holds(active: dict) -> bool:
+    """The bound bead still owes its oracle (pending, or frozen and never passed)."""
+    return bool(active.get("bead_id")) and bool(
+        active.get("freeze_pending") or (active.get("acceptance_sha256") and not active.get("proven"))
+    )
+
+
+def _late_entry(active: dict, bead: dict, command: "str | None") -> "dict | None":
+    """An audit entry when a freeze after the claim adopts a bead edited after it."""
+    updated, claimed = _parse_ts(bead.get("updated_at")), _parse_ts(active.get("claimed_at"))
     if updated is None or claimed is None or updated <= claimed:
         return None
-    return {
-        "bead_id": bead_id,
-        "at": _now(),
-        "late_freeze": True,
-        "updated_at": bead.get("updated_at"),
-        "claimed_at": claimed_at,
-        "to_command": command,
-    }
+    return {"bead_id": bead.get("id") or active.get("bead_id"), "at": _now(), "late_freeze": True,
+            "updated_at": bead.get("updated_at"), "to_command": command}
 
 
-def _settle_owed(active: dict, fetch) -> "dict | None":
-    """Freeze owed debts that were never readable. Returns the new record or None."""
-    owed = dict(active.get("owed") or {})
-    pending = [oid for oid, debt in owed.items() if isinstance(debt, dict) and debt.get("pending")]
-    if not pending:
-        return None
-    frozen = dict(active.get("frozen") or {})
-    log = list(active.get("refreezes") or [])
-    changed = False
-    for oid in pending:
-        bead, missing = _lookup(fetch, oid)
-        if bead is None and not missing:
-            continue  # still unreadable: stays a pending debt
-        changed = True
-        try:
-            contract = derive_contract(bead) if bead is not None else None
-        except OracleNotDeclared:
-            contract = None
-        if contract is None:
-            owed.pop(oid)  # bd says it has no usable oracle (or no bead): nothing was owed
-            continue
-        sha, command = contract["acceptance_sha256"], contract["verification_command"]
-        frozen.setdefault(oid, sha)
-        owed[oid] = {"acceptance_sha256": frozen[oid], "command": command, "frozen_at": _now()}
-        entry = _late_entry(oid, bead, owed[oid].get("claimed_at") or active.get("claimed_at"), command)
-        if entry:
-            log.append(entry)
-    return dict(active, owed=owed, frozen=frozen, refreezes=log) if changed else None
-
-
-def _settle_pending(
-    thread_dir: pathlib.Path,
-    fetch=None,
-    *,
-    session_id=None,
-    bead: "dict | None" = None,
-    at_claim: bool = False,
-) -> bool:
-    """Freeze what the claim-time lookup could not: the active bead and owed debts.
-
-    One bd timeout at claim must not unbind the bead, so the freeze is retried on
-    re-claim and lazily on every check. A late freeze of text edited after the
-    claim is logged for the human. Returns False only while the active bead is
-    still unreadable.
-    """
-    fetch = fetch or fetch_bead
-    path = pathlib.Path(thread_dir) / ACTIVE_BEAD
-    active = _read_json(path)
-    if not active:
-        return True
-    settled = _settle_owed(active, fetch)
-    if settled is not None:
-        active = settled
-        _write_json(path, active)
-    if not active.get("freeze_pending"):
-        return True
-    bead_id = active["bead_id"]
-    if bead is None:
-        bead, missing = _lookup(fetch, bead_id)
-        if missing:  # deleted since the claim: nothing to freeze, nothing owed
-            _write_json(path, dict(active, freeze_pending=False))
-            return True
-    if bead is None:
-        return False
-    record = dict(active, freeze_pending=False)
-    contract = None
+def _freeze(thread_dir, active: dict, bead: dict, *, at_claim: bool, session_id=None) -> dict:
+    """Freeze `bead`'s oracle (or its absence) into the binding; write contract.json."""
     try:
         contract = derive_contract(bead, session_id=session_id)
     except OracleNotDeclared:
         contract = None
+    record = dict(active, bead_id=bead.get("id") or active["bead_id"], freeze_pending=False,
+                  frozen_at=_now(), acceptance_sha256=None, command=None, proven=False)
     if contract is not None:
-        frozen = dict(record.get("frozen") or {})
-        if record.get("acceptance_sha256") in (None, contract["acceptance_sha256"]):
-            record["acceptance_sha256"] = frozen[bead_id] = contract["acceptance_sha256"]
-            record["command"] = contract["verification_command"]
-            record["frozen"] = frozen
-            record["frozen_at"] = _now()
-            entry = None if at_claim else _late_entry(
-                bead_id, bead, record.get("claimed_at"), record["command"])
-            if entry:
-                record["refreezes"] = list(record.get("refreezes") or []) + [entry]
-        else:
-            contract = None  # rewritten since its first freeze: binding_problem reports it
-    _write_json(path, record)
+        record.update(acceptance_sha256=contract["acceptance_sha256"],
+                      command=contract["verification_command"])
+    entry = None if at_claim else _late_entry(active, bead, record["command"])
+    if entry:
+        record["refreezes"] = list(record.get("refreezes") or []) + [entry]
+    write_json(pathlib.Path(thread_dir) / ACTIVE_BEAD, record)
     if contract is not None:
-        _write_json(pathlib.Path(thread_dir) / "contract.json", contract)
-    return True
+        write_json(pathlib.Path(thread_dir) / "contract.json", contract)
+    return record
 
 
-def _refrozen(active: dict, bead_id: str, sha: "str | None", command: "str | None") -> dict:
-    """The active record after an explicit --refreeze, with an audit entry."""
-    frozen_map = dict(active.get("frozen") or {})
-    if sha:
-        frozen_map[bead_id] = sha
+def settle(thread_dir, *, session_id=None) -> dict:
+    """Freeze a pending binding if bd can now read the bead; return the binding."""
+    active = _active(thread_dir)
+    if active.get("freeze_pending"):
+        bead, _missing = lookup(active["bead_id"], active.get("repo"))
+        if bead is not None:
+            active = _freeze(thread_dir, active, bead, at_claim=False, session_id=session_id)
+    return active
+
+
+def bind_claimed_bead(thread_dir, typed_id: str, *, cwd: str, session_id=None) -> None:
+    """Bind a successful claim, unless the bound bead still owes its oracle."""
+    thread_dir = pathlib.Path(thread_dir)
+    repo = repo_root(cwd)
+    bead, missing = lookup(typed_id, repo)
+    if missing:
+        print(f"derive_contract: bd reports no bead {typed_id} in {repo}, so the claim is "
+              "not bound.", file=sys.stderr)
+        return
+    bead_id = (bead or {}).get("id") or typed_id
+    active = settle(thread_dir, session_id=session_id)
+    if active.get("bead_id") in (bead_id, typed_id):
+        return
+    if _holds(active):
+        print(f"derive_contract: claim of {bead_id} is not bound — bead {active['bead_id']} "
+              "still owes its ```verify oracle. Pass it (`verify`), or retire it by explicit "
+              "decision with `derive_contract.py --retire` (shown to the user).", file=sys.stderr)
+        return
+    record = {"bead_id": bead_id, "repo": repo, "claimed_at": _now(), "freeze_pending": True,
+              "refreezes": list(active.get("refreezes") or [])}
+    write_json(thread_dir / ACTIVE_BEAD, record)
+    if bead is not None:
+        _freeze(thread_dir, record, bead, at_claim=True, session_id=session_id)
     else:
-        frozen_map.pop(bead_id, None)
-    log = list(active.get("refreezes") or [])
-    log.append({
-        "bead_id": bead_id,
-        "at": _now(),
-        "from_sha256": active.get("acceptance_sha256"),
-        "from_command": active.get("command"),
-        "to_sha256": sha,
-        "to_command": command,
-    })
-    owed = dict(active.get("owed") or {})
-    owed.pop(bead_id, None)
-    return dict(active, acceptance_sha256=sha, command=command, frozen=frozen_map,
-                proven=False, refreezes=log, owed=owed)
+        print(f"derive_contract: could not read bead {bead_id} at claim, so its ```verify "
+              "oracle is not frozen yet; it is frozen once bd answers, and until then Stop "
+              "stays blocked.", file=sys.stderr)
+
+
+def _released(active: dict, bead: "dict | None") -> bool:
+    """A proven bead that is closed, unchanged since the proof, no longer has
+    precedence: what follows is unclaimed work the agent may declare for."""
+    return (bool(active.get("proven")) and bead is not None and bead.get("status") == "closed"
+            and acceptance_sha256(bead) == active.get("proven_sha256"))
+
+
+def oracle_in_force(thread_dir) -> "str | None":
+    """The bound bead whose oracle no agent-declared contract may replace, or None."""
+    active = settle(thread_dir)
+    if active.get("freeze_pending"):
+        return active["bead_id"]
+    if not active.get("acceptance_sha256"):
+        return None
+    if _released(active, lookup(active["bead_id"], active.get("repo"))[0]):
+        return None
+    return active["bead_id"]
 
 
 def _rewritten(bead_id: str) -> str:
-    return (
-        f"bead {bead_id}'s acceptance text changed since its oracle was frozen — the "
-        "oracle was rewritten mid-work. Restore the original acceptance, or adopt the "
-        f"new one by explicit decision: `derive_contract.py --bead {bead_id} --refreeze`."
-    )
+    return (f"bead {bead_id}'s ```verify oracle changed since it was frozen — rewritten "
+            "mid-work. Restore it, or adopt the new one by explicit decision: "
+            f"`derive_contract.py --bead {bead_id} --refreeze`.")
 
 
 def _declared_after_claim(contract: dict, active: dict) -> bool:
-    declared = _parse_ts(contract.get("created_at"))
-    claimed = _parse_ts(active.get("claimed_at"))
+    declared, claimed = _parse_ts(contract.get("created_at")), _parse_ts(active.get("claimed_at"))
     return declared is not None and (claimed is None or declared >= claimed)
 
 
-def mark_proven(thread_dir: pathlib.Path, *, fetch=None) -> None:
-    """Record what the on-disk contract's LAST RUN says about the active bead's oracle.
+def binding_problem(contract, thread_dir) -> "str | None":
+    """Why the session may not stop on `contract` (None: no readable contract.json)
+    given its binding, or None. Debts hold whether or not a contract exists."""
+    active = settle(thread_dir)
+    aid, frozen, repo = active.get("bead_id"), active.get("acceptance_sha256"), active.get("repo")
+    contract = contract if isinstance(contract, dict) else None
+    bound_id = (contract or {}).get("bead_id")
+    if not aid:
+        if bound_id and contract.get("acceptance_sha256"):
+            bead = lookup(bound_id, None)[0]
+            if bead is not None and acceptance_sha256(bead) != contract["acceptance_sha256"]:
+                return _rewritten(bound_id)
+        return None
+    if active.get("freeze_pending"):
+        return (f"bead {aid}'s ```verify oracle could not be read when it was claimed (bd "
+                "unavailable), so nothing can stand in for it yet. It is frozen once bd answers "
+                f"in {repo}; or retire it with `derive_contract.py --retire` (shown to the user).")
+    bead = lookup(aid, repo)[0] if frozen else None
+    if frozen and not _released(active, bead):
+        if contract is None:
+            return (f"bead {aid}'s frozen ```verify oracle has not passed and there is no "
+                    f"contract to run it. Restore it with `derive_contract.py --bead {aid}`.")
+        if bound_id != aid:
+            return (f"bead {aid} declares its own ```verify oracle, so it is the contract; "
+                    f"this contract ({contract.get('source', 'unknown source')}) cannot "
+                    f"replace it. Run `derive_contract.py --bead {aid}` to restore it.")
+        if contract.get("expected_exit", 0) != 0 or contract.get("acceptance_sha256") != frozen \
+                or contract.get("verification_command") != active.get("command"):
+            return (f"this contract is not bead {aid}'s oracle as frozen at claim. Run "
+                    f"`derive_contract.py --bead {aid}` to restore it.")
+        if bead is not None and acceptance_sha256(bead) != frozen:
+            return _rewritten(aid)
+        last = contract.get("last_run")
+        if isinstance(last, dict) and last.get("cwd") and not _in_repo(last["cwd"], repo):
+            return (f"bead {aid}'s oracle last ran in {last['cwd']}, outside its repo {repo}; "
+                    "run `verify` from inside the repo.")
+        return None
+    if contract is None or (frozen and bound_id == aid):
+        return None
+    if bound_id and bound_id != aid:
+        return (f"this contract proves bead {bound_id}, but the bound bead is {aid}. Declare "
+                f"{aid}'s outcome (init_contract.py) or add a ```verify block to its acceptance "
+                f"and run `derive_contract.py --bead {aid}`.")
+    if not _declared_after_claim(contract, active):
+        return (f"this contract was declared before bead {aid} was claimed, so it describes "
+                f"earlier work. Declare {aid}'s outcome (init_contract.py).")
+    return None
 
-    Reads contract.json itself, so no caller can hand it a contract to judge:
-    `proven` becomes true only when that file's last_run is a fresh, unsuppressed
-    pass (the same test the Stop gate applies) of exactly the frozen command,
-    against a readable bead. Any other run of the bound oracle — a red one
-    included — clears it. Editing the state files directly is out of scope.
+
+def mark_proven(thread_dir) -> None:
+    """Record what the on-disk contract's last run says about the bound oracle.
+
+    Proven only when contract.json's last_run is a fresh, unsuppressed pass of
+    exactly the frozen command, run inside the bead's repo, against a readable,
+    unchanged bead. Any other run clears it. Editing state files is out of scope.
     """
     path = pathlib.Path(thread_dir) / ACTIVE_BEAD
-    active = _read_json(path)
-    contract = _read_json(pathlib.Path(thread_dir) / "contract.json")
-    if not (
-        active
-        and contract
-        and active.get("acceptance_sha256")
-        and contract.get("bead_id") == active.get("bead_id")
-    ):
+    active = read_json(path)
+    contract = read_json(pathlib.Path(thread_dir) / "contract.json")
+    if not (active and contract and active.get("acceptance_sha256")
+            and contract.get("bead_id") == active.get("bead_id")):
         return
     from would_block_stop import _verification_passed_this_turn  # local: import cycle
 
-    bead = _fetch_or_none(fetch or fetch_bead, active["bead_id"])
+    bead = lookup(active["bead_id"], active.get("repo"))[0]
+    last = contract.get("last_run") or {}
     proven = (
         _verification_passed_this_turn(contract)
         and contract.get("expected_exit", 0) == 0
         and contract.get("acceptance_sha256") == active["acceptance_sha256"]
         and contract.get("verification_command") == active.get("command")
+        and _in_repo(last.get("cwd"), active.get("repo"))
         and bead is not None
         and acceptance_sha256(bead) == active["acceptance_sha256"]
-        and _oracle_of(bead) == contract.get("verification_command")
     )
-    if proven:
-        _write_json(path, dict(active, proven=True, proven_sha256=active["acceptance_sha256"]))
-    elif active.get("proven"):
-        _write_json(path, dict(active, proven=False, proven_sha256=None))
+    if proven or active.get("proven"):
+        write_json(path, dict(active, proven=proven,
+                              proven_sha256=active["acceptance_sha256"] if proven else None))
+
+
+def _log(active: dict, **entry) -> list:
+    return list(active.get("refreezes") or []) + [dict(entry, at=_now())]
+
+
+def derive_bound(thread_dir, bead_id: str, *, refreeze: bool, session_id=None) -> int:
+    """`derive_contract.py --bead` while a bead is bound: re-derive it, adopt a
+    rewrite (--refreeze), or freeze a pending one. Never switches the binding."""
+    thread_dir = pathlib.Path(thread_dir)
+    active = settle(thread_dir, session_id=session_id)
+    aid = active["bead_id"]
+    bead, _missing = lookup(bead_id, active.get("repo"))
+    if (bead or {}).get("id", bead_id) != aid:
+        why = (f"bead {aid} still owes its oracle — pass it, or retire it with "
+               "`derive_contract.py --retire` (shown to the user)" if _holds(active)
+               else f"the bound bead is {aid}; claim {bead_id} first (`bd update {bead_id} --claim`)")
+        print(f"refusing to derive contract: {why}.", file=sys.stderr)
+        return 2
+    if bead is None:
+        print(f"could not read bead {bead_id} in {active.get('repo')}; nothing changed.",
+              file=sys.stderr)
+        return 1
+    try:
+        contract = derive_contract(bead, session_id=session_id)
+    except OracleNotDeclared as exc:
+        if refreeze and active.get("acceptance_sha256"):
+            write_json(thread_dir / ACTIVE_BEAD, dict(
+                active, acceptance_sha256=None, command=None, proven=False,
+                refreezes=_log(active, bead_id=aid, from_command=active.get("command"),
+                               to_command=None)))
+            print(f"bead {aid} no longer declares a usable oracle ({exc}); its frozen oracle "
+                  "is released — declare this work's outcome with init_contract.py.")
+            return 0
+        print(f"refusing to derive contract: {exc}", file=sys.stderr)
+        return 2
+    sha, command = contract["acceptance_sha256"], contract["verification_command"]
+    frozen = active.get("acceptance_sha256")
+    if frozen and frozen != sha:
+        if not refreeze:
+            print(f"refusing to derive contract: {_rewritten(aid)}", file=sys.stderr)
+            return 2
+        contract["refrozen_from"] = frozen
+        write_json(thread_dir / ACTIVE_BEAD, dict(
+            active, acceptance_sha256=sha, command=command, proven=False,
+            refreezes=_log(active, bead_id=aid, from_command=active.get("command"),
+                           to_command=command)))
+    elif not frozen:
+        # An oracle added after the claim is adopted, and logged when the bead
+        # was edited after the claim — the agent may have written its own exam.
+        _freeze(thread_dir, active, bead, at_claim=False, session_id=session_id)
+    write_json(thread_dir / "contract.json", contract)
+    print(f"contract derived from {aid} -> {thread_dir / 'contract.json'}")
+    print(json.dumps(contract, indent=2))
+    return 0
+
+
+def retire(thread_dir) -> int:
+    """`derive_contract.py --retire`: end the binding by explicit, recorded decision."""
+    thread_dir = pathlib.Path(thread_dir)
+    active = _active(thread_dir)
+    if not active.get("bead_id"):
+        print("nothing to retire: no bead is bound in this session.", file=sys.stderr)
+        return 2
+    log = _log(active, bead_id=active["bead_id"], retired=True, proven=bool(active.get("proven")),
+               from_command=active.get("command"))
+    write_json(thread_dir / ACTIVE_BEAD, {"refreezes": log})
+    print(f"bead {active['bead_id']} retired; this is reported to the user at Stop.")
+    return 0
 
 
 def _describe(entry: dict) -> str:
     bead_id = entry.get("bead_id", "?")
     if entry.get("late_freeze"):
-        return (
-            f"{bead_id}: frozen late as `{entry.get('to_command')}` — bd was unreadable "
-            f"at claim and the bead was edited after it (updated {entry.get('updated_at')})"
-        )
-    if entry.get("retired_while_inactive"):
-        return f"{bead_id}: `{entry.get('from_command')}` abandoned unproven (never passed)"
-    return (
-        f"{bead_id}: `{entry.get('from_command')}` -> "
-        f"`{entry.get('to_command') or '(oracle removed; agent-declared contract)'}`"
-    )
+        return (f"{bead_id}: late freeze as `{entry.get('to_command')}`, from text edited "
+                f"after the claim (updated {entry.get('updated_at')})")
+    if entry.get("retired"):
+        state = "proven" if entry.get("proven") else "never passed"
+        return f"{bead_id}: `{entry.get('from_command')}` retired by explicit decision ({state})"
+    return (f"{bead_id}: `{entry.get('from_command')}` -> "
+            f"`{entry.get('to_command') or '(oracle removed; agent-declared contract)'}`")
 
 
-def refreeze_notice(thread_dir: pathlib.Path) -> "str | None":
+def refreeze_notice(thread_dir) -> "str | None":
     """Oracle changes not yet shown to the human, as one sentence; marks them shown.
-
-    Settles a pending freeze first, so every Stop path — not only the contract
-    gate — freezes once bd answers and reports a late freeze the same turn.
-    """
-    _settle_pending(thread_dir)
+    Settles a pending binding first, so a late freeze is reported on any Stop path."""
+    settle(thread_dir)
     path = pathlib.Path(thread_dir) / ACTIVE_BEAD
-    active = _read_json(path)
+    active = read_json(path)
     if not active:
         return None
     log = list(active.get("refreezes") or [])
-    fresh = [entry for entry in log if isinstance(entry, dict) and not entry.get("reported")]
+    fresh = [e for e in log if isinstance(e, dict) and not e.get("reported")]
     if not fresh:
         return None
-    parts = [_describe(entry) for entry in fresh]
-    for entry in fresh:
-        entry["reported"] = True
-    _write_json(path, dict(active, refreezes=log))
-    return (
-        "continuation-harness: a bead's frozen oracle was changed outside a normal claim "
-        "this session (--refreeze or a late freeze) — " + "; ".join(parts)
-        + ". Check that this still proves the outcome."
-    )
-
-
-def _released(active: dict, bead: "dict | None") -> bool:
-    """A closed bead whose frozen oracle passed has done its job; what follows is
-    unclaimed work the agent may declare for. Closing it unproven releases nothing,
-    or one tracker action would hand the agent back its own exam."""
-    return (
-        bool(active.get("proven"))
-        and bead is not None
-        and bead.get("status") == "closed"
-        # a rewrite after the proof (even to a stronger oracle) is unproven
-        and acceptance_sha256(bead) == active.get("proven_sha256")
-    )
-
-
-def oracle_in_force(thread_dir: pathlib.Path, *, fetch=None) -> "str | None":
-    """The active bead whose frozen oracle IS the contract (or whose oracle is not
-    known yet because bd was unreadable at claim), or None."""
-    _settle_pending(thread_dir, fetch)
-    active = _read_json(pathlib.Path(thread_dir) / ACTIVE_BEAD) or {}
-    active_id = active.get("bead_id")
-    if active_id and active.get("freeze_pending"):
-        return active_id
-    if not active_id or not active.get("acceptance_sha256"):
-        return None
-    if _released(active, _fetch_or_none(fetch or fetch_bead, active_id)):
-        return None
-    return active_id
-
-
-def _debt(active: dict) -> "str | None":
-    """An open debt that no contract can discharge: a pending freeze or owed oracles."""
-    if active.get("freeze_pending"):
-        return (
-            f"bead {active.get('bead_id')}'s ```verify oracle could not be read when it "
-            "was claimed (bd unavailable), so nothing can stand in for it yet. Retry once "
-            f"bd answers: `derive_contract.py --bead {active.get('bead_id')}`."
-        )
-    owed = active.get("owed") or {}
-    if owed:
-        names = ", ".join(
-            oid + (" (oracle not yet readable)" if isinstance(debt, dict) and debt.get("pending") else "")
-            for oid, debt in sorted(owed.items())
-        )
-        return (
-            f"bead(s) {names} were left with a frozen ```verify oracle that never passed. "
-            "Re-claim each (`bd update <id> --claim`) and make its oracle pass, or retire "
-            "it by explicit decision with `derive_contract.py --bead <id> --refreeze` "
-            "(reported to the user at Stop)."
-        )
-    return None
-
-
-def binding_problem(contract, thread_dir: pathlib.Path, *, fetch=None) -> "str | None":
-    """Why the session may not stop on `contract` (None when contract.json is absent
-    or unreadable) given its bead binding, or None.
-
-    A pending freeze, an owed oracle, or a bound oracle that never passed blocks
-    whether or not a contract exists. Comparisons that need an unreadable bead
-    are skipped; the debts above are not, so a bd outage holds a bound session
-    until bd answers or the user says "stop".
-    """
-    fetch = fetch or fetch_bead
-    _settle_pending(thread_dir, fetch)
-    active = _read_json(pathlib.Path(thread_dir) / ACTIVE_BEAD) or {}
-    debt = _debt(active)
-    if debt:
-        return debt
-    active_id = active.get("bead_id")
-    frozen = active.get("acceptance_sha256")
-    if not isinstance(contract, dict):
-        if active_id and frozen and not active.get("proven"):
-            return (
-                f"bead {active_id}'s frozen ```verify oracle has not passed, and there is "
-                f"no contract to run it. Restore it with `derive_contract.py --bead "
-                f"{active_id}`, then run verify."
-            )
-        return None
-    bound_id = contract.get("bead_id")
-    command = contract.get("verification_command") or ""  # raw: no whitespace laundering
-    if bound_id and contract.get("expected_exit", 0) != 0:
-        return f"a bead-derived contract expects exit 0; this one expects {contract.get('expected_exit')}."
-
-    if active_id and frozen:
-        bead = _fetch_or_none(fetch, active_id)
-        released = _released(active, bead)
-        if not released and bead is not None and acceptance_sha256(bead) != frozen:
-            return _rewritten(active_id)
-        if bound_id == active_id and not released:
-            if contract.get("acceptance_sha256") != frozen or (
-                bead is not None and _oracle_of(bead) != command
-            ):
-                return (
-                    f"this contract is not bead {active_id}'s oracle as frozen at claim. "
-                    f"Run `derive_contract.py --bead {active_id}` to restore it."
-                )
-            return None
-        if not released:
-            return (
-                f"bead {active_id} declares its own ```verify oracle, so it is the "
-                f"contract; this contract ({contract.get('source', 'unknown source')}"
-                f"{', bead ' + bound_id if bound_id else ''}) cannot replace it. Run "
-                f"`derive_contract.py --bead {active_id}` to restore it."
-            )
-    if active_id and frozen and bound_id == active_id:
-        return None  # the released bead's own oracle, already proven
-    if active_id and bound_id != active_id:  # also reached once a proven bead closes
-        if bound_id:
-            return (
-                f"this contract proves bead {bound_id}, but the active bead is {active_id}. "
-                f"Declare {active_id}'s outcome (init_contract.py) or add a ```verify "
-                f"block to its acceptance and run `derive_contract.py --bead {active_id}`."
-            )
-        if not _declared_after_claim(contract, active):
-            return (
-                f"this contract was declared before bead {active_id} was claimed, so "
-                f"it describes earlier work. Declare {active_id}'s outcome "
-                "(init_contract.py) or add a ```verify block to its acceptance."
-            )
-        return None
-    if bound_id and contract.get("acceptance_sha256"):
-        bead = _fetch_or_none(fetch, bound_id)
-        if bead is not None and acceptance_sha256(bead) != contract["acceptance_sha256"]:
-            return _rewritten(bound_id)
-    return None
+    parts = [_describe(e) for e in fresh]
+    for e in fresh:
+        e["reported"] = True
+    write_json(path, dict(active, refreezes=log))
+    return ("continuation-harness: a bead's frozen oracle changed outside a normal claim "
+            "this session (--refreeze, --retire or a late freeze) — " + "; ".join(parts)
+            + ". Check that this still proves the outcome.")
