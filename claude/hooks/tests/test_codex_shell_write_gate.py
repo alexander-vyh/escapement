@@ -77,3 +77,17 @@ def test_codex_cd_into_another_repo_is_read_in_both_halves(tmp_path):
     text = context(output, POST)
     assert "src/app.py" in text
     assert "theirs.py" not in text, "dirt in the session's repo is not this call's write"
+
+
+def test_codex_relative_cd_is_resolved_once(tmp_path):
+    """The dispatcher already turned `cd ..` into the payload cwd for the
+    PreToolUse half; resolving it again lands outside the repo, and the
+    after-call half must not then compare against anything older."""
+    repo = _repo(tmp_path)
+    (repo / "pkg").mkdir()
+    env, session = isolated_env(tmp_path), f"codex-{uuid.uuid4()}"
+    assert _shell(repo / "pkg", env, "ls", session) is None
+    (repo / "src" / "foreign.py").write_text("THEIRS = 1\n")  # another session
+    text = context(_shell(repo / "pkg", env, "cd .. && echo 'VALUE = 9' > src/app.py", session), POST)
+    assert "src/app.py" in text
+    assert "foreign.py" not in text

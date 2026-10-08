@@ -18,27 +18,32 @@ without the test is the override: a file is reported once per session, and
 that memory is forgotten when the debt is paid, so a relapse speaks again.
 
 Attribution. Many sessions share one checkout, so a dirty file is not proof
-that this session wrote it. Before each Bash call (PreToolUse) the hook records
-HEAD and every dirty path with a hash of its content in this session's own
-state file; after the call (PostToolUse, or PostToolUseFailure when the command
-exited non-zero) it names only the paths that are new or whose hash changed,
-plus the files of commits made during the call. Dirt from before the session,
-another session's writes between this session's calls, and this session's own
-Edit-tool writes sit in the snapshot and are not named. Both halves follow a
-leading `cd` the same way, so they read the same repository.
+that this session wrote it. Just before each Bash call (PreToolUse) the hook
+records HEAD and a fingerprint of every dirty path, filed under the host's
+tool-call id; just after it (PostToolUse, or PostToolUseFailure when the
+command exited non-zero) it consumes that same snapshot and names only the
+paths that are new or changed, plus the files of commits the call made (reflog
+`commit` entries only). The after-call half uses the repository the before-half
+resolved; it never resolves a `cd` itself. The before-half resolves a leading
+`cd` only on Claude; on Codex and Pi the dispatcher already has, and doing it
+twice would land in the wrong directory. See _shell_snapshot.
 
-Failing open. Any doubt is silence and a fresh baseline, never blame: a git
-status that fails or times out records the snapshot as unknown, a tree with
-more than 2,000 dirty paths is not hashed, a file that cannot be read is
-skipped, and a HEAD that moved anywhere but forward (reset, checkout) skips the
-call. A host that delivers only the after-call half takes its first look as
-the baseline.
+Failing open. With no before-snapshot for this call -- a host that sends only
+the after-call half or no tool-call id, a before-half killed at the host
+timeout, no repository found -- the call names nothing; it is never compared
+with an older snapshot. A git status that fails or times out, more than 2,000
+dirty paths, or a HEAD moved by anything but this call's commits (pull, merge,
+rebase, reset, checkout) also names nothing, and records a `blind` gate signal
+so the blindness shows in telemetry. Git calls share a 5s budget per half.
 
-Known gaps, not built: another session writing during this session's command
-is inside the window and is named; a write left running in the background
-after the call returns lands in a later call; `git stash pop` re-dirties files
-with new hashes and names them; subagents that share the parent's session id
-share its snapshot; a `cd` that is not the leading command is not followed.
+Known gaps, not built: Codex's `workdir` parameter is not in its payload, so a
+command run in another directory that way -- another worktree, say, which is
+common -- is invisible: its writes are not seen. Another session writing during
+this session's command is inside the window and is named. A write left running
+in the background after the call returns is not seen. `git stash pop`
+re-dirties files with new fingerprints and names them. Subagents that share the
+parent's session id share its state. A `cd` that is not the leading command is
+not followed.
 
 Exit codes:
   0 -- always; the report is the JSON on stdout
@@ -46,23 +51,16 @@ Exit codes:
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import json
-import os
-import re
-import subprocess
 import sys
-import tempfile
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _host_output  # noqa: E402
+import _shell_snapshot as snap  # noqa: E402
 from _agent_dispatch import host as _host  # noqa: E402
-from test_oracle_brief_gate import block_message, record_decision_signal  # noqa: E402
-from test_oracle_brief_policy import brief_status, find_git_root, is_relevant_file  # noqa: E402
 
 try:
     from _effective_cwd import normalized as _effective_cwd
@@ -93,123 +91,8 @@ def _load_tdd_gate():
 
 
 _ONCE = "This is reported once per file per session"
-_SESSION_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
-# Past this size a file is fingerprinted by size and mtime rather than read,
-# and past the budget every further file is; a snapshot must fit the 10s hook.
-_HASH_LIMIT = 1024 * 1024
-_HASH_BUDGET = 64 * 1024 * 1024
-# Past this many dirty paths, or files in one call's commits, nothing is named.
-_MAX_PATHS = 2000
 _SHOWN = 8
-_UNREAD = "?"
-
-
-def _state_path(session_id: str) -> Path | None:
-    """This session's own state file; None for an id unsafe as a path part."""
-    if not _SESSION_RE.fullmatch(session_id) or session_id in (".", ".."):
-        return None
-    root = os.environ.get("HARNESS_ROOT") or os.path.join(
-        os.path.expanduser("~"), ".claude", "harness")
-    return Path(root) / "threads" / session_id / "shell_write_gate.json"
-
-
-def _load_state(path: Path) -> dict:
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return state if isinstance(state, dict) else {}
-
-
-def _save_state(path: Path, state: dict) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".shell_write_gate.")
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(state, handle)
-        os.replace(tmp, path)
-    except OSError:
-        pass
-
-
-def _git(repo_root: Path, *args: str, timeout: float = 2) -> subprocess.CompletedProcess | None:
-    try:
-        return subprocess.run(["git", *args], cwd=str(repo_root), capture_output=True,
-                              text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def changed_files(repo_root: Path) -> list[str] | None:
-    """Repo-relative files the working tree has changed, created, or staged;
-    None when git could not say (which is not the same as a clean tree)."""
-    result = _git(repo_root, "status", "--porcelain=v1", "-z", "--untracked-files=all", timeout=4)
-    if result is None or result.returncode != 0:
-        return None
-    names: list[str] = []
-    entries = iter(result.stdout.split("\0"))
-    for entry in entries:
-        if len(entry) < 4:
-            continue
-        names.append(entry[3:])
-        if entry[0] in "RC":
-            next(entries, None)  # the rename's source path
-    return [name for name in names if (repo_root / name).is_file()]
-
-
-def fingerprint(path: Path, budget: int = _HASH_LIMIT) -> tuple[str, int]:
-    """(content hash, or size and mtime past the limits, or _UNREAD; budget left)."""
-    try:
-        stat = path.stat()
-        if stat.st_size > min(_HASH_LIMIT, budget):
-            return f"stat:{stat.st_size}:{stat.st_mtime_ns}", budget
-        return hashlib.sha256(path.read_bytes()).hexdigest(), budget - stat.st_size
-    except OSError:
-        return _UNREAD, budget
-
-
-def take_snapshot(repo_root: Path) -> dict:
-    """HEAD and a fingerprint per dirty path, or a status saying why there is none."""
-    changed = changed_files(repo_root)
-    if changed is None:
-        return {"status": "unknown"}
-    if len(changed) > _MAX_PATHS:
-        return {"status": "too-many-dirty"}
-    head = _git(repo_root, "rev-parse", "--verify", "-q", "HEAD")
-    files: dict[str, str] = {}
-    budget = _HASH_BUDGET
-    for name in changed:
-        files[name], budget = fingerprint(repo_root / name, budget)
-    return {
-        "status": "ok",
-        "time": time.time(),
-        "head": head.stdout.strip() if head is not None and head.returncode == 0 else None,
-        "files": files,
-    }
-
-
-def _usable(snap: object) -> bool:
-    return isinstance(snap, dict) and snap.get("status") == "ok" and isinstance(snap.get("files"), dict)
-
-
-def committed_files(repo_root: Path, before: dict, now: dict) -> list[str] | None:
-    """Files of commits made during the call; None when HEAD moved anywhere but forward."""
-    old, new = before.get("head"), now.get("head")
-    if old == new or not old or not new:
-        return []
-    ancestor = _git(repo_root, "merge-base", "--is-ancestor", old, new)
-    if ancestor is None or ancestor.returncode != 0:
-        return None  # reset, checkout, or unknown: not this call's writes to name
-    since = int(float(before.get("time") or 0)) - 2  # a pulled commit is older than the call
-    log = _git(repo_root, "log", "--no-merges", f"--since=@{since}", "--format=",
-               "--name-only", "-z", f"{old}..{new}")
-    if log is None or log.returncode != 0:
-        return []
-    names = list(dict.fromkeys(name.strip("\n") for name in log.stdout.split("\0") if name.strip("\n")))
-    if len(names) > _MAX_PATHS:
-        return []
-    return [name for name in names if (repo_root / name).is_file()]
 
 
 def _unreported(memory: dict, key: str, names: list[str]) -> list[str]:
@@ -239,6 +122,8 @@ def brief_debt(
     repo_root: Path, written: list[str], memory: dict
 ) -> tuple[str, str, list[str]] | None:
     """(reason, category, files) when this command wrote behaviour files without a valid brief."""
+    from test_oracle_brief_policy import brief_status, is_relevant_file
+
     relevant = [name for name in written if is_relevant_file(name)]
     if not relevant:
         return None
@@ -253,6 +138,8 @@ def brief_debt(
 
 
 def _brief_message(reason: str, repo_root: Path, files: list[str]) -> str:
+    from test_oracle_brief_gate import block_message
+
     try:
         return block_message(reason, repo_root, files, ask_decision=False)
     except TypeError:  # PR #250 drops the ask_decision keyword
@@ -265,46 +152,60 @@ def _shown(names: list[str]) -> str:
     return f"'{text}'{more}"
 
 
+def _blind(why: str) -> None:
+    """The hook could not tell what this call wrote; say so where it is counted."""
+    _record_signal(gate_name="shell_write_gate", decision="blind", reason=why,
+                   surface="shell-write")
+
+
 def run(data: dict) -> str | None:
-    """The report for this Bash call, or None. Updates the session's snapshot."""
+    """The report for this Bash call, or None."""
     hook_event = data.get("hook_event_name", "") or data.get("hookEventName", "")
     if hook_event not in _EVENTS or data.get("tool_name") != "Bash":
         return None
-    # The PreToolUse dispatcher reads a leading `cd`; this half must read the same repo.
-    data = _effective_cwd(data)
-    cwd = data.get("cwd")
-    session_id = str(data.get("session_id") or data.get("sessionId") or "")
-    state_path = _state_path(session_id)
-    if not isinstance(cwd, str) or not cwd or state_path is None:
+    session_dir = snap.session_dir(str(data.get("session_id") or data.get("sessionId") or ""))
+    call_id = data.get("tool_use_id")
+    if session_dir is None or not isinstance(call_id, str) or not call_id:
+        return None  # nothing pairs the two halves: say nothing
+    budget = snap.Budget()
+    if hook_event == "PreToolUse":
+        if _host(data) == "claude":  # Codex and Pi run this half behind the dispatcher,
+            data = _effective_cwd(data)  # which has already followed a leading `cd`
+        cwd = data.get("cwd")
+        root = snap.repo_root(budget, cwd) if isinstance(cwd, str) and cwd else None
+        if root is None:
+            return None
+        before = snap.take(budget, root)
+        if snap.usable(before):
+            snap.save_pending(session_dir, call_id, root, before)
+        else:
+            _blind(before.get("status", "unknown"))
         return None
-    repo_root = find_git_root(cwd)
-    if repo_root is None:
+
+    pending = snap.pop_pending(session_dir, call_id)
+    if pending is None:
         return None
-    now = take_snapshot(repo_root)
-    state = _load_state(state_path)
-    repo_state = state.get(str(repo_root))
-    repo_state = repo_state if isinstance(repo_state, dict) else {}
-    state[str(repo_root)] = repo_state
-    before = repo_state.get("snapshot")
-    repo_state["snapshot"] = now
-    committed = (committed_files(repo_root, before, now)
-                 if hook_event != "PreToolUse" and _usable(before) and _usable(now) else None)
+    root, before = pending
+    after = snap.take(budget, root, before)
+    if not snap.usable(after):
+        _blind(after.get("status", "unknown"))
+        return None
+    committed = snap.commits_during(budget, root, before.get("head"), after.get("head"))
     if committed is None:
-        _save_state(state_path, state)  # a baseline, or a call nothing can be said about
+        _blind("head-moved")
         return None
-    files, old = now["files"], before["files"]
-    written = [name for name, print_ in files.items()
-               if print_ != _UNREAD and old.get(name) != _UNREAD and old.get(name) != print_]
-    # A committed file already dirty before the call, with the same content, was not written by it.
-    written += [name for name in committed if name not in files
-                and (name not in old or fingerprint(repo_root / name)[0] != old[name])]
-    changed = list(files) + committed
-    memory = repo_state.get("reported")
+    written = snap.written(root, before, after, committed)
+    if not written:
+        return None
+    changed = list(after["files"]) + committed
+    memory_path = session_dir / "reported.json"
+    reported = snap.read_json(memory_path)
+    memory = reported.get(str(root))
     memory = memory if isinstance(memory, dict) else {}
-    repo_state["reported"] = memory
+    reported[str(root)] = memory
 
     reports: list[str] = []
-    untested = tdd_debt(repo_root, changed, written, memory) if written else []
+    untested = tdd_debt(root, changed, written, memory)
     if untested:
         _record_signal(
             gate_name="tdd_gate",
@@ -318,8 +219,10 @@ def run(data: dict) -> str | None:
             f"modified yet. Write the failing test first. {_ONCE}; to go ahead "
             "without a test, carry on."
         )
-    unbriefed = brief_debt(repo_root, written, memory) if written else None
+    unbriefed = brief_debt(root, written, memory)
     if unbriefed:
+        from test_oracle_brief_gate import record_decision_signal
+
         reason, category, names = unbriefed
         record_decision_signal(
             data,
@@ -331,10 +234,10 @@ def run(data: dict) -> str | None:
             file_count=len(names),
         )
         reports.append(
-            _brief_message(reason, repo_root, names)
+            _brief_message(reason, root, names)
             + f"\n\n{_ONCE}; the files above were changed through the shell."
         )
-    _save_state(state_path, state)
+    snap.write_json(memory_path, reported)
     return "\n\n".join(reports) or None
 
 
