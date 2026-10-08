@@ -82,9 +82,13 @@ def test_positive_control_a_challenged_close_with_a_passing_oracle_would_pass(wo
     {"name": "outcome-verifier", "subagent_type": "adversarial-reviewer",
      "description": "act as outcome verifier"},
     {"name": "helper", "subagent_type": "general-purpose", "description": "Outcome verifier for obwo"},
+    {"name": "review-challenger-tests", "subagent_type": "general-purpose"},
+    {"name": "challenger-reviewer", "subagent_type": "general-purpose"},
+    {"name": "outcome-verifier-review", "subagent_type": "Explore"},
 ], ids=["code-reviewer", "adversarial-reviewer", "role-only-in-the-prompt",
         "reviewer-describing-the-challenger", "negated-name", "reviewer-named-as-verifier",
-        "role-only-in-the-description"])
+        "role-only-in-the-description", "review-in-the-name", "reviewer-in-the-name",
+        "review-in-a-verifier-name"])
 def test_a_dispatch_that_is_not_a_challenger_does_not_count(world, agent):
     world.answer(42)
     world.add_bead("proj-a1")
@@ -126,11 +130,15 @@ def test_what_the_challenger_said_is_recorded(world):
     assert challenger["names_bad_implementations"] is True
 
 
-def test_a_codex_spawn_named_for_the_role_counts(world):
+@pytest.mark.parametrize("task_name, expected", [
+    ("outcome_verifier", "would-pass"),
+    ("review_challenger_output", "would-block"),
+], ids=["verifier", "reviewer-of-the-challenger"])
+def test_a_codex_spawn_counts_only_when_named_for_the_role(world, task_name, expected):
     world.answer(42)
     world.add_bead("proj-a1")
     spawn = {"hook_event_name": "PreToolUse", "tool_name": "collaborationspawn_agent",
-             "tool_input": {"task_name": "outcome_verifier", "message": "ENCRYPTEDBLOB"},
+             "tool_input": {"task_name": task_name, "message": "ENCRYPTEDBLOB"},
              "session_id": world.session, "turn_id": "t-1", "cwd": str(world.repo)}
 
     # Through the generated Codex registration, as Codex runs it.
@@ -140,7 +148,7 @@ def test_a_codex_spawn_named_for_the_role_counts(world):
     world.land("bd close proj-a1")
 
     (rec,) = world.wait_final()
-    assert rec["decision"] == "would-pass", rec
+    assert rec["decision"] == expected, rec
 
 
 # --- bead closes: (b) the oracle -------------------------------------------------------

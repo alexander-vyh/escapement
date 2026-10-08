@@ -1938,7 +1938,7 @@
           ],
           "fixtures": [
             "claude/hooks/tests/test_shadow_verifier.py::test_codex_close_is_recorded_and_left_alone",
-            "claude/hooks/tests/test_shadow_verifier_landings.py::test_a_codex_spawn_named_for_the_role_counts"
+            "claude/hooks/tests/test_shadow_verifier_landings.py::test_a_codex_spawn_counts_only_when_named_for_the_role"
           ]
         },
         "claude": {

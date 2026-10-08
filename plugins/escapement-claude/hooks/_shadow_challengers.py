@@ -8,7 +8,8 @@ verifier that checks the actual outcome afterwards.
 No agent type carries either role, so the role is read from the WHOLE TOKENS
 of the dispatch's identity: its name and subagent_type (Codex: task_name /
 agent_type). Never from a description or prompt: "Review the challenger's
-tests" describes a reviewer. A reviewer type never counts, whatever its name,
+tests" describes a reviewer. A review token in the type or the name means a
+reviewer, which never counts ("challenger-reviewer", "review_challenger_output"),
 and a negating token ("no-challenger-needed") disqualifies the name.
 
 Dispatches are recorded on PreToolUse (Claude `Agent`, Codex spawn_agent, Pi's
@@ -29,6 +30,9 @@ from pathlib import Path
 
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
 _NEGATIONS = frozenset({"no", "not", "non", "without", "skip", "skipped", "never"})
+# A dispatch whose type OR name says review is a reviewer, whatever else it says:
+# "review-challenger-tests" reviews the challenger, it is not one.
+_REVIEW_TOKENS = frozenset({"review", "reviews", "reviewer", "reviewers", "reviewing", "reviewed"})
 _BAD_IMPLEMENTATIONS_RE = re.compile(
     r"\b(?:bad|wrong|cheap|plausible|fragile|invalid)\b[\w\s,-]{0,30}\bimplementations?\b"
     r"|\bmutants?\b", re.IGNORECASE)
@@ -51,7 +55,7 @@ def _tokens(value: object) -> list[str]:
 
 
 def _role(dispatch: dict) -> str | None:
-    if "reviewer" in _tokens(dispatch.get("subagent_type")):
+    if any(_REVIEW_TOKENS & set(_tokens(dispatch.get(field))) for field in _IDENTITY_FIELDS):
         return None
     for field in _IDENTITY_FIELDS:
         tokens = _tokens(dispatch.get(field))

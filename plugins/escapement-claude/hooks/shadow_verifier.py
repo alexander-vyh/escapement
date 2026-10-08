@@ -163,7 +163,8 @@ def _hook(data: object) -> None:
             _record("inconclusive", "uncommitted changes at close: the landed commit is not the work",
                     evidence)
         else:
-            _spawn_runner({"repo_root": repo_root, "common_dir": common_dir, "evidence": evidence})
+            _spawn_runner({"repo_root": repo_root, "common_dir": common_dir, "evidence": evidence},
+                          deadline)
 
 
 def _use_root_beads(common_dir: Path) -> None:
@@ -176,13 +177,14 @@ def _use_root_beads(common_dir: Path) -> None:
         os.environ["BEADS_DIR"] = str(beads)
 
 
-def _spawn_runner(job: dict) -> None:
+def _spawn_runner(job: dict, deadline: float) -> None:
     runner = subprocess.Popen(
         [sys.executable, "-B", str(Path(__file__).resolve()), "--runner", json.dumps(job)],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         cwd=job["repo_root"], start_new_session=True, close_fds=True,
     )
-    runner.wait(timeout=sync_seconds())  # it forks and exits at once
+    # It forks and exits at once; every landing shares the hook's one sync limit.
+    runner.wait(timeout=max(_remaining(deadline), 0.5))
 
 
 # --- the runner: judge the landed commit within the budget, write the verdict ---------
