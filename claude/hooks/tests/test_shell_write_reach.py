@@ -303,15 +303,38 @@ def test_an_unsearchable_parent_does_not_hide_the_repository_above_it(repo, monk
 
 
 def test_a_bare_slash_is_not_a_path_token():
-    assert snap._PATH_TOKEN.findall("a / b // c src/x.py") == ["src/x.py"]
+    assert snap.path_tokens("a / b // c src/x.py") == ["src/x.py"]
 
 
-def test_untracked_dirs_is_quiet_when_no_dirty_path_could_be_inside_one(repo, env):
-    """A large tree whose untracked directories hold nothing this call touched:
-    the tracked change is named and no `untracked-dirs` blind is recorded."""
-    (repo / "newpkg").mkdir()
+def _large_with_untracked_pkg(repo: Path, env: dict) -> dict:
+    (repo / "newpkg" / "sub").mkdir(parents=True)
     (repo / "newpkg" / "old.py").write_text("O = 1\n")
-    env = dict(env, ESCAPEMENT_SHELL_WRITE_LARGE_INDEX="1")
-    reason = _feedback(Shell(repo, env).bash("echo 'X = 1' >> src/app.py"))
-    assert "src/app.py" in reason
-    assert not _blind(env, "untracked-dirs"), signals(env)
+    (repo / "newpkg" / "sub" / "mod.py").write_text("M = 1\n")
+    return dict(env, ESCAPEMENT_SHELL_WRITE_LARGE_INDEX="1")
+
+
+def test_an_overwrite_inside_an_untracked_directory_of_a_large_tree_is_flagged(repo, env):
+    """Overwriting a file leaves its directory's mtime alone: still a blind spot."""
+    env = _large_with_untracked_pkg(repo, env)
+    Shell(repo, env).bash("echo 'O = 2' > newpkg/old.py")
+    assert _blind(env, "untracked-dirs"), signals(env)
+
+
+def test_a_write_in_an_existing_untracked_subdirectory_is_flagged(repo, env):
+    env = _large_with_untracked_pkg(repo, env)
+    Shell(repo, env).bash("echo 'M = 2' > newpkg/sub/mod2.py")
+    assert _blind(env, "untracked-dirs"), signals(env)
+
+
+def test_an_unconfirmed_cwd_repository_records_unconfirmed(repo, env):
+    """git refuses the cwd's own repository (safe.directory): not silent."""
+    env = dict(env, GIT_TEST_ASSUME_DIFFERENT_OWNER="1")
+    Shell(repo / "src", env).bash("echo 'V = 3' > app.py")
+    assert _blind(env, "unconfirmed"), signals(env)
+
+
+def test_a_huge_command_is_capped_not_scanned(repo, env):
+    started = time.monotonic()
+    repos, capped = snap.named_repos("/" * 40000 + " src/app.py", str(repo))
+    assert capped, "a command past the scan limit must record token-cap"
+    assert time.monotonic() - started < 3, "the token scan must not run away on a long command"

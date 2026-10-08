@@ -61,8 +61,17 @@ LARGE_INDEX = 8 * 1024 * 1024
 # most this many path tokens; past either cap the gate records a blind signal.
 MAX_REPOS = 6
 MAX_TOKENS = 64
-# A token with a `/` and at least one other character: a bare `/` names nothing.
-_PATH_TOKEN = re.compile(r"(?=[^\s'\"`<>|;&()=]*[^\s'\"`<>|;&()=/])[^\s'\"`<>|;&()=]*/[^\s'\"`<>|;&()=]*")
+# Only this much of a command is scanned for path tokens (the token regex is
+# not linear on a long run of slashes); past it the gate records token-cap.
+MAX_SCAN = 16 * 1024
+# Shell words are runs between these; a path token is one with a `/` and at
+# least one other character (a bare `/` names nothing). A split, not a
+# lookahead regex: the scan stays linear on a long run of slashes.
+_WORD_BREAK = re.compile(r"[\s'\"`<>|;&()=]+")
+
+
+def path_tokens(text: str) -> list[str]:
+    return [word for word in _WORD_BREAK.split(text) if "/" in word and word.strip("/")]
 # The reflog subject of a commit this call made. Anything else moved HEAD for
 # someone else's reasons: pull, merge, rebase, reset, checkout.
 _COMMIT_SUBJECT = re.compile(r"commit(?: \((?:amend|initial)\))?: ")
@@ -101,7 +110,8 @@ def named_repos(command: str, cwd: str) -> tuple[list[Path], bool]:
     """(working trees a path in `command` points into, found on disk without
     git; whether path tokens past MAX_TOKENS went unread)."""
     found: dict[str, Path] = {}
-    tokens = list(dict.fromkeys(_PATH_TOKEN.findall(command) + _quoted_paths(command)))
+    scanned = command[:MAX_SCAN]
+    tokens = list(dict.fromkeys(path_tokens(scanned) + _quoted_paths(scanned)))
     for token in tokens[:MAX_TOKENS]:
         try:
             path = Path(os.path.expanduser(token))
@@ -109,16 +119,23 @@ def named_repos(command: str, cwd: str) -> tuple[list[Path], bool]:
             path = path.resolve(strict=False)
         except (OSError, RuntimeError, ValueError):
             continue
-        for directory in (path, *path.parents):
-            try:
-                # Python 3.9 raises PermissionError under an unsearchable directory;
-                # the walk goes on to the directories above it.
-                if (directory / ".git").exists():
-                    found.setdefault(str(directory), directory)
-                    break
-            except OSError:
-                continue
-    return list(found.values()), len(tokens) > MAX_TOKENS
+        directory = disk_repo(path)
+        if directory is not None:
+            found.setdefault(str(directory), directory)
+    return list(found.values()), len(tokens) > MAX_TOKENS or len(command) > MAX_SCAN
+
+
+def disk_repo(path: Path) -> Path | None:
+    """The nearest directory at or above `path` holding a `.git`, without git."""
+    for directory in (path, *path.parents):
+        try:
+            # Python 3.9 raises PermissionError under an unsearchable directory;
+            # the walk goes on to the directories above it.
+            if (directory / ".git").exists():
+                return directory
+        except OSError:
+            continue
+    return None
 
 
 def _quoted_paths(command: str) -> list[str]:
@@ -161,13 +178,6 @@ def _dirty(budget: Budget, root: Path) -> tuple[list[str], list[str]] | None:
             next(entries, None)  # the rename's source path (staged, or an intent-to-add rename)
     dirs = [name for name in names if name.endswith("/")]
     return [name for name in names if (root / name).is_file()], dirs
-
-
-def _dir_print(path: Path) -> int:
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return -1
 
 
 def fingerprint(path: Path, method: str) -> str:
@@ -230,9 +240,7 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
         "files": files,
     }
     if untracked_dirs:
-        # Each directory's own mtime: it moves when an entry is added, removed
-        # or renamed in it, which is cheap to see; an in-place edit deeper in is not.
-        taken["untracked_dirs"] = {name: _dir_print(root / name) for name in untracked_dirs}
+        taken["untracked_dirs"] = untracked_dirs
     return taken
 
 

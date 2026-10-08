@@ -73,9 +73,11 @@ named repository git cannot confirm (timeout, safe.directory) records
 `unconfirmed`. Past 64 path tokens (`token-cap`) or 6
 repositories (`repo-cap`) the rest are not watched, and a named repository
 that cannot be snapshotted records its own blind. In a tree past
-_shell_snapshot.LARGE_INDEX, files inside untracked directories are not seen;
-an entry added, removed or renamed directly in one records `untracked-dirs`,
-an in-place edit deeper inside records nothing. An after-half whose snapshot is gone -- never taken, or
+_shell_snapshot.LARGE_INDEX, files inside untracked directories are not seen,
+and every call in such a tree records `untracked-dirs`. A path quoted inside
+another quoted string (`bash -c "... '/a b/x.py'"`, a `python -c` open) with a
+space in it is split on the space and not watched. Only the first 16k
+characters of a command are scanned for paths (`token-cap` past that). An after-half whose snapshot is gone -- never taken, or
 swept as an hour-old orphan -- records `no-pending`.
 
 Exit codes:
@@ -252,6 +254,9 @@ def _before_half(data: dict, budget, session_dir: Path, call_id: str, started: f
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     roots = [root] if root is not None else []
     unconfirmed = 0
+    if root is None and isinstance(cwd, str) and cwd and snap.disk_repo(Path(cwd)) is not None:
+        unconfirmed += 1
+        _blind("unconfirmed")  # a .git is there, but git would not say (safe.directory, timeout)
     if isinstance(command, str) and isinstance(cwd, str) and cwd:
         named_repos, token_cap = snap.named_repos(command, cwd)
         if token_cap:
@@ -308,8 +313,8 @@ def _after_half(data: dict, budget, root: Path, before: dict, primary: Path,
         _blind("out-of-time")  # a file the budget left no time to check
     if unreadable:
         _blind("unreadable")  # a dirty file that cannot be read, before or after
-    if (after.get("untracked_dirs") or {}) != (before.get("untracked_dirs") or {}):
-        _blind("untracked-dirs")  # a large tree: something in an untracked directory moved
+    if after.get("untracked_dirs"):
+        _blind("untracked-dirs")  # a large tree: files in untracked directories are not listed
     if not written:
         return ""
     changed = list(after["files"]) + committed
