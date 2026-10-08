@@ -326,10 +326,14 @@ def test_a_write_in_an_existing_untracked_subdirectory_is_flagged(repo, env):
     assert _blind(env, "untracked-dirs"), signals(env)
 
 
-def test_an_unconfirmed_cwd_repository_records_unconfirmed(repo, env):
-    """git refuses the cwd's own repository (safe.directory): not silent."""
-    env = dict(env, GIT_TEST_ASSUME_DIFFERENT_OWNER="1")
-    Shell(repo / "src", env).bash("echo 'V = 3' > app.py")
+def test_an_unconfirmed_cwd_repository_records_unconfirmed(env, tmp_path):
+    """A `.git` is on disk but git will not confirm it -- a broken gitdir here;
+    safe.directory and a timeout take the same path. Not silent. (The
+    safe.directory form is not used: CI runners trust every directory.)"""
+    broken = tmp_path / "broken"
+    (broken / "src").mkdir(parents=True)
+    (broken / ".git").write_text("gitdir: /nonexistent/gitdir\n")
+    Shell(broken / "src", env).bash("echo 'V = 3' > app.py")
     assert _blind(env, "unconfirmed"), signals(env)
 
 
