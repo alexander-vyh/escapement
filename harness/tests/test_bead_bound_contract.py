@@ -61,6 +61,17 @@ Wrong implementations these tests reject
 - "owed refreeze clobbers the active contract": retiring a non-active owed oracle
   replaces the active bead's contract or leaves the debt in place
   (test_owed_bead_retired_by_recorded_refreeze).
+- "one bd outage unbinds the bead": the claim-time lookup fails, the freeze is
+  never retried, and the agent declares its own exam
+  (test_bd_down_at_claim_freezes_once_bd_recovers).
+- "proof outlives a later red run": the oracle passes, then fails, and the bead is
+  closed — the stale proof must not release it (test_red_run_after_proof_unproves).
+- "proof outlives a stronger rewrite": the oracle is rewritten after it passed and
+  the bead closed (test_rewrite_after_proof_is_not_released).
+- "mark_proven is an API": calling it directly on a red contract records proof
+  (test_mark_proven_directly_on_red_contract_records_nothing).
+- "whitespace-equal is equal": a forged command differing only by Unicode
+  whitespace from the oracle verifies (test_unicode_whitespace_forgery_rejected).
 - "a subagent's claim rebinds the parent": a subagent sharing the parent's
   thread dir claims a child bead and replaces the parent's contract
   (test_subagent_claim_does_not_rebind_parent).
@@ -88,6 +99,9 @@ FAKE_BD = textwrap.dedent(
     import json, os, pathlib, sys
     store = pathlib.Path(os.environ["FAKE_BD_STORE"])
     args = sys.argv[1:]
+    if (store / "_down").exists():
+        sys.stderr.write("bd: database unavailable\\n")
+        sys.exit(1)
     if args[:1] == ["show"] and len(args) >= 2:
         path = store / (args[1] + ".json")
         if not path.exists():
@@ -535,4 +549,89 @@ def test_owed_bead_retired_by_recorded_refreeze(s: Session) -> None:
     assert s.verify().returncode == 0, "A's debt is retired"
     out = _stop_raw(s)
     assert "decision" not in out
-    assert "bd-a" in out.get("systemMessage", "") and "test -f done-a" in out["systemMessage"]
+    note = out.get("systemMessage", "")
+    assert "bd-a" in note and "test -f done-a" in note and "never passed" in note, out
+
+
+def test_bd_down_at_claim_freezes_once_bd_recovers(s: Session) -> None:
+    """Re-review B1 repro: claim while bd is down, bd recovers, re-claim, declare."""
+    s.bead("bd-a", "test -f done-a")
+    (s.store / "_down").write_text("")
+    r = s._run([sys.executable, str(BIN / "task_mode_entry.py")], json.dumps({
+        "session_id": SESSION, "hook_event_name": "PostToolUse", "tool_name": "Bash",
+        "tool_input": {"command": "bd update bd-a --claim"},
+        "tool_response": {"interrupted": False, "stdout": "", "stderr": ""}}))
+    assert "bd-a" in r.stderr, "a failed claim-time freeze must be visible"
+    assert s.declare("test -d .").returncode != 0, "no self-declared exam while the oracle is unknown"
+
+    (s.store / "_down").unlink()
+    s.claim("bd-a")
+    assert s.contract()["verification_command"] == "test -f done-a"
+    assert s.declare("test -d .").returncode != 0
+    assert s.verify().returncode != 0
+    s.close("bd-a")
+    assert _blocked(s.stop())
+
+
+def test_bd_recovery_freezes_lazily_without_reclaim(s: Session) -> None:
+    """The freeze also happens on the next check once bd is readable."""
+    s.bead("bd-a", "test -f done-a")
+    (s.store / "_down").write_text("")
+    s.claim("bd-a")
+    (s.store / "_down").unlink()
+    assert s.declare("test -d .").returncode != 0
+    (s.thread / "contract.json").write_text(json.dumps({
+        "goal": "g", "verification_command": "test -d .", "expected_exit": 0,
+        "source": "agent-declared", "created_at": "2999-01-01T00:00:00+00:00"}))
+    assert s.verify().returncode != 0
+    s.close("bd-a")
+    assert _blocked(s.stop())
+
+
+def test_red_run_after_proof_unproves(s: Session) -> None:
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    (s.work / "done-a").write_text("x")
+    assert s.verify().returncode == 0
+    (s.work / "done-a").unlink()
+    assert s.verify().returncode != 0
+    s.close("bd-a")
+    assert s.declare("test -d .").returncode != 0
+    assert _blocked(s.stop())
+
+
+def test_rewrite_after_proof_is_not_released(s: Session) -> None:
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    (s.work / "done-a").write_text("x")
+    assert s.verify().returncode == 0
+    s.bead("bd-a", "test -f done-a && test -f stronger")  # oracle tightened after proof
+    s.close("bd-a")
+    assert s.declare("test -d .").returncode != 0
+    assert _blocked(s.stop())
+
+
+def test_mark_proven_directly_on_red_contract_records_nothing(s: Session) -> None:
+    """Proof is a fact about a green run, not something a caller can assert."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    assert s.verify().returncode != 0
+    r = s._run([sys.executable, "-c", (
+        "import json,sys; sys.path.insert(0, %r); import derive_contract as d; "
+        "d.mark_proven(%r, json.load(open(%r)))"
+    ) % (str(BIN), str(s.thread), str(s.thread / "contract.json"))])
+    assert r.returncode == 0, r.stderr  # the call itself ran
+    active = json.loads((s.thread / "active_bead.json").read_text())
+    assert not active.get("proven"), active
+
+
+def test_unicode_whitespace_forgery_rejected(s: Session) -> None:
+    """A command equal to the oracle only after .strip() is a different command."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    forged = dict(s.contract(), verification_command="test -f done-a\u00a0")
+    (s.thread / "contract.json").write_text(json.dumps(forged))
+    (s.work / "done-a\u00a0").write_text("x")  # satisfies the forgery, not the outcome
+    assert s.verify().returncode != 0
+    s.close("bd-a")
+    assert _blocked(s.stop())

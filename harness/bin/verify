@@ -21,7 +21,7 @@ CONTRACT="$THREAD_DIR/contract.json"
 
 if [[ ! -f "$CONTRACT" ]]; then
   echo "verify: no contract.json at $CONTRACT" >&2
-  echo "verify: declare a contract first (e.g. via init_contract.py)" >&2
+  echo "verify: declare a contract first: derive_contract.py --bead <id> for a claimed bead with a verify oracle, otherwise init_contract.py" >&2
   exit 2
 fi
 
@@ -92,18 +92,16 @@ c["runs"] = history[-MAX_RUNS:]
 with open(path, "w") as f:
     json.dump(c, f, indent=2)
 
-# escapement-l9lo: the ONLY way a claimed bead's oracle becomes proven is this
-# run passing — never a separate command an agent could call on a red oracle.
-if exit_code == c.get("expected_exit", 0):
-    sys.path.insert(0, script_dir)
-    try:
-        from verify_integrity import is_suppressed_verification
-        from derive_contract import mark_proven
+# escapement-l9lo: record what this run says about a claimed bead's oracle.
+# mark_proven derives proof from the last_run just written (fresh, passing,
+# unsuppressed, exactly the frozen command); a red run clears earlier proof.
+sys.path.insert(0, script_dir)
+try:
+    from derive_contract import mark_proven
 
-        if not is_suppressed_verification(c.get("verification_command", "")):
-            mark_proven(thread_dir, c)
-    except Exception as exc:  # noqa: BLE001 — a failed mark leaves the oracle unproven
-        print(f"verify: could not record the bead oracle as proven: {exc}", file=sys.stderr)
+    mark_proven(thread_dir, c)
+except Exception as exc:  # noqa: BLE001 — a failed mark leaves the oracle unproven
+    print(f"verify: could not record the bead oracle's result: {exc}", file=sys.stderr)
 PY
 
 cat "$TMP_OUT"

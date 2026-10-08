@@ -55,6 +55,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from init_contract import (  # noqa: E402
@@ -154,8 +155,9 @@ def _read_json(path: pathlib.Path) -> "dict | None":
 
 
 def _write_json(path: pathlib.Path, value: dict) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2))
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+        json.dump(value, f, indent=2)
     os.replace(tmp, path)
 
 
@@ -204,6 +206,8 @@ def bind_claimed_bead(
     thread_dir = pathlib.Path(thread_dir)
     previous = _read_json(thread_dir / ACTIVE_BEAD) or {}
     if previous.get("bead_id") == bead_id:
+        if previous.get("freeze_pending"):
+            _settle_pending(thread_dir, fetch, session_id=session_id)
         return
     frozen = dict(previous.get("frozen") or {})
     owed = dict(previous.get("owed") or {})
@@ -223,22 +227,49 @@ def bind_claimed_bead(
         "owed": owed,
         "refreezes": list(previous.get("refreezes") or []),
     }
+    _write_json(thread_dir / ACTIVE_BEAD, dict(record, freeze_pending=True))
+    if not _settle_pending(thread_dir, fetch, session_id=session_id):
+        print(
+            f"derive_contract: could not read bead {bead_id} at claim, so its ```verify "
+            "oracle is not frozen yet. It will be frozen on the next check once bd answers; "
+            "until then no agent-declared contract is accepted for it.",
+            file=sys.stderr,
+        )
+
+
+def _settle_pending(thread_dir: pathlib.Path, fetch=None, *, session_id=None) -> bool:
+    """Freeze the active bead's oracle if the claim-time lookup could not.
+
+    One bd timeout at claim must not unbind the bead for the session, so the
+    freeze is retried on re-claim and lazily on every check. Returns False only
+    while the bead is still unreadable.
+    """
+    path = pathlib.Path(thread_dir) / ACTIVE_BEAD
+    active = _read_json(path)
+    if not active or not active.get("freeze_pending"):
+        return True
+    bead_id = active["bead_id"]
+    bead = _fetch_or_none(fetch or fetch_bead, bead_id)
+    if bead is None:
+        return False
+    record = dict(active, freeze_pending=False)
     contract = None
-    bead = _fetch_or_none(fetch, bead_id)
-    if bead is not None:
-        try:
-            contract = derive_contract(bead, session_id=session_id)
-        except OracleNotDeclared:
-            contract = None
+    try:
+        contract = derive_contract(bead, session_id=session_id)
+    except OracleNotDeclared:
+        contract = None
     if contract is not None:
-        if record["acceptance_sha256"] in (None, contract["acceptance_sha256"]):
+        frozen = dict(record.get("frozen") or {})
+        if record.get("acceptance_sha256") in (None, contract["acceptance_sha256"]):
             record["acceptance_sha256"] = frozen[bead_id] = contract["acceptance_sha256"]
             record["command"] = contract["verification_command"]
+            record["frozen"] = frozen
         else:
             contract = None  # rewritten since its first freeze: binding_problem reports it
-    _write_json(thread_dir / ACTIVE_BEAD, record)
+    _write_json(path, record)
     if contract is not None:
-        _write_json(thread_dir / "contract.json", contract)
+        _write_json(pathlib.Path(thread_dir) / "contract.json", contract)
+    return True
 
 
 def _refrozen(active: dict, bead_id: str, sha: "str | None", command: "str | None") -> dict:
@@ -278,10 +309,12 @@ def _declared_after_claim(contract: dict, active: dict) -> bool:
 
 
 def mark_proven(thread_dir: pathlib.Path, contract, *, fetch=None) -> None:
-    """After a green verify: the active bead's frozen oracle has passed.
+    """Record what the contract's LAST RUN says about the active bead's oracle.
 
-    Only when the bead is readable and the contract that ran is exactly its frozen
-    oracle — a lookup that fails (bd down, wrong cwd) proves nothing.
+    Proof is a fact about a run, not a claim a caller makes: `proven` becomes true
+    only when the contract's own last_run is a fresh, unsuppressed pass (the same
+    test the Stop gate applies) of exactly the frozen command, against a readable
+    bead. Any other run of the bound oracle — a red one included — clears it.
     """
     path = pathlib.Path(thread_dir) / ACTIVE_BEAD
     active = _read_json(path)
@@ -290,17 +323,27 @@ def mark_proven(thread_dir: pathlib.Path, contract, *, fetch=None) -> None:
         and isinstance(contract, dict)
         and active.get("acceptance_sha256")
         and contract.get("bead_id") == active.get("bead_id")
-        and contract.get("acceptance_sha256") == active["acceptance_sha256"]
-        and contract.get("expected_exit", 0) == 0
     ):
         return
+    from would_block_stop import _verification_passed_this_turn  # local: import cycle
+
     bead = _fetch_or_none(fetch or fetch_bead, active["bead_id"])
-    if bead is None or acceptance_sha256(bead) != active["acceptance_sha256"]:
-        return
-    oracle = extract_verify_oracle(bead.get("acceptance_criteria") or bead.get("acceptance"))
-    if oracle != (contract.get("verification_command") or "").strip():
-        return
-    _write_json(path, dict(active, proven=True))
+    oracle = extract_verify_oracle(
+        (bead or {}).get("acceptance_criteria") or (bead or {}).get("acceptance")
+    )
+    proven = (
+        _verification_passed_this_turn(contract)
+        and contract.get("expected_exit", 0) == 0
+        and contract.get("acceptance_sha256") == active["acceptance_sha256"]
+        and contract.get("verification_command") == active.get("command")
+        and bead is not None
+        and acceptance_sha256(bead) == active["acceptance_sha256"]
+        and oracle == contract.get("verification_command")
+    )
+    if proven:
+        _write_json(path, dict(active, proven=True, proven_sha256=active["acceptance_sha256"]))
+    elif active.get("proven"):
+        _write_json(path, dict(active, proven=False, proven_sha256=None))
 
 
 def refreeze_notice(thread_dir: pathlib.Path) -> "str | None":
@@ -314,16 +357,19 @@ def refreeze_notice(thread_dir: pathlib.Path) -> "str | None":
     if not fresh:
         return None
     parts = [
-        f"{entry.get('bead_id', '?')}: `{entry.get('from_command')}` -> "
-        f"`{entry.get('to_command') or ('(retired while not active)' if entry.get('retired_while_inactive') else '(oracle removed; agent-declared contract)')}`"
+        f"{entry.get('bead_id', '?')}: `{entry.get('from_command')}` abandoned unproven "
+        "(never passed)"
+        if entry.get("retired_while_inactive")
+        else f"{entry.get('bead_id', '?')}: `{entry.get('from_command')}` -> "
+        f"`{entry.get('to_command') or '(oracle removed; agent-declared contract)'}`"
         for entry in fresh
     ]
     for entry in fresh:
         entry["reported"] = True
     _write_json(path, dict(active, refreezes=log))
     return (
-        "continuation-harness: a bead's frozen oracle was replaced by --refreeze this "
-        "session — " + "; ".join(parts) + ". Check that the new oracle still proves the outcome."
+        "continuation-harness: a bead's frozen oracle was changed by --refreeze this "
+        "session — " + "; ".join(parts) + ". Check that this still proves the outcome."
     )
 
 
@@ -331,13 +377,23 @@ def _released(active: dict, bead: "dict | None") -> bool:
     """A closed bead whose frozen oracle passed has done its job; what follows is
     unclaimed work the agent may declare for. Closing it unproven releases nothing,
     or one tracker action would hand the agent back its own exam."""
-    return bool(active.get("proven")) and bead is not None and bead.get("status") == "closed"
+    return (
+        bool(active.get("proven"))
+        and bead is not None
+        and bead.get("status") == "closed"
+        # a rewrite after the proof (even to a stronger oracle) is unproven
+        and acceptance_sha256(bead) == active.get("proven_sha256")
+    )
 
 
 def oracle_in_force(thread_dir: pathlib.Path, *, fetch=None) -> "str | None":
-    """The active bead whose frozen oracle IS the contract, or None."""
+    """The active bead whose frozen oracle IS the contract (or whose oracle is not
+    known yet because bd was unreadable at claim), or None."""
+    _settle_pending(thread_dir, fetch)
     active = _read_json(pathlib.Path(thread_dir) / ACTIVE_BEAD) or {}
     active_id = active.get("bead_id")
+    if active_id and active.get("freeze_pending"):
+        return active_id
     if not active_id or not active.get("acceptance_sha256"):
         return None
     if _released(active, _fetch_or_none(fetch or fetch_bead, active_id)):
@@ -354,11 +410,19 @@ def binding_problem(contract, thread_dir: pathlib.Path, *, fetch=None) -> "str |
     if not isinstance(contract, dict):
         return None
     fetch = fetch or fetch_bead
+    _settle_pending(thread_dir, fetch)
     active = _read_json(pathlib.Path(thread_dir) / ACTIVE_BEAD) or {}
     active_id = active.get("bead_id")
     frozen = active.get("acceptance_sha256")
     bound_id = contract.get("bead_id")
-    command = (contract.get("verification_command") or "").strip()
+    command = contract.get("verification_command") or ""  # raw: no whitespace laundering
+
+    if active.get("freeze_pending"):
+        return (
+            f"bead {active_id}'s ```verify oracle could not be read when it was claimed "
+            "(bd unavailable), so nothing can stand in for it yet. Retry once bd answers: "
+            f"`derive_contract.py --bead {active_id}`."
+        )
 
     owed = active.get("owed") or {}
     if owed:
@@ -529,11 +593,12 @@ def main(argv: list[str], _fetch=fetch_bead) -> int:
         contract["refrozen_from"] = frozen
         _write_json(active_path, _refrozen(active, args.bead, sha, contract["verification_command"]))
     elif is_active and not frozen:
-        # A bead that gained an oracle after its claim now owns the contract too.
+        # A bead that gained an oracle after its claim (or whose claim-time lookup
+        # failed) now owns the contract too.
         frozen_map = dict(active.get("frozen") or {}, **{args.bead: sha})
         _write_json(active_path, dict(
             active, acceptance_sha256=sha, command=contract["verification_command"],
-            frozen=frozen_map, proven=False))
+            frozen=frozen_map, proven=False, freeze_pending=False))
 
     out = thread_dir / "contract.json"
     _write_json(out, contract)

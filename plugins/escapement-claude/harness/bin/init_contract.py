@@ -190,7 +190,8 @@ def main(argv: list[str]) -> int:
     bound_bead = oracle_in_force(thread_dir)
     if bound_bead:
         print(
-            f"refusing to write contract: active bead {bound_bead} declares its "
+            f"refusing to write contract: active bead {bound_bead} declares (or may declare, "
+            "if bd was unreadable at claim) its "
             "own ```verify oracle, which is this session's contract. Change the oracle on "
             "the bead by explicit decision (then derive_contract.py --bead <id> --refreeze), "
             "or claim the bead this work belongs to.",

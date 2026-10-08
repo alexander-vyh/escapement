@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1318 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1324 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -1044,6 +1044,7 @@ def main() -> int:
             "was_correct": None,
             "notes": "universal_override",
         })
+        _emit_allow_notice(thread_dir)
         return 0
 
     # The delegated adapter owns trusted exact-session context loading. Existing
@@ -1142,6 +1143,7 @@ def main() -> int:
                 "was_correct": None,
                 "notes": "scope_wakeup_pause",
             })
+            _emit_allow_notice(thread_dir)
             return 0
         decision, reason = _check_task_mode_queue(session_mode)
         _log_incident({
@@ -1290,10 +1292,14 @@ def main() -> int:
         _emit_block(display, thread_dir)
         return 0
 
+    _emit_allow_notice(thread_dir)
+    return 0
+
+
+def _emit_allow_notice(thread_dir) -> None:
     notice = _refreeze_notice(thread_dir)
     if notice:
         print(json.dumps({"systemMessage": notice}))
-    return 0
 
 
 def _emit_block(display: str, thread_dir) -> None:
