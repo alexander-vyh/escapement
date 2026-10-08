@@ -1,3 +1,4 @@
+# file-complexity-waiver: pre-existing 1,662-line suite on main; split tracked in escapement-w539
 import os
 import datetime as dt
 import importlib.util
@@ -432,7 +433,10 @@ def _canonical_hook_registrations(hooks):
                 command = hook.get("command", "")
                 script_match = re.search(r"([\w.-]+\.(?:py|sh))", command)
                 identity = script_match.group(1) if script_match else command.strip()
-                registrations.append((event, matcher, identity))
+                # Arguments make a different invocation (inject_rules' --part K),
+                # so they are part of the identity; a repeated command still collides.
+                args = command[script_match.end():].strip(' "') if script_match else ""
+                registrations.append((event, matcher, identity, args) if args else (event, matcher, identity))
     return registrations
 
 
