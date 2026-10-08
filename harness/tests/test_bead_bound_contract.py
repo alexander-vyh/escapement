@@ -47,6 +47,13 @@ Wrong implementations these tests reject
   block leaves --refreeze, init_contract and close all refusing, so the session is
   stuck forever (test_oracle_removed_after_claim_recovers_via_refreeze,
   test_closed_and_rewritten_bead_recovers_only_via_refreeze).
+- "close-then-swap": close bead A while its oracle is red, claim a throwaway bead
+  with no oracle, declare `test -d .` — Stop must not be released
+  (test_close_red_then_claim_throwaway_cannot_swap_exam).
+- "silent refreeze": the agent adopts a rewritten oracle and Stop says nothing
+  (test_refreeze_is_reported_at_stop).
+- "prose edits trap verify": a typo fix in acceptance prose, with the verify
+  command unchanged, reads as a rewritten oracle (test_prose_edit_is_not_a_rewrite).
 - "a subagent's claim rebinds the parent": a subagent sharing the parent's
   thread dir claims a child bead and replaces the parent's contract
   (test_subagent_claim_does_not_rebind_parent).
@@ -179,6 +186,11 @@ def s(tmp_path: pathlib.Path) -> Session:
     return Session(tmp_path)
 
 
+def _allowed(verdict: dict | None) -> bool:
+    """Stop allowed: no output, or output with no decision (e.g. a systemMessage)."""
+    return verdict is None or (isinstance(verdict, dict) and "decision" not in verdict)
+
+
 def _blocked(verdict: dict | None) -> bool:
     return isinstance(verdict, dict) and verdict.get("decision") == "block"
 
@@ -196,7 +208,7 @@ def test_claim_freezes_bead_oracle_as_contract(s: Session) -> None:
     (s.work / "done-a").write_text("x")
     s.close("bd-a")
     assert s.verify().returncode == 0
-    assert s.stop() is None, "a green bead oracle releases Stop"
+    assert _allowed(s.stop()), "a green bead oracle releases Stop"
 
 
 def test_agent_contract_cannot_replace_bead_oracle(s: Session) -> None:
@@ -246,7 +258,7 @@ def test_acceptance_rewritten_after_claim_is_reported(s: Session) -> None:
     assert r.returncode == 0, r.stderr
     assert s.contract().get("refrozen_from")
     assert s.verify().returncode == 0
-    assert s.stop() is None
+    assert _allowed(s.stop())
 
 
 def test_bead_switch_invalidates_previous_contract(s: Session) -> None:
@@ -256,7 +268,7 @@ def test_bead_switch_invalidates_previous_contract(s: Session) -> None:
     (s.work / "done-a").write_text("x")
     s.close("bd-a")
     assert s.verify().returncode == 0
-    assert s.stop() is None  # positive control: A really was done
+    assert _allowed(s.stop())  # positive control: A really was done
 
     s.bead("bd-b", None)  # B declares no machine oracle
     s.claim("bd-b")
@@ -269,7 +281,7 @@ def test_bead_switch_invalidates_previous_contract(s: Session) -> None:
     assert s.declare("test -f done-b").returncode == 0
     (s.work / "done-b").write_text("x")
     assert s.verify().returncode == 0
-    assert s.stop() is None
+    assert _allowed(s.stop())
 
     # A third bead WITH an oracle replaces B's contract with its own.
     s.bead("bd-c", "test -f done-c")
@@ -285,7 +297,7 @@ def test_unbound_session_keeps_agent_contract(s: Session) -> None:
     assert _blocked(s.stop())
     (s.work / "done").write_text("x")
     assert s.verify().returncode == 0
-    assert s.stop() is None
+    assert _allowed(s.stop())
 
 
 def test_reclaim_after_detour_cannot_launder_rewrite(s: Session) -> None:
@@ -327,7 +339,7 @@ def test_closed_bead_releases_its_oracle(s: Session) -> None:
     assert s.verify().returncode != 0, "the re-declared contract, not A's, is what runs"
     (s.work / "done-next").write_text("x")
     assert s.verify().returncode == 0
-    assert s.stop() is None
+    assert _allowed(s.stop())
 
 
 def test_close_with_red_oracle_still_holds(s: Session) -> None:
@@ -351,7 +363,7 @@ def test_close_with_red_oracle_still_holds(s: Session) -> None:
     assert s.derive("bd-a").returncode == 0
     (s.work / "done-a").write_text("x")
     assert s.verify().returncode == 0
-    assert s.stop() is None
+    assert _allowed(s.stop())
     assert s.declare("test -f done-next").returncode == 0
 
 
@@ -385,7 +397,7 @@ def test_oracle_removed_after_claim_recovers_via_refreeze(s: Session, rewritten)
     (s.work / "done-a2").write_text("x")
     s.close("bd-a")
     assert s.verify().returncode == 0
-    assert s.stop() is None
+    assert _allowed(s.stop())
 
 
 def test_closed_and_rewritten_bead_recovers_only_via_refreeze(s: Session) -> None:
@@ -404,7 +416,7 @@ def test_closed_and_rewritten_bead_recovers_only_via_refreeze(s: Session) -> Non
     assert _refreezes(s)[-1]["to_command"] == "test -d ."
     assert s.contract()["verification_command"] == "test -d ."
     assert s.verify().returncode == 0
-    assert s.stop() is None
+    assert _allowed(s.stop())
 
 
 def test_subagent_claim_does_not_rebind_parent(s: Session) -> None:
@@ -416,3 +428,55 @@ def test_subagent_claim_does_not_rebind_parent(s: Session) -> None:
 
     assert s.contract()["verification_command"] == "test -f done-a"
     assert s.verify().returncode != 0
+
+
+def test_close_red_then_claim_throwaway_cannot_swap_exam(s: Session) -> None:
+    """Review NO-SHIP repro: an unproven oracle stays owed across a bead switch."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    assert s.verify().returncode != 0
+    s.close("bd-a")
+    s.bead("bd-throwaway", None)
+    s.claim("bd-throwaway")
+    s.close("bd-throwaway")
+    s.declare("test -d .")
+    v = s.verify()
+    assert v.returncode != 0, "A's red oracle is still owed"
+    assert "bd-a" in (v.stdout + v.stderr)
+    assert _blocked(s.stop())
+
+    # Positive control: going back and actually proving A settles the debt.
+    s.claim("bd-a")
+    (s.work / "done-a").write_text("x")
+    assert s.verify().returncode == 0
+    assert _allowed(s.stop())
+
+
+def test_refreeze_is_reported_at_stop(s: Session) -> None:
+    """An adopted rewrite is visible at Stop, naming the old and new command."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    s.bead("bd-a", "test -d .")
+    assert s.derive("bd-a", "--refreeze").returncode == 0
+    s.close("bd-a")
+    assert s.verify().returncode == 0
+    r = s._run([sys.executable, str(BIN / "stop_hook.py")], json.dumps({
+        "session_id": SESSION, "transcript_path": "", "stop_hook_active": False}))
+    out = json.loads(r.stdout)
+    shown = out.get("systemMessage", "") + out.get("reason", "")
+    assert "test -f done-a" in shown and "test -d ." in shown, out
+    assert out.get("decision") != "block", "the report must not itself block"
+
+
+def test_prose_edit_is_not_a_rewrite(s: Session) -> None:
+    """Only the verify command is frozen; editing surrounding prose is fine."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    path = s.store / "bd-a.json"
+    bead = json.loads(path.read_text())
+    bead["acceptance_criteria"] = "Typo fixed. " + bead["acceptance_criteria"]
+    path.write_text(json.dumps(bead))
+    (s.work / "done-a").write_text("x")
+    s.close("bd-a")
+    assert s.verify().returncode == 0
+    assert _allowed(s.stop())
