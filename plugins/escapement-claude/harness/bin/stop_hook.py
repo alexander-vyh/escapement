@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1313 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1318 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -75,7 +75,8 @@ RESUMPTION_PROMPT = (
     "that wind-down is the exact failure this gate exists to prevent. Continue now with the "
     "next concrete in-scope action. The only ways to actually finish this turn: "
     "(1) run `~/.claude/harness/bin/verify` and have it exit 0 "
-    "(declare a contract via init_contract.py first if you haven't); "
+    "(with no contract yet: `derive_contract.py --bead <id>` for a claimed bead with a "
+    "```verify oracle, otherwise init_contract.py); "
     "(2) call the ScheduleWakeup tool because you are blocked on an external event. "
     "The user can release you by saying 'stop' — but do not solicit that by halting."
 )
@@ -1068,7 +1069,7 @@ def main() -> int:
             display = _TASK_MODE_DISPLAY.get(reason) or RESUMPTION_PROMPT.format(
                 reason=reason
             )
-            print(json.dumps({"decision": "block", "reason": display}))
+            _emit_block(display, thread_dir)
         return 0
 
     # Task mode: queue-drain is the session-scope stopping criterion.
@@ -1111,7 +1112,7 @@ def main() -> int:
                     display = _TASK_MODE_DISPLAY.get(task_reason) or RESUMPTION_PROMPT.format(
                         reason=task_reason
                     )
-                    print(json.dumps({"decision": "block", "reason": display}))
+                    _emit_block(display, thread_dir)
                     return 0
                 wakeup_blocker_decision, wakeup_blocker_reason = _check_wakeup_blockers(
                     session_mode, thread_dir=thread_dir
@@ -1129,7 +1130,7 @@ def main() -> int:
                         _TASK_MODE_DISPLAY.get(wakeup_blocker_reason)
                         or RESUMPTION_PROMPT.format(reason=wakeup_blocker_reason)
                     )
-                    print(json.dumps({"decision": "block", "reason": display}))
+                    _emit_block(display, thread_dir)
                     return 0
             # Tag a legacy wakeup-allow as scope_wakeup_pause so half-life review
             # can count pacing pauses. Managed execution wakes are handled above.
@@ -1153,7 +1154,7 @@ def main() -> int:
         })
         if decision == "block":
             display = _TASK_MODE_DISPLAY.get(reason) or RESUMPTION_PROMPT.format(reason=reason)
-            print(json.dumps({"decision": "block", "reason": display}))
+            _emit_block(display, thread_dir)
             return 0
         # A drained queue is TASK STATE, not completion proof (escapement-b81u).
         # This used to `return 0` unconditionally, so a scoped task-mode session
@@ -1286,17 +1287,21 @@ def main() -> int:
                 steer = None
             if steer:
                 display = display + steer
-        notice = _refreeze_notice(thread_dir)
-        if notice:
-            display = display + " " + notice
-        out = {"decision": "block", "reason": display}
-        print(json.dumps(out))
+        _emit_block(display, thread_dir)
         return 0
 
     notice = _refreeze_notice(thread_dir)
     if notice:
         print(json.dumps({"systemMessage": notice}))
     return 0
+
+
+def _emit_block(display: str, thread_dir) -> None:
+    out = {"decision": "block", "reason": display}
+    notice = _refreeze_notice(thread_dir)
+    if notice:
+        out["systemMessage"] = notice  # the human must see it, not only the agent
+    print(json.dumps(out))
 
 
 def _refreeze_notice(thread_dir) -> Optional[str]:

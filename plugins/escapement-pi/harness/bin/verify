@@ -48,11 +48,12 @@ bash -c "$VERIFICATION_COMMAND" >"$TMP_OUT" 2>&1
 ACTUAL_EXIT=$?
 TIMESTAMP="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
 
-python3 - "$CONTRACT" "$ACTUAL_EXIT" "$TIMESTAMP" "$TMP_OUT" <<'PY'
+python3 - "$CONTRACT" "$ACTUAL_EXIT" "$TIMESTAMP" "$TMP_OUT" "$SCRIPT_DIR" "$THREAD_DIR" <<'PY'
 import json
 import sys
 
 path, exit_code, timestamp, out_path = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+script_dir, thread_dir = sys.argv[5], sys.argv[6]
 
 # Keep the tail of the history bounded: a long-lived contract must not grow
 # without limit, and the recent runs are the ones that answer "is this oracle
@@ -90,6 +91,19 @@ c["runs"] = history[-MAX_RUNS:]
 
 with open(path, "w") as f:
     json.dump(c, f, indent=2)
+
+# escapement-l9lo: the ONLY way a claimed bead's oracle becomes proven is this
+# run passing — never a separate command an agent could call on a red oracle.
+if exit_code == c.get("expected_exit", 0):
+    sys.path.insert(0, script_dir)
+    try:
+        from verify_integrity import is_suppressed_verification
+        from derive_contract import mark_proven
+
+        if not is_suppressed_verification(c.get("verification_command", "")):
+            mark_proven(thread_dir, c)
+    except Exception as exc:  # noqa: BLE001 — a failed mark leaves the oracle unproven
+        print(f"verify: could not record the bead oracle as proven: {exc}", file=sys.stderr)
 PY
 
 cat "$TMP_OUT"
@@ -100,7 +114,6 @@ if [[ $ACTUAL_EXIT -eq $EXPECTED_EXIT ]]; then
   # part 2). Best-effort; never let pruning affect the verify result.
   _BRIDGE="$(cd "$(dirname "$0")" && pwd)/schedule_wakeup_bridge.py"
   [[ -f "$_BRIDGE" ]] && python3 "$_BRIDGE" --prune "$THREAD_DIR" >/dev/null 2>&1 || true
-  HARNESS_ROOT="$HARNESS_ROOT" python3 "$SCRIPT_DIR/derive_contract.py" --proven >/dev/null 2>&1 || true
   echo "verify: PASS (exit $ACTUAL_EXIT)"
   exit 0
 fi

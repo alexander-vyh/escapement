@@ -315,7 +315,7 @@ def refreeze_notice(thread_dir: pathlib.Path) -> "str | None":
         return None
     parts = [
         f"{entry.get('bead_id', '?')}: `{entry.get('from_command')}` -> "
-        f"`{entry.get('to_command') or '(oracle removed; agent-declared contract)'}`"
+        f"`{entry.get('to_command') or ('(retired while not active)' if entry.get('retired_while_inactive') else '(oracle removed; agent-declared contract)')}`"
         for entry in fresh
     ]
     for entry in fresh:
@@ -365,8 +365,9 @@ def binding_problem(contract, thread_dir: pathlib.Path, *, fetch=None) -> "str |
         names = ", ".join(sorted(owed))
         return (
             f"bead(s) {names} were left with a frozen ```verify oracle that never passed. "
-            "Re-claim each and make its oracle pass, or change it by explicit decision "
-            "(`derive_contract.py --bead <id> --refreeze`, reported at Stop)."
+            "Re-claim each (`bd update <id> --claim`) and make its oracle pass, or retire "
+            "it by explicit decision with `derive_contract.py --bead <id> --refreeze` "
+            "(reported to the user at Stop)."
         )
     if bound_id and contract.get("expected_exit", 0) != 0:
         return f"a bead-derived contract expects exit 0; this one expects {contract.get('expected_exit')}."
@@ -441,8 +442,6 @@ def main(argv: list[str], _fetch=fetch_bead) -> int:
     mode.add_argument("--bead", help="Beads issue id to derive from.")
     mode.add_argument("--check", action="store_true",
                       help="Exit 3 with the reason if the contract is not proof for the active work.")
-    mode.add_argument("--proven", action="store_true",
-                      help="Record that the active bead's frozen oracle passed (called by verify).")
     parser.add_argument("--refreeze", action="store_true",
                         help="Adopt the bead's CURRENT acceptance text after it changed since claim.")
     args = parser.parse_args(argv)
@@ -461,15 +460,40 @@ def main(argv: list[str], _fetch=fetch_bead) -> int:
             return 3
         return 0
 
-    if args.proven:
-        mark_proven(thread_dir, _read_json(thread_dir / "contract.json"))
-        return 0
-
     thread_dir.mkdir(parents=True, exist_ok=True)
     active_path = thread_dir / ACTIVE_BEAD
     active = _read_json(active_path) or {}
     is_active = active.get("bead_id") == args.bead
     frozen = active.get("acceptance_sha256") if is_active else None
+    if active.get("bead_id") and not is_active:
+        owed = dict(active.get("owed") or {})
+        if args.refreeze and args.bead in owed:
+            # Retire an owed oracle by explicit, recorded decision; the active
+            # bead's contract is untouched.
+            debt = owed.pop(args.bead)
+            bead = _fetch_or_none(_fetch, args.bead) or {}
+            oracle = extract_verify_oracle(bead.get("acceptance_criteria") or bead.get("acceptance"))
+            log = list(active.get("refreezes") or [])
+            log.append({
+                "bead_id": args.bead,
+                "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "from_sha256": debt.get("acceptance_sha256"),
+                "from_command": debt.get("command"),
+                "to_sha256": None,
+                "to_command": None,
+                "retired_while_inactive": True,
+                "current_oracle": oracle,
+            })
+            _write_json(active_path, dict(active, owed=owed, refreezes=log))
+            print(f"owed oracle of bead {args.bead} retired by explicit refreeze (reported at Stop).")
+            return 0
+        print(
+            f"refusing to derive contract: bead {args.bead} is not the active bead "
+            f"({active['bead_id']}). Claim it first (`bd update {args.bead} --claim`)"
+            + (", or retire its owed oracle with --refreeze." if args.bead in owed else "."),
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         bead = _fetch(args.bead)

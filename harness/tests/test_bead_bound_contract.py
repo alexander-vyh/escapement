@@ -54,6 +54,13 @@ Wrong implementations these tests reject
   (test_refreeze_is_reported_at_stop).
 - "prose edits trap verify": a typo fix in acceptance prose, with the verify
   command unchanged, reads as a rewritten oracle (test_prose_edit_is_not_a_rewrite).
+- "proof on request": `derive_contract.py --proven` marks a red oracle proven, then
+  close + declare releases Stop (test_proven_cannot_be_asserted_without_a_green_run).
+- "notice only the agent sees": a refreeze reported inside a block reason never
+  reaches the human (test_refreeze_notice_reaches_human_on_block).
+- "owed refreeze clobbers the active contract": retiring a non-active owed oracle
+  replaces the active bead's contract or leaves the debt in place
+  (test_owed_bead_retired_by_recorded_refreeze).
 - "a subagent's claim rebinds the parent": a subagent sharing the parent's
   thread dir claims a child bead and replaces the parent's contract
   (test_subagent_claim_does_not_rebind_parent).
@@ -480,3 +487,52 @@ def test_prose_edit_is_not_a_rewrite(s: Session) -> None:
     s.close("bd-a")
     assert s.verify().returncode == 0
     assert _allowed(s.stop())
+
+
+def _stop_raw(s: Session) -> dict:
+    r = s._run([sys.executable, str(BIN / "stop_hook.py")], json.dumps({
+        "session_id": SESSION, "transcript_path": "", "stop_hook_active": False}))
+    return json.loads(r.stdout) if r.stdout.strip() else {}
+
+
+def test_proven_cannot_be_asserted_without_a_green_run(s: Session) -> None:
+    """Re-review B1, the exact 7-step sequence: proof comes only from verify passing."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")                                  # 1
+    assert s.verify().returncode != 0                # 2
+    s._run([sys.executable, str(BIN / "derive_contract.py"), "--proven"])  # 3
+    s.close("bd-a")                                  # 4
+    s.declare("test -d .")                           # 5
+    s.verify()                                       # 6
+    assert _blocked(s.stop()), "a red oracle must not become proven on request"  # 7
+
+
+def test_refreeze_notice_reaches_human_on_block(s: Session) -> None:
+    """A refreeze notice on a blocked Stop goes to the human, not only the agent."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    s.bead("bd-a", "test -f done-a-v2")
+    assert s.derive("bd-a", "--refreeze").returncode == 0
+    out = _stop_raw(s)                               # red: blocks
+    assert out.get("decision") == "block"
+    assert "test -f done-a-v2" in out.get("systemMessage", ""), out
+
+
+def test_owed_bead_retired_by_recorded_refreeze(s: Session) -> None:
+    """The owed message's route works for a non-active bead, and is recorded."""
+    s.bead("bd-a", "test -f done-a")
+    s.claim("bd-a")
+    s.bead("bd-b", "test -f done-b")
+    s.claim("bd-b")
+    v = s.verify()
+    assert v.returncode != 0 and "bd-a" in (v.stdout + v.stderr)
+
+    assert s.derive("bd-a", "--refreeze").returncode == 0
+    assert s.contract()["verification_command"] == "test -f done-b", "B stays the contract"
+    (s.work / "done-b").write_text("x")
+    s.close("bd-b")
+    s.close("bd-a")
+    assert s.verify().returncode == 0, "A's debt is retired"
+    out = _stop_raw(s)
+    assert "decision" not in out
+    assert "bd-a" in out.get("systemMessage", "") and "test -f done-a" in out["systemMessage"]
