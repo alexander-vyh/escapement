@@ -196,6 +196,7 @@ spec_review_recovery: ❌ Missing progress reporting, extra --json flag
 followup_task(target="impl_recovery", message="Fix: remove --json, add progress reporting")
 impl_recovery: Fixed, committed
 
+# Round 2 of the review round cap (2 review rounds); leftovers -> bd create
 spawn_agent(task_name="spec_review_recovery_2", agent_type="default", fork_turns="none", message="Re-review...")
 spec_review_recovery_2: ✅ Spec compliant
 
@@ -221,8 +222,10 @@ The example uses Codex calls. On Pi the loop is identical: each `spawn_agent` be
 **For the coordinator (you):**
 
 DO NOT STOP after a task completes. Check `More tasks remain?` and KEEP GOING.
-If a reviewer finds issues, loop until they're fixed — do not report "issues found"
-and stop. If the final reviewer finds problems, dispatch agents to fix them. The
+If a reviewer finds issues, repair and re-review inside the review round cap: at
+most 2 review rounds, then file each remaining non-blocking finding with
+`bd create` (a finding that causally blocks the outcome gets one more repair
+round, then escalate). Do not report "issues found" and stop. If the final reviewer finds problems, dispatch agents to fix them. The
 process ends when ALL tasks are done AND the final review passes AND verification
 confirms the outcome end-to-end. Anything short of that is not done.
 

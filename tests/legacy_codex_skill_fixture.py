@@ -249,6 +249,30 @@ repo's own review template (the `adversarial-reviewer` agent / the
   this skill instead. Falls back to subagent-driven-development if project has no
   beads graph.""",
     ),
+    (
+        'Re-review after fixes\n   (round cap: 2 review rounds, then `bd create` the rest).',
+        'Re-review after fixes.',
+    ),
+    (
+        '(tight loop, no escalation;\n  round cap: 2 review rounds, then `bd create` the rest)',
+        '(tight loop, no escalation)',
+    ),
+    (
+        'complete without user involvement (round cap: 2 review rounds, then `bd create` the rest).',
+        'complete without user involvement.',
+    ),
+    (
+        '- **patch** → resume implementer to fix, re-review (round cap: 2 review rounds, then `bd create` the rest)\n',
+        '- **patch** → resume implementer to fix, re-review\n',
+    ),
+    (
+        'without user involvement (round cap:\n2 review rounds, then `bd create` the rest).',
+        'without user involvement.',
+    ),
+    (
+        '- Skip the re-review after fixes (it is round 2 of the round cap: 2 review rounds, then `bd create` the rest)\n',
+        '- Skip the re-review after fixes\n',
+    ),
 )
 
 
