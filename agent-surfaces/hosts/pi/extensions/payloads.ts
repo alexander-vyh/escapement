@@ -257,17 +257,17 @@ const CLAUDE_USAGE: Record<string, string> = {
 // `tool_result`, and an assistant turn's `message.usage`). Tool calls carry
 // their Claude name and input, so code-touch detection sees a Pi `write` as the
 // Write it is; usage carries Pi's cache writes as Claude's
-// cache_creation_input_tokens, which is how a heavy session is measured. Pi-only
-// roles (custom notices, `!` shell runs, summaries) are neither user nor
-// assistant speech and are left out.
+// cache_creation_input_tokens, which is how a heavy session is measured. A
+// custom notice becomes a `system` line; other Pi-only roles (`!` shell runs,
+// summaries) are neither user nor assistant speech and are left out.
 function claudeTranscript(messages: unknown[]): string {
   const lines: string[] = [];
   for (const message of messages) {
     if (!message || typeof message !== "object" || !("role" in message)) continue;
     const content = "content" in message ? message.content : undefined;
-    const at = "timestamp" in message && typeof message.timestamp === "number"
-      ? new Date(message.timestamp).toISOString()
-      : undefined;
+    const stamp = "timestamp" in message ? message.timestamp : undefined;
+    const at = typeof stamp === "number" ? new Date(stamp).toISOString()
+      : typeof stamp === "string" ? stamp : undefined;
     if (message.role === "user") {
       lines.push(JSON.stringify({
         type: "user",
@@ -302,6 +302,15 @@ function claudeTranscript(messages: unknown[]): string {
           content: blocks,
           usage,
         },
+      }));
+    } else if (message.role === "custom") {
+      // A host notice (omp's `async-result` job delivery) is neither user nor
+      // assistant speech: a Claude `system` line, which speech readers skip.
+      lines.push(JSON.stringify({
+        type: "system",
+        subtype: "customType" in message ? message.customType : undefined,
+        timestamp: at,
+        content: textOf(content),
       }));
     } else if (message.role === "toolResult") {
       lines.push(JSON.stringify({

@@ -32,7 +32,9 @@ extension({
 });
 const results = [];
 for (const call of JSON.parse(process.argv[3])) {
-  const branch = (call.branch ?? []).map((message) => ({ type: "message", message }));
+  // A message is wrapped as Pi's session entry; an entry that is not a message
+  // (an omp custom_message notice) is already one.
+  const branch = (call.branch ?? []).map((item) => (item.type ? item : { type: "message", message: item }));
   const context = {
     cwd: call.cwd,
     signal: new AbortController().signal,
@@ -135,6 +137,13 @@ class Session:
 
     def user(self, text: str) -> None:
         self.branch.append({"role": "user", "content": text, "timestamp": 1})
+
+    def notice(self, custom_type: str, text: str) -> None:
+        """A custom message entry, as omp appends an `async-result` delivery."""
+        self.branch.append({
+            "type": "custom_message", "customType": custom_type, "content": text,
+            "display": True, "timestamp": "2026-10-07T23:20:42.047Z",
+        })
 
     def say(self, text: str) -> dict:
         message = {"role": "assistant", "content": [{"type": "text", "text": text}], "stopReason": "stop", "timestamp": 2}
