@@ -168,7 +168,8 @@ def test_a_hashed_file_left_unhashed_when_time_runs_out_is_not_named(repo):
             return 0.0
 
     after = snap.take(SpentAfterGit(), repo, before)
-    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [], [])
+    # Not named, and not silently dropped either: it could not be checked.
+    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [], ["src/app.py"])
 
 
 def test_a_worktree_rename_is_parsed_as_one_path(repo):

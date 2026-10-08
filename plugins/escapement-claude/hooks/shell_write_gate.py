@@ -47,8 +47,9 @@ missing duration on Claude also
 names nothing, and records a `blind` gate signal so the blindness shows in
 telemetry. Git calls and every file hash, including re-hashing a committed
 file, share a 4s budget per half; a file left unhashed when it runs out is
-never named, and a committed file left unchecked records an `out-of-time`
-blind signal. A file past 1MB is fingerprinted by size and mtime, so a new mtime
+never named, and any file left unchecked -- unhashed, unreadable, or a
+committed file there was no time to re-hash -- records an `out-of-time` blind
+signal. A file past 1MB is fingerprinted by size and mtime, so a new mtime
 with the same size is not proof of a write: it is not named, and records a
 `stat-only` blind signal.
 
@@ -234,7 +235,7 @@ def run(data: dict) -> str | None:
     if unproven:
         _blind("stat-only")  # a large file's mtime moved, its size did not: no proof
     if out_of_time:
-        _blind("out-of-time")  # a committed file the budget left no time to check
+        _blind("out-of-time")  # a file the budget left no time to check, or unreadable
     if not written:
         return None
     changed = list(after["files"]) + committed
