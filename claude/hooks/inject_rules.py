@@ -33,7 +33,8 @@ from pathlib import Path
 
 BINDING_START = "<!-- escapement:binding:start -->"
 BINDING_END = "<!-- escapement:binding:end -->"
-# Claude Code's inline cap for one additionalContext string.
+# Claude Code's documented inline cap for one additionalContext string. Codex
+# and Pi document no cap; holding them to the same one is an assumption.
 BUDGET = 10_000
 
 

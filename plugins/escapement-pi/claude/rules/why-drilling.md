@@ -1,9 +1,5 @@
 # Why-Drilling — Depth-1 Probe (always-on)
 
-<!-- escapement:binding:start -->
-When a load-bearing why is thin — authority-shaped ("X asked for it"), a user premise no artifact confirms, or a reason that restates the request — run one inline check: is this the real, observable outcome or an unconfirmed inference? Proceed on a confirmed outcome; otherwise mark it unconfirmed, name who or what would confirm it, and proceed — do not block.
-<!-- escapement:binding:end -->
-
 When a **load-bearing why is thin**, drill it once before acting. A *why* is
 load-bearing if a decision, design, or recommendation rests on it. It is **thin**
 when it is (a) **authority-shaped** ("X asked for it", "it's a mandate",

@@ -131,47 +131,103 @@ def test_precompact_reinjects_the_same_index():
 # --- Bindings keep the rules' teeth ----------------------------------------
 
 # Every bolded prohibition in a rule body, and how its binding carries it: a
-# phrase that must appear in that rule's binding region, or a waiver saying why
-# the agent can safely meet it only on reading the full rule. A new bolded
-# prohibition fails this test until someone makes that call.
+# span of the requirement that must appear in that rule's binding region, or a
+# waiver saying why the agent can safely meet it only on reading the full rule.
+# A new bolded prohibition fails this test until someone makes that call. Where
+# only a word or two is bolded ("Do **not** pick up..."), the key is the whole
+# sentence around it.
 PROHIBITIONS: dict[tuple[str, str], tuple[str, str]] = {
     ("agent-teams-default.md", '"Roundtable" NEVER means writing simulated dialogue in your output.'):
-        ("bound", "never means simulated dialogue"),
+        ("bound", '"roundtable" never means simulated dialogue in your output'),
+    ("agent-teams-default.md", "- **Always pair** for feature/epic work with behavioral specs - **Consider pairing** for complex bug fixes where the fix could mask the root cause - **Skip pairing** for simple chores, config changes, one-liners"):
+        ("bound", "Always pair feature/epic implementation with an independent reviewing agent"),
+    ("agent-teams-default.md", "A blocked agent is not a blocked team."):
+        ("bound", "A blocked agent is not a blocked team: escalate the narrow choice"),
+    ("agent-teams-default.md", "Most research does NOT need this."):
+        ("waived", "qualifies the opt-in vocab-scout guidance; it narrows an optional "
+                   "practice and imposes nothing on the agent"),
     ("agent-teams-default.md", "Subagents do not inherit this rule."):
-        ("bound", "Subagents do not inherit"),
-    ("continuation-harness.md", 'merge and ship it live. Do NOT ask "want me to merge it now, or review the PR first?"'):
-        ("bound", "merge on green without asking"),
+        ("bound", "Subagents do not inherit these rules: put the continuation discipline in every agent prompt"),
     ("continuation-harness.md", "Attempt the merge; do not pre-judge repository authorization in conversation."):
-        ("bound", "do not pre-judge"),
+        ("bound", "Attempt the merge; do not pre-judge repository authorization"),
+    ("continuation-harness.md", "Do **not** pick up unrelated ready tasks from `bd ready` to drain the queue and satisfy the gate."):
+        ("bound", "Do not pick up unrelated `bd ready` tasks to drain the queue and satisfy the gate"),
+    ("continuation-harness.md", "On re-invocation, classify the run mechanically — do NOT do manual `ps`/file-activity forensics:"):
+        ("waived", "background-workflow watchdog procedure; only reached while running "
+                   "a watched background workflow, which sends the agent to the full rule"),
+    ("continuation-harness.md", 'The "irreversible external action" carve-out does NOT cover a merge that triggers auto-deploy.'):
+        ("bound", "The irreversible-external-action carve-out does not cover a merge that triggers auto-deploy"),
+    ("continuation-harness.md", 'merge and ship it live. Do NOT ask "want me to merge it now, or review the PR first?"'):
+        ("bound", "`auto_merge_on_green: true`, merge on green without asking"),
+    ("delicate-art-of-bureaucracy.md", "Coercion is a smell, not a strategy."):
+        ("bound", "A gate that only blocks, with no affordance to unblock, is coercive"),
+    ("delicate-art-of-bureaucracy.md", "Design intent does not survive implementation."):
+        ("waived", "an observation about how gates are experienced once shipped; it "
+                   "explains the rule rather than forbidding an action"),
+    ("gate-design.md", "Validate value, not presence."):
+        ("bound", "(3) validate value, not presence"),
     ("molecule-awareness.md", "Do NOT use `bd mol show` to find formulas"):
         ("waived", "formula-authoring procedure; only reached while creating a molecule, "
                    "a task that sends the agent to the full rule"),
+    ("molecule-awareness.md", "Scope changes are always human-driven."):
+        ("bound", "Scope changes are always human-driven: never silently change scope, specifications, or task descriptions"),
+    ("outcome-ownership.md", "Closing every child is an intermediate artifact, not the parent's outcome"):
+        ("bound", "not code that compiles, tests that pass, or children that closed"),
     ("outcome-ownership.md", "merge it and ship it live; do not ask."):
-        ("bound", "merge it and ship it live; do not ask"),
+        ("bound", "Where `.escapement/repo.json` authorizes it, merge it and ship it live; do not ask"),
     ("research-findings-persistence.md", "never the payload."):
-        ("bound", "never the payload"),
+        ("bound", "its message is a pointer to that file, never the payload"),
     ("tdd-enforcement.md", "Lint alone is forbidden as the verification for trigger / auth / deploy-gating changes."):
-        ("bound", "Lint alone is forbidden"),
+        ("bound", "Lint alone is forbidden as the verification for trigger / auth / deploy-gating changes"),
+    ("tdd-enforcement.md", "gates, not oracles"):
+        ("bound", "Lint alone is forbidden as the verification"),
+    ("tdd-enforcement.md", "structured waiver, not an exemption"):
+        ("bound", "file a structured waiver that names the post-merge observation"),
     ("why-drilling.md", "Mark it unconfirmed, name who/what would confirm it, and proceed — do not block."):
-        ("bound", "do not block"),
-    ("worktree-discipline.md", "never"):
-        ("bound", "never the isolation mechanism"),
-    ("worktree-discipline.md", "Never"):
+        ("bound", "mark it unconfirmed, name who or what would confirm it, and proceed — do not block"),
+    ("why-drilling.md", "floor, not a ceiling."):
+        ("waived", "scopes the probe (deeper drilling is opt-in elsewhere); it limits "
+                   "the rule rather than adding a requirement"),
+    ("worktree-discipline.md", "**Never** `git stash`, `git checkout`, `git clean`, or discard when the tree holds WIP you did not write — that destroys another writer's work."):
         ("bound", "never stash, checkout, clean, or discard WIP you did not write"),
+    ("worktree-discipline.md", 'Prompt-level "you own these files" lanes are merge-planning notes, **never** the isolation mechanism; compliance-based lanes have leaked in practice.'):
+        ("bound", "prompt-level file lanes are never the isolation mechanism"),
 }
-_BOLD = re.compile(r"\*\*([^*]+?)\*\*", re.S)
-_PROHIBITION = re.compile(r"\b(forbidden|never|must not|do not)\b", re.I)
+_BOLD = re.compile(r"\*\*([^*]+?)\*\*")
+_PROHIBITION = re.compile(r"\b(forbidden|never|must not|do not|does not|not|always)\b", re.I)
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+# A bound span must be long enough that gutting the requirement around a short
+# phrase ("do not block") still fails.
+MIN_BOUND_SPAN = 30
+
+
+def _prose(text: str) -> str:
+    """Rule text outside its binding region and fenced code."""
+    out, fenced = [], False
+    for line in BINDING.sub("", text).splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced:
+            out.append(line)
+    return "\n".join(out)
 
 
 def bold_prohibitions(rules: Path) -> set[tuple[str, str]]:
     found = set()
     for path in sorted(rules.glob("*.md")):
-        text = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)
-        text = BINDING.sub("", text)
-        for match in _BOLD.finditer(text):
-            phrase = " ".join(match.group(1).split())
-            if _PROHIBITION.search(phrase):
-                found.add((path.name, phrase))
+        for para in re.split(r"\n\s*\n", _prose(path.read_text(encoding="utf-8"))):
+            flat = " ".join(para.split())
+            for match in _BOLD.finditer(flat):
+                bold = match.group(1).strip()
+                if not _PROHIBITION.search(bold):
+                    continue
+                if len(bold.split()) > 2:
+                    found.add((path.name, bold))
+                    continue
+                ends = [e.end() for e in _SENTENCE_END.finditer(flat, 0, match.start())]
+                after = _SENTENCE_END.search(flat, match.end())
+                sentence = flat[ends[-1] if ends else 0:after.end() if after else len(flat)]
+                found.add((path.name, sentence.strip()))
     return found
 
 
@@ -184,6 +240,7 @@ def test_every_bold_prohibition_is_bound_or_explicitly_waived():
         if kind == "waived":
             assert len(value) >= 40, f"{name}: a waiver needs a real reason"
             continue
+        assert len(value) >= MIN_BOUND_SPAN, f"{name}: bound span too short to prove anything"
         assert value.lower() in binding_of(rules / name).lower(), (
             f"{name}: binding drops the prohibition it must carry ({value!r})"
         )

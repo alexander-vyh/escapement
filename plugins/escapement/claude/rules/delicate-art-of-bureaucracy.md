@@ -1,9 +1,5 @@
 # The Delicate Art of Bureaucracy — Global Rule
 
-<!-- escapement:binding:start -->
-Before adding or modifying any hook, gate, rule, or skill, test it against the four enabling features: repair (the practitioner can unblock themselves from the denial), internal transparency (it states its rationale and path to compliance), global transparency (its role in the workflow is discoverable), and flexibility (a reasoned waiver path that feeds back). A gate that only blocks, with no affordance to unblock, is coercive — add the affordance or remove the gate. Every rule has a half-life.
-<!-- escapement:binding:end -->
-
 This repo is a bureaucracy. The hooks, skills, gates, rules, and harnesses
 in `escapement/` are a structured set of routines that turn
 problem-solving successes into reusable practice. That is not pejorative —
@@ -37,6 +33,8 @@ When this rule conflicts with another rule, the resolution belongs in the
 discussion, not in silent suppression of one or the other. Surface the
 tension, name which design feature is being traded for which, and decide
 deliberately.
+
+<!-- escapement:detail:start -->
 
 ## The four design features (Adler & Borys, 1996)
 
@@ -107,6 +105,8 @@ Recognizing them early is the work.
   enabling-by-design is not a guaranteed cure.
   [per published abstract; full paper not accessed]
 
+
+<!-- escapement:detail:end -->
 ## Operating rules
 
 1. **Every rule has a half-life.** Annual review minimum. A rule unrevised in a year is a

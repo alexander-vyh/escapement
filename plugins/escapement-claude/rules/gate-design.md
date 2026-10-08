@@ -1,9 +1,5 @@
 # Gate Design — Resident Checklist
 
-<!-- escapement:binding:start -->
-When adding or modifying any gate, hook, denial/permission message, or waiver — or deciding to keep, revise, or retire a rule — load the `gate-design` skill and satisfy all three: (1) an escape path written into the denial itself (a redirect or `--<gate-name>-waiver "<reason>"`), never "ask the user"; (2) persistent signal for every decision; (3) validate value, not presence.
-<!-- escapement:binding:end -->
-
 The full manual (reference designs, anti-patterns, audit findings, validation
 mechanics, waiver convention, lineage) lives in the on-demand **`gate-design`
 skill**. This stub is the always-on checklist. A `PreToolUse` nudge

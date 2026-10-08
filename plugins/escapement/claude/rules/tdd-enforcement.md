@@ -1,9 +1,5 @@
 # TDD Enforcement — Global Rule
 
-<!-- escapement:binding:start -->
-For any non-trivial change, go Outcome -> Oracle -> Constraints -> Tests -> Code. Before implementation, write a Test Oracle Brief: business invariant, independent source of truth, constraints, invalid solution classes, a fragile implementation the tests must reject, negative and positive controls, missing-data handling, and final outcome verification. Tests must reject plausible bad implementations; tests that echo implementation details are not accepted. Lint alone is forbidden as the verification for trigger / auth / deploy-gating changes: observe the real behavior, or, when it cannot be reproduced locally, file a structured waiver that names the post-merge observation that will confirm it.
-<!-- escapement:binding:end -->
-
 ## Outcome -> Oracle -> Constraints -> Tests -> Code
 
 For any non-trivial implementation task, do not start implementation until the test
@@ -48,6 +44,8 @@ produce a Test Oracle Brief covering:
 
 A test plan fails review if the named fragile implementation would pass every behavioral,
 fixture, contract, architecture, and static check.
+
+<!-- escapement:detail:start -->
 
 ### Rapid form (low-blast-radius changes)
 
@@ -104,6 +102,8 @@ The fragile-implementation challenge is mandatory in both forms. The rapid form
 compresses presentation; it never drops independent truth, binding constraints,
 discriminating controls, missing-data behavior, or final user-facing proof.
 
+
+<!-- escapement:detail:end -->
 ## Implementation-Echo Tests Are Not Accepted
 
 A test is an implementation echo if it passes by repeating the same constant, algorithm,
@@ -152,12 +152,17 @@ For these, "it parses" and "it's well-formed" are **gates, not oracles**. A sche
 workflow can still suppress a deploy trigger; a valid HCL plan can still destroy the
 wrong resource. Verification owed scales with behavioral risk:
 
+<!-- escapement:detail:start -->
+
 | Rung | What it proves | Required |
 |------|----------------|----------|
 | Parse | valid syntax | gate only — never sufficient alone |
 | Schema-lint (`actionlint`, `tofu validate`, `kubeconform`) | well-formed + self-consistent; catches shellcheck / expression-context / type / ref errors | **mandatory on every behavioral-config change** |
 | Predict (`tofu plan` + deterministic JSON assertion; `kubectl apply --dry-run=server`) | the change-set this produces vs current state | required for IaC / manifest config-authoring changes |
 | Observe (`gh workflow run` + assert the downstream run started; apply-to-sandbox / terratest) | the actual behavior happened | required for trigger / auth / deploy-gating logic — the only oracle for that class |
+
+
+<!-- escapement:detail:end -->
 
 **Lint alone is forbidden as the verification for trigger / auth / deploy-gating
 changes.** A GitHub workflow whose `GITHUB_TOKEN`-authored merge silently fails to

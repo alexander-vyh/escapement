@@ -1,9 +1,5 @@
 # Planning Discipline — Global Rule
 
-<!-- escapement:binding:start -->
-When the user describes new work, dispatch it without asking which tool: in a repo with `.beads/`, pour `mol-feature` for a feature or cross-cutting change and `mol-rapid` for a bug fix or chore (no `.beads/`: `bd init` first). Check `bd mol current`, `bd list`, and `openspec/changes/` first and resume existing work. A new feature's first deliverable is the walking skeleton that tests the riskiest assumption.
-<!-- escapement:binding:end -->
-
 ## Detection and Dispatch
 
 When the user describes new work ("build X", "add X", "implement X", or similar),

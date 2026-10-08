@@ -1,9 +1,5 @@
 # continuation-harness — outcome-or-resumption gate (live)
 
-<!-- escapement:binding:start -->
-Stop gate enforcing outcome-bias over action-bias: you may Stop only when verification passed this turn (`~/.claude/harness/bin/verify` exited 0), you scheduled your own resumption (`ScheduleWakeup` for an external wait), or the user released you. A session that edited tracked code must declare an outcome (`derive_contract.py --bead <id>`, else `init_contract.py`). Done means merged and deployed live where the repo authorizes it: if `.escapement/repo.json` declares `intended_outcome` at or above `merged` and `auto_merge_on_green: true`, merge on green without asking — attempt the merge and let the merge gate decide; do not pre-judge it. With no declaration, a malformed one, or `auto_merge_on_green: false`, stop at `pr-opened`; never assume authorization a repo did not grant. A blocked action blocks only its dependents — keep independent work running.
-<!-- escapement:binding:end -->
-
 A new deterministic Stop gate runs alongside `validate_no_shirking.py`. Both can block; they are additive. The harness gate enforces **outcome-bias over action-bias**: stopping is forbidden unless you've demonstrated completion, scheduled your own resumption, or been explicitly released by the user.
 
 ## The three Stop-permission paths
@@ -34,6 +30,8 @@ ready work, and return to the decision only when it becomes the last remaining r
 The session is `input_required` only when no authorized path toward the delegated
 outcome remains runnable. Informational side questions do not cancel the active outcome;
 answer them and resume unless the user explicitly redirects or stops the work.
+
+<!-- escapement:detail:start -->
 
 ## How to declare a contract
 
@@ -156,6 +154,8 @@ A background `Workflow` run is killed at the Claude Code host's task timeout (~1
 
 The residual platform fix (the runtime emitting its own death signal / raising the timeout) is tracked outside this repo; the harness-side mitigation above turns silent stranding into a scheduled, mechanical re-check.
 
+
+<!-- escapement:detail:end -->
 ## Rule: outcome-bias
 
 If you are not done and not scheduled to return, you are not stopping. More tool
