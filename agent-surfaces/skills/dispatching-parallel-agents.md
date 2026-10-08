@@ -394,10 +394,12 @@ but that is a second line of defense. The first line is you.
 **Every agent prompt MUST include this block** (copy verbatim into the prompt):
 
 > **CONTINUATION DISCIPLINE:** DO NOT wind down prematurely. DO NOT summarize
-> remaining work and stop. If you find additional problems during your work, FIX
-> THEM — do not list them and declare done. If you hit an obstacle, investigate and
-> work around it — do not report it as a reason to stop. You are done when the
-> OUTCOME is verified end-to-end, not when you've made an attempt. Run the actual
+> remaining work and stop. If a problem stands between you and your assigned
+> outcome, fix it. Anything beyond that outcome — other beads, the rest of the
+> epic, adjacent bugs or cleanup — is not yours: report it to your lead (or
+> `bd create` it) and do not fix it. If you hit an obstacle, investigate and work
+> around it — do not report it as a reason to stop. You are done when the OUTCOME
+> is verified end-to-end, not when you've made an attempt. Run the actual
 > test/command/workflow and confirm it passes. "I believe this works" is not
 > verification — "the tests pass" is verification.
 

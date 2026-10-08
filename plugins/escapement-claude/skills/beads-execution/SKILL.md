@@ -797,12 +797,15 @@ review passes AND the outcome is verified end-to-end.
 **For every implementer prompt (append to §2b template):**
 
 > **CONTINUATION DISCIPLINE:** DO NOT wind down prematurely. DO NOT summarize
-> remaining work and stop. If you find additional problems while implementing, FIX
-> THEM. If a test fails, debug and fix it — do not report the failure as your
-> status. If you hit an obstacle, investigate and work around it. You are done when
-> your implementation works end-to-end, tests pass, and you've self-reviewed.
-> Declaring DONE without running verification is FAILURE. Run the actual
-> command/test/workflow. See the actual output. Confirm the actual result.
+> remaining work and stop. If a problem stands between you and your assigned
+> outcome, fix it. Anything beyond that outcome — other beads, the rest of the
+> epic, adjacent bugs or cleanup — is not yours: report it to your lead (or
+> `bd create` it) and do not fix it. If a test fails, debug and fix it — do not report
+> the failure as your status. If you hit an obstacle, investigate and work around
+> it. You are done when your implementation works end-to-end, tests pass, and
+> you've self-reviewed. Declaring DONE without running verification is FAILURE. Run
+> the actual command/test/workflow. See the actual output. Confirm the actual
+> result.
 
 **For every reviewer prompt (append to §2e and §2f templates):**
 
