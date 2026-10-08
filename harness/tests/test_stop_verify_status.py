@@ -13,7 +13,7 @@ Oracle
 ------
 The real entrypoints as subprocesses (init_contract.py, the `verify` script,
 stop_hook.py) against an isolated harness root and a fake `bd` whose queue holds
-one session-fresh in-progress bead. The verdict is the Stop hook's block text.
+one in-progress bead this session claimed. The verdict is the Stop hook's block text.
 
 Wrong implementations rejected
 ------------------------------
@@ -56,6 +56,8 @@ class Session:
         self.work.mkdir()
         self.thread = tmp / "thread"
         self.thread.mkdir()
+        # The queue block holds only on beads this session claimed (escapement-xcbn).
+        (self.thread / "claimed_beads.json").write_text(json.dumps({"ids": ["bd-open"]}))
         fakebin = tmp / "fakebin"
         fakebin.mkdir()
         (fakebin / "bd").write_text(FAKE_BD)

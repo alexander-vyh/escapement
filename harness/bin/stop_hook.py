@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# file-complexity-waiver: 1326 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
+# file-complexity-waiver: 1341 lines; legacy Stop adapter; task policy is isolated in execution_stop_adapter.py, and the broader responsibility split remains owned by bead e9v.7.
 """
 Claude Code Stop-hook adapter for continuation-harness.
 
@@ -652,13 +652,11 @@ def _wakeup_work_remains(
     and stop with that work abandoned (escapement-51w3; the cro-dashboard
     grain-adaptation deferral).
 
-    Reuses the SAME watermark-scoped oracle the task-mode wakeup path already trusts
-    (`_check_bd_queue_implicit`): it blocks only on beads created_at >= the session
-    watermark, so unrelated prior-session backlog does NOT trap a completed session.
-    That scope is the whole point — an unscoped `bd ready` check would block every
-    session in any repo that has a backlog. Returns (decision, reason) to block, or
-    None to allow. Deterministic and fail-open (bd unavailable / no watermark ⇒ the
-    scoped check itself returns allow ⇒ None here).
+    Reuses `_check_bd_queue_implicit`: it blocks only on beads this session claimed
+    that are still in_progress (escapement-xcbn), so other sessions' beads and
+    unclaimed follow-ups do NOT trap a completed session. Returns (decision, reason)
+    to block, or None to allow. Deterministic and fail-open (bd unavailable / no
+    claims ⇒ the check itself returns allow ⇒ None here).
     """
     if bd_check is None:
         bd_check = _check_bd_queue_implicit
@@ -780,10 +778,10 @@ def _check_wakeup_blockers(session_mode: dict, run_bd=None, thread_dir=None) -> 
 
     When a task-mode session would be released by a registered wakeup, this
     function audits every SESSION-FRESH blocked bead for a substantiated blocker
-    claim. Scoping (created_at >= the session watermark, via `thread_dir`) mirrors
-    `_check_bd_queue_implicit`: a pre-existing dependency-blocked bead from another
-    session is not this session's responsibility and must not hold the wakeup gate
-    indefinitely. Without a watermark, all blocked beads are audited (fail-safe).
+    claim. Scoping is by created_at >= the session watermark (via `thread_dir`; the
+    implicit queue check moved to claim scope in escapement-xcbn): a pre-existing
+    dependency-blocked bead from another session is not this session's responsibility
+    and must not hold the wakeup gate indefinitely. Without a watermark, all blocked beads are audited (fail-safe).
     A bead is satisfied iff it carries a `blocker-verify:` command that exits 0
     (not trivial) OR a substantive `blocker-waiver:` reason (≥20 chars, not a
     placeholder).  Any unsatisfied blocked bead yields
@@ -829,9 +827,8 @@ def _check_wakeup_blockers(session_mode: dict, run_bd=None, thread_dir=None) -> 
         # No blocked beads (or bd unavailable): nothing to verify; wakeup stands.
         return ("allow", "wakeup_no_blockers")
 
-    # Scope to session-fresh blocked beads (created_at >= watermark), matching
-    # _check_bd_queue_implicit. A pre-existing dependency-blocked bead from another
-    # session is not this session's responsibility and must not hold the wakeup gate.
+    # Scope to session-fresh blocked beads (created_at >= watermark). A pre-existing
+    # dependency-blocked bead from another session is not this session's responsibility and must not hold the wakeup gate.
     watermark = (
         resolve_watermark(pathlib.Path(thread_dir)) if thread_dir is not None else None
     )
@@ -858,12 +855,12 @@ def _check_wakeup_blockers(session_mode: dict, run_bd=None, thread_dir=None) -> 
 # not assume the verify passed: it states the contract's real last result. Before,
 # it said "your contract verify passed" on a wakeup with a red (exit 1) contract.
 _IMPLICIT_QUEUE_DISPLAY = (
-    "continuation-harness: {verify_status}, and bd still has unfinished work in "
-    "this repo. If any of it is in this session's scope, keep going — do NOT stop to summarize "
-    "or to ask the user what to do next. If the only open work is unrelated backlog from other "
-    "sessions, do not drain it (that is scope creep): instead close out your own claimed tasks, "
-    "or call ScheduleWakeup if you are waiting on something external. "
-    "Hint: `bd list --status=in_progress` shows what is still claimed."
+    "continuation-harness: {verify_status}, and this session still holds claimed work: "
+    "{held} (in_progress). Keep going until it is done, then `bd close <id>` — do NOT stop "
+    "to summarize or to ask the user what to do next. Waiting on something external? Call "
+    "ScheduleWakeup. Not yours to finish? Release the claim (`bd update <id> --status open`) "
+    "and say why. Other sessions' beads and follow-ups you filed without claiming do not "
+    "hold this gate."
 )
 
 
@@ -918,59 +915,76 @@ def _check_bd_queue_implicit(
     cwd: str,
     thread_dir=None,
     run_bd=None,
-    watermark=None,
+    claimed=None,
 ) -> Tuple[str, str]:
-    """Watermark-scoped implicit Stop-path (beads 858.2 + 858.4).
+    """Hold Stop only on beads THIS session claimed that are still in_progress (escapement-xcbn).
 
-    Blocks only on SESSION-FRESH bd work (created_at >= watermark); older backlog
-    is treated as not-this-session's and does NOT block (fixes the a2n over-block).
-    The query set is {in_progress ∪ ready ∪ open} — dropping `open` re-opens FN-4
-    (a session-fresh bead blocked on unmet deps is in neither ready nor in_progress).
-
-    Capability probe (858.4, fixes E-1): no `.beads/`-directory check — a worktree
-    has no dir but bd resolves via redirect/BEADS_DIR; degrade to advisory-allow only
-    when bd genuinely cannot resolve a queue. `watermark` absent ⇒ advisory-allow
-    (never a hard block on unscoped backlog, never now()). `run_bd`/`watermark`
-    injectable for tests.
+    The previous scope, any open/ready/in_progress bead created after the session
+    watermark, was time-based, not session-based. In a shared tracker every session
+    runs as the same account, so other sessions' fresh beads and this session's own
+    filed follow-ups (open by design) held finished sessions: 30.8% of Claude tokens
+    over 4 days were spent in turns this block opened. Claimed = the claim set
+    task_mode_entry records plus the l9lo binding. A claimed bead that is closed or
+    released back to open no longer holds. bd failure ⇒ advisory allow.
+    `run_bd`/`claimed` injectable for tests.
     """
+    global _QUEUE_HOLD
+    _QUEUE_HOLD = []
     if not cwd:
         return ("allow", "implicit_queue_no_cwd")
-
-    if watermark is None and thread_dir is not None:
-        watermark = resolve_watermark(pathlib.Path(thread_dir))
+    if claimed is None:
+        claimed = _session_claims(thread_dir)
+    if not claimed:
+        return ("allow", "implicit_queue_no_claims")
 
     if run_bd is None:
-        import json as _json
-
         def run_bd(args: list[str]) -> Optional[list]:
             try:
                 r = subprocess.run(
                     ["bd"] + args + ["--json"],
                     cwd=cwd, capture_output=True, text=True, timeout=15,
                 )
-                return _json.loads(r.stdout)
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError,
-                    _json.JSONDecodeError, ValueError):
+                return json.loads(r.stdout)
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
                 return None
 
-    # No watermark (session predating this feature) ⇒ cannot scope ⇒ advisory allow.
-    if watermark is None:
-        return ("allow", "scope_no_watermark")
-
-    # {in_progress ∪ ready ∪ open}, capability-probe: degrade on bd FAILURE only.
     in_progress = run_bd(["list", "--status=in_progress"])
-    ready = run_bd(["ready"])
-    open_items = run_bd(["list", "--status=open"])
-    if in_progress is None or ready is None or open_items is None:
+    if in_progress is None:
         return ("allow", "scope_bd_failed")
-
-    seen: dict = {}
-    for it in list(in_progress) + list(ready) + list(open_items):
-        if isinstance(it, dict):
-            seen[it.get("id") or id(it)] = it
-    if any(_created_at_in_scope(it, watermark) for it in seen.values()):
-        return ("block", "implicit_queue_scoped")
+    _QUEUE_HOLD = sorted(
+        {it.get("id") for it in in_progress if isinstance(it, dict)} & set(claimed)
+    )
+    if _QUEUE_HOLD:
+        return ("block", "implicit_queue_claimed")
     return ("allow", "implicit_queue_scoped_drained")
+
+
+_QUEUE_HOLD: list = []  # bead ids that held the last queue block, for its gate signal
+
+
+def _queue_hold() -> list:
+    return list(_QUEUE_HOLD)
+
+
+def _queue_notes(reason: str) -> str:
+    if not reason.startswith("implicit_queue_"):
+        return ""
+    return "implicit_queue_check" + (f" held_by={','.join(_QUEUE_HOLD)}" if _QUEUE_HOLD else "")
+
+
+def _session_claims(thread_dir) -> set:
+    if thread_dir is None:
+        return set()
+    from task_session_mode import load_session_claims  # local: keep Stop importable
+
+    claims = set(load_session_claims(thread_dir))
+    try:
+        bound = json.loads((pathlib.Path(thread_dir) / "active_bead.json").read_text())
+        if isinstance(bound, dict) and isinstance(bound.get("bead_id"), str):
+            claims.add(bound["bead_id"])
+    except (OSError, ValueError):
+        pass
+    return claims
 
 
 def _log_incident(record: dict) -> None:
@@ -1211,10 +1225,9 @@ def main() -> int:
     # verification_passed work-check above and the conversational wind-down rung
     # below — so a session could file session-fresh work, schedule a trivial
     # deploy/CI-check wakeup, and stop with that work abandoned (the cro-dashboard
-    # grain-adaptation deferral). Route the wakeup allow through the SAME
-    # watermark-scoped queue oracle the task-mode wakeup path already uses
-    # (_check_wakeup_blockers → _check_bd_queue_implicit scope). Session-fresh work
-    # blocks; unrelated backlog does not (fail-open: no watermark / bd down ⇒ allow).
+    # grain-adaptation deferral). Route the wakeup allow through the same claim-scoped
+    # queue check (_check_bd_queue_implicit, escapement-xcbn): claimed in_progress work
+    # blocks; other sessions' beads do not (fail-open: no claims / bd down ⇒ allow).
     winddown_display = None
     if decision == "allow" and reason == "wakeup_registered":
         try:
@@ -1258,8 +1271,7 @@ def main() -> int:
         "was_correct": None,
         "notes": (
             "winddown_rung" if reason == "winddown_offer_work_remains"
-            else "implicit_queue_check" if reason.startswith("implicit_queue_")
-            else ""
+            else _queue_notes(reason)
         ),
     })
 
@@ -1267,7 +1279,10 @@ def main() -> int:
         if winddown_display:
             display = winddown_display
         elif reason.startswith("implicit_queue_"):
-            display = _IMPLICIT_QUEUE_DISPLAY.format(verify_status=_verify_status(state))
+            display = _IMPLICIT_QUEUE_DISPLAY.format(
+                verify_status=_verify_status(state),
+                held=", ".join(_QUEUE_HOLD) or "a bead this session claimed",
+            )
         elif reason == "verification_suppressed":
             display = _VERIFICATION_SUPPRESSED_DISPLAY
         elif reason == "no_declaration":

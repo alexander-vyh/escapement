@@ -26,6 +26,7 @@ from would_block_stop import InvalidActorIdentity, thread_dir_for_session, harne
 from task_session_mode import (
     extract_exact_claim_task_id,
     is_issue_id,
+    record_session_claim,
     record_task_context_first_claim,
     record_task_mode_incident,
 )
@@ -198,6 +199,13 @@ def main() -> int:
     # scope -> do not enter task mode; the contract gate still covers the session.
     if task_id is None:
         return 0
+    # escapement-xcbn: the Stop gate's queue check holds only on beads this session
+    # claimed. Recorded for every claim (subagents on the parent dir included: the
+    # session tree owns that work). Best-effort, like the binding below.
+    try:
+        record_session_claim(thread_dir, task_id)
+    except (OSError, ValueError) as exc:
+        print(f"task_mode_entry: could not record claim {task_id}: {exc}", file=sys.stderr)
     # escapement-l9lo: the claimed bead's oracle is the contract from now on,
     # and the previous bead's contract stops counting. Best-effort: a binding
     # failure must not cost the task-mode record below.
