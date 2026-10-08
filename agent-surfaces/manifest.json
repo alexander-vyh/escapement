@@ -2382,6 +2382,81 @@
       }
     },
     {
+      "id": "shell_write_gate",
+      "description": "Report, after the fact, files this session changed through the shell that owe the test or Test Oracle Brief an Edit would; a PreToolUse snapshot keeps other sessions' dirt out of it.",
+      "source": "claude/hooks/shell_write_gate.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PostToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_codex_shell_write_gate.py::test_codex_shell_write_without_tests_reaches_the_model",
+            "claude/hooks/tests/test_codex_shell_write_gate.py::test_codex_shell_docs_write_is_silent"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B ~/.claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PostToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B ~/.claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PostToolUseFailure",
+              "matcher": "Bash",
+              "command": "python3 -B ~/.claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_shell_write_gate.py"
+          ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PreToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PostToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/shell_write_gate.py",
+              "timeout_seconds": 10
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_shell_write_gate_end_to_end.py::test_pi_shell_write_without_tests_is_reported_in_the_result_once",
+            "tests/test_pi_shell_write_gate_end_to_end.py::test_pi_shell_docs_write_is_silent"
+          ]
+        }
+      }
+    },
+    {
       "id": "test_reminder",
       "description": "PostToolUse test reminder after code-file edits.",
       "source": "claude/hooks/test_reminder.py",

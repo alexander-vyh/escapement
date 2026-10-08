@@ -133,6 +133,9 @@ SHARED_HOOK_SUPPORT = {
     # Host detection and the captured Codex spawn_agent payload mapping, imported
     # at module scope by every agent-dispatch gate. Omitting it crashes them.
     "claude/hooks/_agent_dispatch.py",
+    # shell_write_gate's before/after snapshot. Omitting it makes the gate's
+    # import fail, and the Bash hook errors on every call in that host.
+    "claude/hooks/_shell_snapshot.py",
 }
 SHARED_RUNTIME_SUPPORT = {
     "bin/escapement-worktree",

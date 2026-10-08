@@ -22,6 +22,16 @@
       {
         "hooks": [
           {
+            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/shell_write_gate.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/test_reminder.py\"",
             "type": "command"
           }
@@ -50,6 +60,18 @@
         "hooks": [
           {
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/harness/bin/task_mode_entry.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/shell_write_gate.py\"",
+            "timeout": 10,
             "type": "command"
           }
         ],
@@ -418,6 +440,16 @@
           }
         ],
         "matcher": "NotebookEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/shell_write_gate.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
       },
       {
         "hooks": [

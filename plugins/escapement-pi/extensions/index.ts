@@ -392,6 +392,8 @@ export default function escapementPi(pi: PiAPI): void {
             transcript_path: transcriptOf(context, sessionId, []),
             cwd: cwdOf(event, context),
             hook_event_name: "PreToolUse",
+            // Pairs this call's PreToolUse with its PostToolUse, as Claude and Codex do.
+            tool_use_id: event.toolCallId,
             ...mapped,
           },
           context?.signal,
@@ -435,6 +437,7 @@ export default function escapementPi(pi: PiAPI): void {
           transcript_path: transcriptOf(context, sessionId, []),
           cwd: cwdOf(event, context),
           hook_event_name: "PostToolUse",
+          tool_use_id: event.toolCallId,
           ...mapped,
           tool_response: { content: textOf(content), is_error: Boolean(event.isError) },
         },

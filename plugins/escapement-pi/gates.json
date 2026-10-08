@@ -98,6 +98,11 @@
       "timeout_seconds": 10
     },
     {
+      "id": "shell_write_gate",
+      "source": "claude/hooks/shell_write_gate.py",
+      "timeout_seconds": 10
+    },
+    {
       "id": "validate_no_shirking",
       "source": "claude/hooks/validate_no_shirking.py",
       "timeout_seconds": 30
@@ -179,6 +184,13 @@
     }
   ],
   "post_tool_gates": {
+    "bash": [
+      {
+        "id": "shell_write_gate",
+        "source": "claude/hooks/shell_write_gate.py",
+        "timeout_seconds": 10
+      }
+    ],
     "write": [
       {
         "id": "design_doc_location_guard",
