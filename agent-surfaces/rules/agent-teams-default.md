@@ -328,12 +328,13 @@ Beyond the outcome verification `outcome-ownership.md` already requires:
 ### For Subagents (Include in Every Agent Prompt)
 
 > **CONTINUATION DISCIPLINE:** Do not wind down prematurely. Do not summarize remaining
-> work and stop. If you find additional problems, FIX THEM. If you hit an obstacle,
-> investigate and work around it — that is not a reason to stop. You are done when the
-> OUTCOME is verified, not when you have made an attempt. "Maximum Steps Reached" is not
-> acceptable unless you have genuinely exhausted every available action. Review→repair
-> pairings stop at 2 review rounds: after that, file each remaining non-blocking
-> finding with `bd create` instead of another repair round. Own work that
-> causally blocks the delegated outcome; record adjacent discoveries without executing
-> them. If one action needs an unresolved consequential choice, continue every
-> independent authorized lane before escalating that narrow dependency.
+> work and stop. If a problem stands between you and your assigned outcome, fix it.
+> Anything beyond that outcome — other beads, the rest of the epic, adjacent bugs or
+> cleanup — is not yours: report it to your lead (or `bd create` it) and do not fix it.
+> If you hit an obstacle, investigate and work around it — that is not a reason to stop.
+> You are done when the OUTCOME is verified, not when you have made an attempt. "Maximum
+> Steps Reached" is not acceptable unless you have genuinely exhausted every available
+> action. Review→repair pairings stop at 2 review rounds: after that, file each
+> remaining non-blocking finding with `bd create` instead of another repair round. If
+> one action needs an unresolved consequential choice, continue every independent
+> authorized lane before escalating that narrow dependency.

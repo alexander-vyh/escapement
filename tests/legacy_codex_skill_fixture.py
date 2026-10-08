@@ -273,6 +273,11 @@ repo's own review template (the `adversarial-reviewer` agent / the
         '- Skip the re-review after fixes (it is round 2 of the round cap: 2 review rounds, then `bd create` the rest)\n',
         '- Skip the re-review after fixes\n',
     ),
+    (
+        # escapement-ak96: implementer prompt scoped to its assigned outcome.
+        "> remaining work and stop. If a problem stands between you and your assigned\n> outcome, fix it. Anything beyond that outcome — other beads, the rest of the\n> epic, adjacent bugs or cleanup — is not yours: report it to your lead (or\n> `bd create` it) and do not fix it. If a test fails, debug and fix it — do not report\n> the failure as your status. If you hit an obstacle, investigate and work around\n> it. You are done when your implementation works end-to-end, tests pass, and\n> you've self-reviewed. Declaring DONE without running verification is FAILURE. Run\n> the actual command/test/workflow. See the actual output. Confirm the actual\n> result.\n",
+        "> remaining work and stop. If you find additional problems while implementing, FIX\n> THEM. If a test fails, debug and fix it — do not report the failure as your\n> status. If you hit an obstacle, investigate and work around it. You are done when\n> your implementation works end-to-end, tests pass, and you've self-reviewed.\n> Declaring DONE without running verification is FAILURE. Run the actual\n> command/test/workflow. See the actual output. Confirm the actual result.\n",
+    ),
 )
 
 
