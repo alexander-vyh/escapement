@@ -749,6 +749,15 @@
           }
         ],
         "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/hooks/dsy_reminder.py\"",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
       }
     ]
   }
