@@ -30,6 +30,16 @@
           }
         ],
         "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/shadow_verifier.py\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
       }
     ],
     "PreCompact": [
@@ -143,6 +153,16 @@
           }
         ],
         "matcher": "apply_patch"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/shadow_verifier.py\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "(collaboration)?spawn_agent"
       }
     ],
     "SessionStart": [

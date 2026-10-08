@@ -1916,6 +1916,84 @@
       }
     },
     {
+      "id": "shadow_verifier",
+      "description": "Shadow-mode landing verifier (escapement-obwo): after a successful gh pr merge or bd close, a detached runner records whether a blocking verifier would have stopped the landing: the PR head's or bead's ```verify oracle run on the landed commit, a missing oracle, or a behaviour change with no mutation challenger / outcome verifier dispatched. Never blocks; promotion rule in claude/hooks/shadow_verifier.md.",
+      "source": "claude/hooks/shadow_verifier.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B claude/hooks/shadow_verifier.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "(collaboration)?spawn_agent",
+              "command": "python3 -B claude/hooks/shadow_verifier.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_shadow_verifier.py::test_codex_close_is_recorded_and_left_alone",
+            "claude/hooks/tests/test_shadow_verifier_landings.py::test_a_codex_spawn_counts_only_when_named_for_the_role"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "Bash",
+              "command": "python3 -B ~/.claude/hooks/shadow_verifier.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "Agent",
+              "command": "python3 -B ~/.claude/hooks/shadow_verifier.py",
+              "timeout_seconds": 5
+            },
+            {
+              "event": "PostToolUse",
+              "matcher": "Agent",
+              "command": "python3 -B ~/.claude/hooks/shadow_verifier.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_bd_command_parsing.py",
+            "claude/hooks/tests/test_shadow_verifier.py",
+            "claude/hooks/tests/test_shadow_verifier_bounds.py",
+            "claude/hooks/tests/test_shadow_verifier_landings.py"
+          ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "PostToolUse",
+              "matcher": "bash",
+              "command": "python3 -B claude/hooks/shadow_verifier.py",
+              "timeout_seconds": 10
+            },
+            {
+              "event": "PreToolUse",
+              "matcher": "subagent",
+              "command": "python3 -B claude/hooks/shadow_verifier.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "tests/test_pi_shadow_verifier_end_to_end.py::test_pi_successful_close_gets_a_verdict_and_the_result_is_untouched",
+            "tests/test_pi_shadow_verifier_end_to_end.py::test_pi_close_that_errored_gets_nothing"
+          ]
+        }
+      }
+    },
+    {
       "id": "merge_authorization_gate",
       "description": "Deterministic merge-authorization gate: resolves .escapement/repo.json instead of leaving the merge decision to agent judgment in conversation.",
       "source": "claude/hooks/merge_authorization_gate.py",

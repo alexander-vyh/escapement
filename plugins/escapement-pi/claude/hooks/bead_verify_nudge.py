@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 import sys
 from pathlib import Path
 
@@ -55,15 +54,13 @@ except ImportError:  # pragma: no cover
 # discovery-close-gate, which learned the hard way that a substring match fires
 # on prose. Missing sibling => the nudge stays silent rather than guessing.
 try:
-    from _bd_command import invokes as _bd_invokes
+    from _bd_command import invocations as _bd_invocations, invokes as _bd_invokes
 except ImportError:  # pragma: no cover
-    _bd_invokes = None  # type: ignore[assignment]
+    _bd_invocations = _bd_invokes = None  # type: ignore[assignment]
 
 # Mirrors derive_contract._VERIFY_BLOCK_RE. Only a fence tagged `verify` counts, so
 # an illustrative ``` block in acceptance criteria is never mistaken for an oracle.
 _VERIFY_BLOCK_RE = re.compile(r"```[ \t]*verify[ \t]*\r?\n(.*?)\r?\n```", re.S)
-
-_SHELL_SEP_RE = re.compile(r"&&|\|\||[;\n]")
 
 _ACCEPTANCE_FLAGS = ("--acceptance", "--acceptance-file")
 
@@ -97,13 +94,15 @@ def _is_bd_create(command: str) -> bool:
 
 
 def _acceptance_text(command: str) -> str:
-    """Return whatever was passed to --acceptance, joined across segments."""
+    """Return whatever was passed to --acceptance on a real `bd create`.
+
+    Read from the shared parser's argv, so a multi-line quoted acceptance (the
+    usual shape of a verify block) stays one value instead of being cut at its
+    newlines."""
+    if _bd_invocations is None:
+        return ""
     found: list[str] = []
-    for segment in _SHELL_SEP_RE.split(command):
-        try:
-            tokens = shlex.split(segment)
-        except ValueError:
-            continue
+    for tokens in _bd_invocations(command, "create"):
         for index, token in enumerate(tokens):
             for flag in _ACCEPTANCE_FLAGS:
                 if token == flag and index + 1 < len(tokens):
