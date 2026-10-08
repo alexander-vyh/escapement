@@ -66,7 +66,8 @@ MAX_TOKENS = 64
 MAX_SCAN = 16 * 1024
 # Shell words are runs between these; a path token is one with a `/` and at
 # least one other character (a bare `/` names nothing). A split, not a
-# lookahead regex: the scan stays linear on a long run of slashes.
+# lookahead regex, which went quadratic on a long run of slashes. The split is
+# linear; the per-token parent walk after it is not (escapement bead filed).
 _WORD_BREAK = re.compile(r"[\s'\"`<>|;&()=]+")
 
 
@@ -161,23 +162,30 @@ def _large(root: Path) -> bool:
         return False
 
 
-def _dirty(budget: Budget, root: Path) -> tuple[list[str], list[str]] | None:
+def _dirty(budget: Budget, root: Path) -> tuple[list[str], list[str], dict[str, str]] | None:
     """(changed, staged and untracked files; untracked directories not listed
-    file by file in a large tree), or None when git could not say."""
+    file by file in a large tree; dirty submodules -> their status code), or
+    None when git could not say."""
     untracked = "normal" if _large(root) else "all"
     result = budget.git(root, "status", "--porcelain=v1", "-z", f"--untracked-files={untracked}")
     if result is None or result.returncode != 0:
         return None
     names: list[str] = []
+    codes: dict[str, str] = {}
     entries = iter(result.stdout.split("\0"))
     for entry in entries:
         if len(entry) < 4:
             continue
         names.append(entry[3:])
+        codes[entry[3:]] = entry[:2]
         if entry[0] in "RC" or entry[1] in "RC":
             next(entries, None)  # the rename's source path (staged, or an intent-to-add rename)
     dirs = [name for name in names if name.endswith("/")]
-    return [name for name in names if (root / name).is_file()], dirs
+    # A dirty submodule is a directory with no trailing slash: its files are
+    # another repository's, so only its status code is kept.
+    submodules = {name: codes[name] for name in names
+                  if not name.endswith("/") and (root / name).is_dir()}
+    return [name for name in names if (root / name).is_file()], dirs, submodules
 
 
 def fingerprint(path: Path, method: str) -> str:
@@ -210,7 +218,7 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
     listed = _dirty(budget, root)
     if listed is None:
         return {"status": "unknown"}
-    dirty, untracked_dirs = listed
+    dirty, untracked_dirs, submodules = listed
     if len(dirty) > MAX_PATHS:
         return {"status": "too-many-dirty"}
     head = budget.git(root, "rev-parse", "--verify", "-q", "HEAD")
@@ -241,6 +249,8 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
     }
     if untracked_dirs:
         taken["untracked_dirs"] = untracked_dirs
+    if submodules:
+        taken["submodules"] = submodules
     return taken
 
 

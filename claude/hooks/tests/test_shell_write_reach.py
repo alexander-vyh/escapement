@@ -338,3 +338,51 @@ def test_a_huge_command_is_capped_not_scanned(repo, env):
     repos, capped = snap.named_repos("/" * 40000 + " src/app.py", str(repo))
     assert capped, "a command past the scan limit must record token-cap"
     assert time.monotonic() - started < 3, "the token scan must not run away on a long command"
+
+
+# --- round 7: background calls, submodules, no cwd ----------------------------
+
+
+def _gate_in_process(env: dict, monkeypatch, payload: dict):
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.syspath_prepend(str(Path(snap.__file__).parent))
+    import shell_write_gate as gate
+
+    base = {"session_id": f"s-{uuid.uuid4()}", "tool_use_id": f"toolu_{uuid.uuid4().hex}",
+            "tool_name": "Bash", "hook_event_name": "PreToolUse"}
+    return gate.run({**base, **payload})
+
+
+def test_a_run_in_background_call_records_background(repo, env, monkeypatch):
+    # No `&` of its own: the host backgrounds it, so only the flag can say so.
+    command = "sleep 2; echo V=5 > src/app.py"
+    _gate_in_process(env, monkeypatch, {"cwd": str(repo), "tool_input": {
+        "command": command, "run_in_background": True}})
+    assert _blind(env, "background"), signals(env)
+
+
+def test_a_nohup_and_trailing_ampersand_records_background(repo, env, monkeypatch):
+    _gate_in_process(env, monkeypatch, {"cwd": str(repo), "tool_input": {
+        "command": "nohup sh -c 'sleep 2; echo V=5 > src/app.py' &"}})
+    assert _blind(env, "background"), signals(env)
+
+
+def test_an_and_list_is_not_background(repo, env, monkeypatch):
+    """Negative control: `a && b` runs in the foreground."""
+    _gate_in_process(env, monkeypatch, {"cwd": str(repo), "tool_input": {
+        "command": "true && echo 1 > src/app.py"}})
+    assert not _blind(env, "background"), signals(env)
+
+
+def test_a_change_inside_a_submodule_records_submodule(repo, env, tmp_path):
+    lib = _clone(tmp_path / "lib")
+    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "vendor/lib")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "sub")
+    Shell(repo, env).bash("echo 'X = 9' > vendor/lib/src/x.py")
+    assert _blind(env, "submodule"), signals(env)
+
+
+def test_a_payload_without_cwd_records_no_cwd(env, monkeypatch):
+    _gate_in_process(env, monkeypatch, {"tool_input": {"command": "echo 1 > a.py"}})
+    assert _blind(env, "no-cwd"), signals(env)

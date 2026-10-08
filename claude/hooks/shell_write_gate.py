@@ -68,7 +68,15 @@ leading command is not followed. A write into another working tree is seen
 only when a path in the command points into it (a gitignored .worktrees/<name>
 checkout, an absolute path in another clone); a script that writes there
 without naming the path is not, nor is a path built at run time (`$VAR`,
-`${PWD}/..`, `$HOME`, `os.path.join`) or a glob in the target directory. A
+`${PWD}/..`, `$HOME`, `os.path.join`), a glob in the target directory, brace
+expansion (`src/{a,b}.py`), or a path glued to a flag (`-o/path`). Writes to
+gitignored paths are never seen (status does not list them), and a `git init`
+outside any repository creates a tree no snapshot covered. A backgrounded
+call (`run_in_background`, a trailing `&`, nohup/setsid/disown) records
+`background`: what it writes after the after-half looks is not seen. A dirty
+submodule whose status code changes records `submodule`; its files are not
+named, and a further change to an already-dirty submodule is not seen. A
+payload with no cwd records `no-cwd`. A
 named repository git cannot confirm (timeout, safe.directory) records
 `unconfirmed`. Past 64 path tokens (`token-cap`) or 6
 repositories (`repo-cap`) the rest are not watched, and a named repository
@@ -88,6 +96,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -133,6 +142,9 @@ _EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
 _SHOWN = 8
 # How much longer than the command's own run time the before/after window may be.
 _PROMPT_SLACK = 2.0
+# A command that leaves work running after it returns: a standalone trailing
+# `&`, or nohup/setsid/disown anywhere.
+_BACKGROUND = re.compile(r"(?:^|[^&])&\s*$|\b(?:nohup|setsid|disown)\b")
 
 
 def _unreported(memory: dict, key: str, names: list[str]) -> list[str]:
@@ -249,9 +261,14 @@ def _before_half(data: dict, budget, session_dir: Path, call_id: str, started: f
     if _host(data) == "claude":  # Codex and Pi run this half behind the dispatcher,
         data = _effective_cwd(data)  # which has already followed a leading `cd`
     cwd = data.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        _blind("no-cwd")  # nowhere to look from
     root = snap.repo_root(budget, cwd) if isinstance(cwd, str) and cwd else None
     tool_input = data.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if (isinstance(tool_input, dict) and tool_input.get("run_in_background") is True) or (
+            isinstance(command, str) and _BACKGROUND.search(command)):
+        _blind("background")  # it may still be writing after the after-half looks
     roots = [root] if root is not None else []
     unconfirmed = 0
     if root is None and isinstance(cwd, str) and cwd and snap.disk_repo(Path(cwd)) is not None:
@@ -315,6 +332,8 @@ def _after_half(data: dict, budget, root: Path, before: dict, primary: Path,
         _blind("unreadable")  # a dirty file that cannot be read, before or after
     if after.get("untracked_dirs"):
         _blind("untracked-dirs")  # a large tree: files in untracked directories are not listed
+    if (after.get("submodules") or {}) != (before.get("submodules") or {}):
+        _blind("submodule")  # a submodule's files are another repository's: not named
     if not written:
         return ""
     changed = list(after["files"]) + committed
