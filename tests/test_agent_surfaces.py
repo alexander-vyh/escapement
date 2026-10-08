@@ -1,3 +1,4 @@
+# file-complexity-waiver: pre-existing 1,662-line suite on main; split tracked in escapement-w539
 import os
 import datetime as dt
 import importlib.util
@@ -432,8 +433,26 @@ def _canonical_hook_registrations(hooks):
                 command = hook.get("command", "")
                 script_match = re.search(r"([\w.-]+\.(?:py|sh))", command)
                 identity = script_match.group(1) if script_match else command.strip()
-                registrations.append((event, matcher, identity))
+                # Only inject_rules' `--part K --of N` makes a distinct invocation of
+                # the same script; any other repeat, with or without arguments, collides.
+                args = command[script_match.end():].strip(' "') if script_match else ""
+                part = args if re.fullmatch(r"--part \d+ --of \d+", args) else None
+                registrations.append((event, matcher, identity, part) if part else (event, matcher, identity))
     return registrations
+
+
+def test_only_part_arguments_distinguish_registrations_of_one_script():
+    def group(command):
+        return {"matcher": "", "hooks": [{"type": "command", "command": command}]}
+
+    parts = {"SessionStart": [group('python3 -B "x/inject_rules.py" --part 1 --of 2'),
+                              group('python3 -B "x/inject_rules.py" --part 2 --of 2')]}
+    other = {"SessionStart": [group('python3 -B "x/gate.py" --quiet'),
+                              group('python3 -B "x/gate.py" --verbose')]}
+    registrations = _canonical_hook_registrations(parts)
+    assert len(registrations) == len(set(registrations))
+    registrations = _canonical_hook_registrations(other)
+    assert len(registrations) != len(set(registrations)), "other arguments must still collide"
 
 
 def _manifest_codex_registrations():
@@ -1467,9 +1486,23 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
         (ROOT / src).read_text() for src in _planned_rule_symlink_sources(plan)
     )
 
-    inj = _run_claude_rules_injector(CLAUDE_PLUGIN / "hooks" / "inject_rules.py")
-    assert inj.returncode == 0, inj.stderr
-    channel_b = json.loads(inj.stdout)["hookSpecificOutput"]["additionalContext"]
+    # Channel B as Claude receives it: every registered SessionStart part.
+    registered = json.loads((CLAUDE_PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
+    parts = []
+    for item in registered["SessionStart"]:
+        for hook in item["hooks"]:
+            argv = shlex.split(hook["command"])
+            script = next((i for i, a in enumerate(argv) if a.endswith("/inject_rules.py")), None)
+            if script is None:
+                continue
+            inj = _run_claude_rules_injector(
+                CLAUDE_PLUGIN / "hooks" / "inject_rules.py", argv[script + 1:]
+            )
+            assert inj.returncode == 0, inj.stderr
+            if inj.stdout.strip():
+                parts.append(json.loads(inj.stdout)["hookSpecificOutput"]["additionalContext"])
+    assert len(parts) > 1, "the rules must be split across registered parts"
+    channel_b = "\n".join(parts)
 
     combined = channel_a + "\n" + channel_b
     assert combined.count(RULE_DEDUP_PHRASE) == 1, (
@@ -1479,11 +1512,11 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
     # Positive control: the surviving channel still delivers the sentinel AND every
     # bundled rule — the fix removed the duplicate, not the rules.
     #
-    # "Delivers" is no longer "verbatim in full": a rule may hold reference
-    # sections back behind detail markers, which the injector replaces with the
-    # rule's own path (see tests/test_rule_injection.py for that contract). What
-    # must not happen is a rule going missing, so assert on the rule's identity
-    # and on the pointer that makes the held-back part reachable.
+    # "Delivers" is not always "verbatim in full": a rule may hold reference
+    # sections back behind detail markers, and the part carrying it names the
+    # rule's file (tests/test_rule_injection.py holds the byte-for-byte contract).
+    # What must not happen is a rule going missing, so assert on the rule's
+    # identity and on the pointer that makes the held-back part reachable.
     assert channel_b.count(RULE_DEDUP_PHRASE) == 1
     for rule_file in sorted((CLAUDE_PLUGIN / "rules").glob("*.md")):
         body = rule_file.read_text()
@@ -1496,7 +1529,8 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
                 f"{rule_file.name}: detail held back without a path to read it"
             )
         else:
-            assert body in channel_b, (
+            # HTML comments (support-claims metadata) are renderer markup, not rule text.
+            assert re.sub(r"<!--.*?-->", "", body, flags=re.S) in channel_b, (
                 f"surviving channel dropped rule body: {rule_file.name}"
             )
 
@@ -1551,9 +1585,9 @@ def test_pi_dedup_guard_is_not_vacuous_without_the_manifest_flag(tmp_path):
     )
 
 
-def _run_claude_rules_injector(hook: Path) -> subprocess.CompletedProcess[str]:
+def _run_claude_rules_injector(hook: Path, args: list[str] = ()) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(hook)],
+        [sys.executable, str(hook), *args],
         input=json.dumps({"hook_event_name": "SessionStart", "source": "startup"}),
         capture_output=True,
         text=True,

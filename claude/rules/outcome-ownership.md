@@ -32,7 +32,6 @@ Neither provenance ("pre-existing") nor component ownership excuses a blocker; t
 wanted a working result. If it is genuinely adjacent, record it separately and keep
 delivering the delegated outcome.
 
-<!-- escapement:detail:start -->
 
 ### Wind-Down Anti-Patterns (The Silent Killer)
 
@@ -95,7 +94,6 @@ executes a deployment nor authorizes arbitrary commands. See `continuation-harne
 § Per-repo outcome authorization.
 
 
-<!-- escapement:detail:end -->
 ## The Verification Test
 
 Before declaring done, answer honestly: (1) Did I run the exact command or workflow the

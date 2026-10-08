@@ -28,8 +28,6 @@ catch a fleeting message. This survives both child exit and lead-transcript comp
 - **Retention:** on completion the lead **prints the path and offers cleanup** — no
   auto-delete.
 
-<!-- escapement:detail:start -->
-
 ## Enforcement — at the consumer's gate, not the producer's
 
 The **lead's own verification step** is the enforcement — no new machinery, no
@@ -61,6 +59,7 @@ present would fall through to the loop and pass — the gate that doesn't fire.
 If a file is missing or a stub, **re-dispatch or ping that agent** — do not
 synthesize from the transcript.
 
+<!-- escapement:detail:start -->
 **Day-2 escalation (only if the observe phase shows agents skipping the file):**
 a producer-side hook with an escape path in the denial (`write file OR send
 inline + --persist-waiver "<why>"`), `_gate_signal.record(gate=
