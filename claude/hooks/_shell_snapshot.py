@@ -56,8 +56,10 @@ _PENDING_TTL = 3600
 # Past this index size (about 100k tracked files), untracked files are not
 # listed one by one: `-uall` costs seconds per half at 200k files.
 LARGE_INDEX = 8 * 1024 * 1024
-# At most this many repositories are snapshotted for one call.
+# At most this many repositories are snapshotted for one call, found from at
+# most this many path tokens; past either cap the gate records a blind signal.
 MAX_REPOS = 6
+MAX_TOKENS = 64
 _PATH_TOKEN = re.compile(r"[^\s'\"`<>|;&()=]*/[^\s'\"`<>|;&()=]*")
 # The reflog subject of a commit this call made. Anything else moved HEAD for
 # someone else's reasons: pull, merge, rebase, reset, checkout.
@@ -93,23 +95,24 @@ def repo_root(budget: Budget, cwd: str) -> Path | None:
     return Path(result.stdout.strip())
 
 
-def named_repos(command: str, cwd: str) -> list[Path]:
-    """Working trees a path in `command` points into, found on disk without git."""
+def named_repos(command: str, cwd: str) -> tuple[list[Path], bool]:
+    """(working trees a path in `command` points into, found on disk without
+    git; whether path tokens past MAX_TOKENS went unread)."""
     found: dict[str, Path] = {}
-    for token in _PATH_TOKEN.findall(command)[:64]:
-        path = Path(os.path.expanduser(token))
-        path = path if path.is_absolute() else Path(cwd) / path
+    tokens = _PATH_TOKEN.findall(command)
+    for token in tokens[:MAX_TOKENS]:
         try:
+            path = Path(os.path.expanduser(token))
+            path = path if path.is_absolute() else Path(cwd) / path
             path = path.resolve(strict=False)
-        except (OSError, RuntimeError):
+            for directory in (path, *path.parents):
+                # Python 3.9 raises PermissionError under an unsearchable directory.
+                if (directory / ".git").exists():
+                    found.setdefault(str(directory), directory)
+                    break
+        except (OSError, RuntimeError, ValueError):
             continue
-        for directory in (path, *path.parents):
-            if (directory / ".git").exists():
-                found.setdefault(str(directory), directory)
-                break
-        if len(found) >= MAX_REPOS:
-            break
-    return list(found.values())
+    return list(found.values()), len(tokens) > MAX_TOKENS
 
 
 def _large(root: Path) -> bool:
@@ -356,17 +359,11 @@ def save_pending(directory: Path, call_id: str, snaps: dict[str, dict], started:
     write_json(_pending_path(directory, call_id), {"repos": snaps, "at": started})
 
 
-def drop_pending(directory: Path, call_id: str) -> None:
-    """Forget any snapshot filed under this id: this before-half has none to give."""
-    try:
-        _pending_path(directory, call_id).unlink(missing_ok=True)
-    except OSError:
-        pass
-
-
 def pop_pending(directory: Path, call_id: str) -> tuple[dict[Path, dict], float | None] | None:
     """({repo: before-snapshot}, when they were taken), consumed; None when the
-    before-half left none."""
+    before-half left nothing at all. A before-half that ran but had nothing to
+    watch files an empty one, so ({}, at) is "nothing to compare", and None is
+    "the before-half never ran, or its snapshot was lost"."""
     path = _pending_path(directory, call_id)
     pending = read_json(path)
     try:
@@ -378,8 +375,6 @@ def pop_pending(directory: Path, call_id: str) -> tuple[dict[Path, dict], float 
     if not isinstance(repos, dict):
         return None
     snaps = {Path(repo): snap for repo, snap in repos.items() if usable(snap)}
-    if not snaps:
-        return None
     return snaps, at if isinstance(at, (int, float)) else None
 
 

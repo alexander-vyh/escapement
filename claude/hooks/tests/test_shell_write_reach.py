@@ -170,3 +170,78 @@ def test_orphaned_snapshots_of_other_sessions_are_swept(repo, env):
 def test_the_report_says_another_session_may_have_written(repo, env):
     reason = _feedback(Shell(repo, env).bash("echo 'X = 1' >> src/app.py"))
     assert "another session" in reason
+
+
+# --- nothing nominated is dropped without a signal (review of 748245d) -------
+
+
+def _clone(path: Path) -> Path:
+    """A committed Python repository at `path` with src/x.py."""
+    (path / "src").mkdir(parents=True)
+    (path / "pyproject.toml").write_text("[project]\nname = 'o'\n")
+    (path / "src" / "x.py").write_text("X = 0\n")
+    _git(path, "init", "-q", "-b", "main")
+    _git(path, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    _git(path, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+    return path
+
+
+def test_repositories_past_the_cap_record_repo_cap(repo, env, tmp_path):
+    others = [_clone(tmp_path / f"o{i}") for i in range(6)]
+    listing = " ".join(str(o) for o in others[:5])
+    output = Shell(repo, env).bash(f"ls {listing} >/dev/null; echo 'X = 1' > {others[5]}/src/x.py")
+    seen = output is not None and "o5/src/x.py" in json.dumps(output)
+    assert seen or _blind(env, "repo-cap"), "a dropped seventh repository must be named or flagged"
+    assert _blind(env, "repo-cap")
+
+
+def test_a_named_repository_that_cannot_be_snapshotted_records_its_blind(repo, env, tmp_path):
+    other = _clone(tmp_path / "other")
+    (other / "junk").mkdir()
+    for i in range(snap.MAX_PATHS + 1):
+        (other / "junk" / f"f{i}").write_text("")
+    Shell(repo, env).bash(f"echo 'X = 1' > {other}/src/x.py")
+    assert _blind(env, "too-many-dirty"), signals(env)
+
+
+def test_tokens_past_the_cap_record_token_cap(repo, env, tmp_path):
+    other = _clone(tmp_path / "other")
+    noise = " ".join(["a/b"] * 64)
+    Shell(repo, env).bash(f"echo {noise} >/dev/null; echo 'X = 1' > {other}/src/x.py")
+    assert _blind(env, "token-cap"), signals(env)
+
+
+def test_an_unsearchable_path_does_not_cost_the_cwd_snapshot(repo, monkeypatch):
+    """Python 3.9's Path.exists raises PermissionError under an unsearchable
+    directory (/var/root/x); the other paths must still be resolved."""
+    real_exists = Path.exists
+
+    def exists(self):
+        if "forbidden" in str(self):
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    repos, _ = snap.named_repos("cat /forbidden/x; echo 1 > src/app.py", str(repo))
+    assert [p.resolve() for p in repos] == [repo.resolve()]
+
+
+def test_an_after_half_with_no_pending_snapshot_records_no_pending(repo, env):
+    Shell(repo, env, pre=False).bash("echo 'X = 1' >> src/app.py")
+    assert _blind(env, "no-pending"), signals(env)
+
+
+def test_a_call_outside_any_repository_records_no_no_pending(env, tmp_path):
+    """Negative control: the before-half ran and found nothing to watch."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    Shell(plain, env).bash("echo 1 > a.txt")
+    assert not _blind(env, "no-pending"), signals(env)
+
+
+def test_a_write_into_an_existing_untracked_directory_of_a_large_tree_is_flagged(repo, env):
+    (repo / "newpkg").mkdir()
+    (repo / "newpkg" / "old.py").write_text("O = 1\n")
+    env = dict(env, ESCAPEMENT_SHELL_WRITE_LARGE_INDEX="1")
+    Shell(repo, env).bash("echo 'M = 1' > newpkg/mod.py")
+    assert _blind(env, "untracked-dirs"), signals(env)

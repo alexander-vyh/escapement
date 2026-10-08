@@ -67,8 +67,13 @@ two calls finishing at once can each rewrite the reported-once memory
 leading command is not followed. A write into another working tree is seen
 only when a path in the command points into it (a gitignored .worktrees/<name>
 checkout, an absolute path in another clone); a script that writes there
-without naming the path is not. In a tree past _shell_snapshot.LARGE_INDEX,
-files inside a new untracked directory are not seen (`untracked-dirs`).
+without naming the path is not, nor is a path built at run time (`$VAR`,
+`${PWD}/..`, `$HOME`, `os.path.join`). Past 64 path tokens (`token-cap`) or 6
+repositories (`repo-cap`) the rest are not watched, and a named repository
+that cannot be snapshotted records its own blind. In a tree past
+_shell_snapshot.LARGE_INDEX, files inside untracked directories are not seen
+(`untracked-dirs`). An after-half whose snapshot is gone -- never taken, or
+swept as an hour-old orphan -- records `no-pending`.
 
 Exit codes:
   0 -- always; the report is the JSON on stdout
@@ -207,8 +212,11 @@ def run(data: dict) -> str | None:
 
     pending = snap.pop_pending(session_dir, call_id)
     if pending is None:
+        _blind("no-pending")  # the before-half never ran here, or its snapshot was swept
         return None
     befores, taken_at = pending
+    if not befores:
+        return None  # the before-half ran and had nothing it could watch
     duration_ms = data.get("duration_ms")
     if not isinstance(duration_ms, (int, float)) or isinstance(duration_ms, bool):
         if _host(data) == "claude":  # Claude always sends it; without it the window is unknown
@@ -241,23 +249,27 @@ def _before_half(data: dict, budget, session_dir: Path, call_id: str, started: f
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     roots = [root] if root is not None else []
     if isinstance(command, str) and isinstance(cwd, str) and cwd:
-        for named in snap.named_repos(command, cwd):
+        named_repos, token_cap = snap.named_repos(command, cwd)
+        if token_cap:
+            _blind("token-cap")  # paths past the token cap were not looked at
+        for named in named_repos:
             # git, not the .git found on disk, says where the tree is: the same
             # answer, in the same spelling, the cwd's repository got.
             found = snap.repo_root(budget, str(named))
             if found is not None and found not in roots:
                 roots.append(found)
+    if len(roots) > snap.MAX_REPOS:
+        _blind("repo-cap")  # repositories past the cap are not watched
     snaps: dict[str, dict] = {}
-    for index, repo in enumerate(roots[:snap.MAX_REPOS]):
+    for repo in roots[:snap.MAX_REPOS]:
         before = snap.take(budget, repo)
         if snap.usable(before):
             snaps[str(repo)] = before
-        elif index == 0:
+        else:
             _blind(before.get("status", "unknown"))
-    if snaps:
-        snap.save_pending(session_dir, call_id, snaps, started)
-    else:
-        snap.drop_pending(session_dir, call_id)
+    # Filed even when empty: it replaces any older snapshot under this id, and
+    # tells the after-half this call had nothing to watch rather than no snapshot.
+    snap.save_pending(session_dir, call_id, snaps, started)
 
 
 def _label(root: Path, primary: Path, names: list[str]) -> list[str]:
@@ -289,8 +301,8 @@ def _after_half(data: dict, budget, root: Path, before: dict, primary: Path,
         _blind("out-of-time")  # a file the budget left no time to check
     if unreadable:
         _blind("unreadable")  # a dirty file that cannot be read, before or after
-    if set(after.get("untracked_dirs", [])) - set(before.get("untracked_dirs", [])):
-        _blind("untracked-dirs")  # a large tree: files in a new directory are not listed
+    if after.get("untracked_dirs"):
+        _blind("untracked-dirs")  # a large tree: files in untracked directories are not listed
     if not written:
         return ""
     changed = list(after["files"]) + committed
