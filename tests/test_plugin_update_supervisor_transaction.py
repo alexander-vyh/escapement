@@ -16,6 +16,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 UPDATER = ROOT / "scripts" / "plugin-update.sh"
+SUPERVISOR_INSTALLER = ROOT / "scripts" / "continuation-supervisor-install.sh"
 PLUGIN = ROOT / "plugins" / "escapement-claude"
 PLUGIN_ID = "escapement@escapement"
 
@@ -157,6 +158,19 @@ def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
     )
 
 
+def _install_supervisor(env: dict[str, str]) -> subprocess.CompletedProcess:
+    # A deploy retires the supervisor (escapement-lzp8), so a prior installed
+    # generation is seeded through the installer itself.
+    return subprocess.run(
+        ["bash", str(SUPERVISOR_INSTALLER)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=40,
+    )
+
+
 def _link_target(path: Path) -> str | None:
     return os.readlink(path) if path.is_symlink() else None
 
@@ -192,6 +206,10 @@ def _shell_launchctl() -> str:
     return 113
   fi
   if [[ "${1:-}" == bootout ]]; then
+    if [[ "${LAUNCHCTL_BOOTOUT_FAIL_ONCE:-0}" == 1 && ! -e "$HOME/bootout-failed-once" ]]; then
+      : > "$HOME/bootout-failed-once"
+      return 5
+    fi
     grep -Fxq "$label" "$state" || return 3
     grep -Fvx "$label" "$state" > "$state.next" || true
     mv -f "$state.next" "$state"
@@ -293,10 +311,14 @@ def test_supervisor_failure_rolls_back_every_cutover_authority(tmp_path):
         "loaded": loaded.read_bytes(),
     }
 
-    result = _run({**env, "LAUNCHCTL_BOOTSTRAP_FAIL_ONCE": "1"})
+    # The deploy's only bootout is its --uninstall retirement step; failing it
+    # once must restore the prior loaded generation, and rollback's own
+    # quiesce/restore launchctl calls then succeed.
+    result = _run({**env, "LAUNCHCTL_BOOTOUT_FAIL_ONCE": "1"})
 
     assert result.returncode != 0
     assert "==> done" not in result.stdout + result.stderr
+    assert "continuation supervisor retirement failed" in result.stdout + result.stderr
     after = {
         "settings": settings.read_bytes(),
         "registry": registry.read_bytes(),
@@ -575,8 +597,11 @@ def test_recovery_restores_exact_prior_supervisor_generation(
     )
     loaded = home / "launchctl.loaded"
     if prior_marker or prior_loaded:
-        installed = _run(launch_env)
+        deployed = _run(launch_env)
+        assert deployed.returncode == 0, deployed.stdout + deployed.stderr
+        installed = _install_supervisor(launch_env)
         assert installed.returncode == 0, installed.stdout + installed.stderr
+        assert loaded.read_text().splitlines() == ["com.escapement.continuation-supervisor"]
         if not prior_marker:
             marker.unlink()
         if not prior_loaded:
@@ -614,7 +639,8 @@ os.execv(os.environ["REAL_PYTHON"], [os.environ["REAL_PYTHON"], *sys.argv[1:]])
 
     assert interrupted.returncode != 0
     assert (claude / ".plugin-update-transaction.json").is_file()
-    assert loaded.read_text().splitlines() == ["com.escapement.continuation-supervisor"]
+    assert loaded.read_text().splitlines() == []
+    assert not plist.exists()
     (fake_bin / "python3").unlink()
 
     retry = _run(

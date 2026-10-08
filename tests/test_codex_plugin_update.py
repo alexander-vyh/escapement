@@ -203,26 +203,19 @@ fi
     codex_runtime = codex_home / "escapement-harness"
     assert codex_runtime.joinpath("bin").resolve() == plugin_root / "harness" / "bin"
     assert codex_runtime.joinpath("schemas").resolve() == plugin_root / "harness" / "schemas"
-    with (home / "Library" / "LaunchAgents" / "com.escapement.continuation-supervisor.plist").open("rb") as stream:
-        plist = plistlib.load(stream)
-    assert plist["ProgramArguments"] == [str(harness / "bin" / "wakeup_waker.py"), "--fire"]
-
-    # An executable, runnable pre-watchdog Claude waker is not preserved as the
-    # supervisor target; the fresh Codex runtime supplies the required capability.
-    (prior_runtime / "bin" / "wakeup_waker.py").write_text(
-        "#!/bin/sh\n[ \"${1:-}\" = --help ] && exit 0\nexit 2\n"
-    )
-    (prior_runtime / "bin" / "wakeup_waker.py").chmod(0o755)
-    repaired = subprocess.run(
+    # escapement-lzp8: the continuation supervisor is retired; a Codex deploy must not
+    # install it, and must remove one that a previous deploy left behind.
+    supervisor_plist = home / "Library" / "LaunchAgents" / "com.escapement.continuation-supervisor.plist"
+    assert not supervisor_plist.exists()
+    supervisor_plist.parent.mkdir(parents=True, exist_ok=True)
+    with supervisor_plist.open("wb") as stream:
+        plistlib.dump({"Label": "com.escapement.continuation-supervisor"}, stream)
+    rerun = subprocess.run(
         ["bash", str(UPDATER)], cwd=ROOT, env=env,
         capture_output=True, text=True, check=False,
     )
-    assert repaired.returncode == 0, repaired.stderr
-    with (home / "Library" / "LaunchAgents" / "com.escapement.continuation-supervisor.plist").open("rb") as stream:
-        repaired_plist = plistlib.load(stream)
-    assert repaired_plist["ProgramArguments"] == [
-        str(codex_runtime / "bin" / "wakeup_waker.py"), "--fire",
-    ]
+    assert rerun.returncode == 0, rerun.stderr
+    assert not supervisor_plist.exists()
     assert harness.joinpath("bin").resolve() == prior_runtime / "bin"
 
 

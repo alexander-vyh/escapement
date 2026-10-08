@@ -48,6 +48,14 @@ def _plugin_snapshot(home: Path, mode_root: Path) -> dict[str, object]:
     }
 
 
+def _assert_supervisor_retired(home: Path) -> None:
+    # escapement-lzp8: a committed deploy generation retires the supervisor.
+    assert (home / "launchctl.loaded").read_text().splitlines() == []
+    assert not (home / "Library" / "LaunchAgents" / f"{LABEL}.plist").exists()
+    launch_log = (home / "launchctl.log").read_text().splitlines()
+    assert not [line for line in launch_log if line.startswith("bootstrap")]
+
+
 def test_post_begin_command_substitution_failure_rolls_back_once(tmp_path):
     home, _, new_cache, fake_bin, env = _cutover_fixture(tmp_path)
     before = _plugin_snapshot(home, new_cache / "harness" / "bin")
@@ -267,7 +275,7 @@ shutil.rmtree=rmtree
     backup = Path(committed["backup"])
     assert committed.get("committed") is True and backup.is_dir()
     assert os.readlink(claude / "harness" / "bin") == str(new_cache / "harness" / "bin")
-    assert (home / "launchctl.loaded").read_text().splitlines() == [LABEL]
+    _assert_supervisor_retired(home)
 
     retry = _run_updater(env)
 
@@ -277,7 +285,7 @@ shutil.rmtree=rmtree
     assert not backup.exists()
     assert not list(claude.glob(".cutover-backup-*"))
     assert os.readlink(claude / "harness" / "bin") == str(new_cache / "harness" / "bin")
-    assert (home / "launchctl.loaded").read_text().splitlines() == [LABEL]
+    _assert_supervisor_retired(home)
 
 
 def test_commit_helper_sigkill_after_durable_guard_preserves_committed_result(tmp_path):
@@ -325,7 +333,7 @@ os.replace=replace
     backup = Path(committed["backup"])
     assert committed.get("committed") is True and backup.is_dir()
     assert os.readlink(claude / "harness" / "bin") == str(new_cache / "harness" / "bin")
-    assert (home / "launchctl.loaded").read_text().splitlines() == [LABEL]
+    _assert_supervisor_retired(home)
 
     retry = _run_updater(env)
 
@@ -335,7 +343,7 @@ os.replace=replace
     assert not backup.exists()
     assert not list(claude.glob(".cutover-backup-*"))
     assert os.readlink(claude / "harness" / "bin") == str(new_cache / "harness" / "bin")
-    assert (home / "launchctl.loaded").read_text().splitlines() == [LABEL]
+    _assert_supervisor_retired(home)
 
 
 def test_transaction_helper_sigkill_after_guard_cleanup_preserves_success(tmp_path):
@@ -382,7 +390,7 @@ os.unlink=unlink
     assert not guard.exists()
     assert not list(claude.glob(".cutover-backup-*"))
     assert os.readlink(claude / "harness" / "bin") == str(new_cache / "harness" / "bin")
-    assert (home / "launchctl.loaded").read_text().splitlines() == [LABEL]
+    _assert_supervisor_retired(home)
 
     retry = _run_updater(env)
 
@@ -391,7 +399,7 @@ os.unlink=unlink
     assert not guard.exists()
     assert not list(claude.glob(".cutover-backup-*"))
     assert os.readlink(claude / "harness" / "bin") == str(new_cache / "harness" / "bin")
-    assert (home / "launchctl.loaded").read_text().splitlines() == [LABEL]
+    _assert_supervisor_retired(home)
 
 
 def test_successful_commit_fsyncs_every_current_file_authority(tmp_path):

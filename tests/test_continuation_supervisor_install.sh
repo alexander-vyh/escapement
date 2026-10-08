@@ -715,11 +715,12 @@ if cmp -s "$ROOT/dry.before" "$ROOT/dry.after"; then
 else
   bad "plugin deployment dry-run mutated the isolated HOME tree"
 fi
-if grep -Eq 'com\.escapement\.continuation-supervisor' "$ROOT/dry.out" \
-  && grep -Eq 'wakeup_waker\.py.*--fire|--fire.*wakeup_waker\.py' "$ROOT/dry.out"; then
-  ok "plugin deployment dry-run reports the supervisor execution plan"
+# escapement-lzp8: deployment retires the supervisor instead of installing it.
+if grep -Fxq '    [dry-run] retire continuation supervisor (uninstall)' "$ROOT/dry.out" \
+  && ! grep -Eq 'wakeup_waker\.py.*--fire|--fire.*wakeup_waker\.py' "$ROOT/dry.out"; then
+  ok "plugin deployment dry-run reports supervisor retirement, not a --fire plan"
 else
-  bad "plugin deployment dry-run did not report the supervisor --fire plan"
+  bad "plugin deployment dry-run did not report supervisor retirement"
 fi
 
 if python3 - "$ROOT" "$KEY_FILE" \
