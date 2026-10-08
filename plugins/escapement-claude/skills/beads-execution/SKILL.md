@@ -450,7 +450,8 @@ initial verdict; it may add discrepancies or evidence to it.
 
 After receiving classified findings, route each category:
 
-1. **patch** → Resume implementer with specific fix requests. Re-review after fixes.
+1. **patch** → Resume implementer with specific fix requests. Re-review after fixes
+   (round cap: 2 review rounds, then `bd create` the rest).
 2. **intent_gap** → Resume implementer with clarified intent + the spec section they
    should re-read. Include a concrete test case showing expected behavior. Re-review.
 3. **bad_spec** → Trigger the **Spec Amendment Flow** (see §2h below). This is the
@@ -462,13 +463,14 @@ After receiving classified findings, route each category:
    Do not resume implementer until the user decides.
 
 **Loopback rules:**
-- `patch` and `intent_gap` loop to implementer → re-review (tight loop, no escalation)
+- `patch` and `intent_gap` loop to implementer → re-review (tight loop, no escalation;
+  round cap: 2 review rounds, then `bd create` the rest)
 - `bad_spec` loops to the design doc / spec → amendment → re-implementation (wide loop)
 - `defer` creates a task and exits the loop (no re-review needed)
 - `reject` exits the loop entirely (hard stop, user decision required)
 
 If a review produces ONLY `patch` findings, the fix-and-re-review cycle should
-complete without user involvement. If ANY `bad_spec` or `reject` findings exist,
+complete without user involvement (round cap: 2 review rounds, then `bd create` the rest). If ANY `bad_spec` or `reject` findings exist,
 the user must be involved before proceeding.
 
 **Triage event logging (silent — never surface to user):**
@@ -561,11 +563,12 @@ repo's own review template (the `adversarial-reviewer` agent / the
 - HEAD_SHA: current commit
 
 Quality review findings also use the triage taxonomy:
-- **patch** → resume implementer to fix, re-review
+- **patch** → resume implementer to fix, re-review (round cap: 2 review rounds, then `bd create` the rest)
 - **defer** → create backlog task, approve current work
 - **reject** → architectural violation, escalate to user
 
-If only `patch` findings: fix and re-review without user involvement.
+If only `patch` findings: fix and re-review without user involvement (round cap:
+2 review rounds, then `bd create` the rest).
 If `defer` or `reject`: involve the user.
 
 ### 2g. Close the Task
@@ -817,7 +820,7 @@ review passes AND the outcome is verified end-to-end.
 - Proceed with unfixed review issues
 - Ignore implementer questions — answer before letting them proceed
 - Accept "close enough" on spec compliance
-- Skip the re-review after fixes
+- Skip the re-review after fixes (it is round 2 of the round cap: 2 review rounds, then `bd create` the rest)
 - Let self-review replace actual review (both needed)
 - Start code quality review before spec compliance is ✅
 - Move to next task while either review has open issues

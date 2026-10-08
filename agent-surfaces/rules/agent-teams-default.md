@@ -253,11 +253,21 @@ The operative directive for each pattern, one line, stays here:
 - **Completeness Critic** — after the per-lens reviewers report and before
   declaring the review done, dispatch a generative, blinded critic that surfaces
   what is MISSING (gaps no lens owned), UNDERSTATED (severity to calibrate up),
-  and MIS-SCOPED; each gap re-enters the loop as a new finding. Run
-  loop-until-dry.
+  and MIS-SCOPED; each gap re-enters the loop as a new finding, inside the review
+  round cap below (2 review rounds; leftovers go to `bd create`).
 
 See the `dispatching-parallel-agents` skill for the full write-ups, the bad-
 implementation-class checklist, and the dispatch templates.
+
+### Review Round Cap
+
+Every review→repair pairing runs at most 2 review rounds: round 1 reviews,
+repair fixes, round 2 checks those fixes and does not start a fresh sweep.
+After round 2, each remaining finding is an adjacent discovery: record it with
+`bd create` and report it, not another repair round. Exception: a finding that
+causally blocks the delegated outcome gets one more repair round; if it is still
+open after that, escalate it as the blocker. A lane that has spent its rounds
+reports; it does not re-dispatch itself or its partner.
 
 ### When to Pair
 
@@ -321,7 +331,9 @@ Beyond the outcome verification `outcome-ownership.md` already requires:
 > work and stop. If you find additional problems, FIX THEM. If you hit an obstacle,
 > investigate and work around it — that is not a reason to stop. You are done when the
 > OUTCOME is verified, not when you have made an attempt. "Maximum Steps Reached" is not
-> acceptable unless you have genuinely exhausted every available action. Own work that
+> acceptable unless you have genuinely exhausted every available action. Review→repair
+> pairings stop at 2 review rounds: after that, file each remaining non-blocking
+> finding with `bd create` instead of another repair round. Own work that
 > causally blocks the delegated outcome; record adjacent discoveries without executing
 > them. If one action needs an unresolved consequential choice, continue every
 > independent authorized lane before escalating that narrow dependency.

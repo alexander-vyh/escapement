@@ -332,7 +332,9 @@ to miss). Its job is three questions:
 with no verdict yet — so it re-enters the loop: dispatch a lens at it, then verify
 it adversarially like any other. The critic does not get the last word; it
 *restarts* the loop with the findings the first pass could never have produced.
-Run the critic until a round surfaces nothing new (loop-until-dry), not once.
+Run the critic again on the next round, not once, but inside the review round
+cap: at most 2 review rounds, then file each remaining gap with `bd create`
+instead of another round.
 
 ```
 # After the per-lens roundtable reports:
