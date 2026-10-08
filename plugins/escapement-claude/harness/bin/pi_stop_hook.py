@@ -18,6 +18,14 @@ rungs and the local judge -- the continuation harness, which Pi does not have.
 So no reason here names ScheduleWakeup or a ~/.claude path; every command it
 names is one this Pi package ships.
 
+A delegated worker -- a Pi session whose header names a parent session -- is
+held to its delegated scope, not its parent's outcome: the parent owns the
+outcome and its verification, which delegation forbids the worker to run. So
+for a worker, a block becomes "hand your work back" (end with a message; omp
+delivers it to the parent), the parent's IRC "stop" is its user's release, and
+a run of identical blocks is capped so a gate bug cannot loop a worker without
+bound (escapement-by3e).
+
 Fail-open: any internal error allows the stop AND appends an incident record,
 so a gate bug degrades to "no gate", never a stuck session, and is visible.
 stdout carries at most the single decision JSON.
@@ -60,6 +68,10 @@ _EXPLANATIONS = {
         "the declared verify command exited 0 but neuters itself (`|| true`, a bare "
         "`true`, `--no-verify`, `SKIP=`), so re-running it will not release this gate."
     ),
+    "worker_no_handoff": (
+        "this delegated worker changed work but ended with no message, so its "
+        "parent has nothing to read about what it produced."
+    ),
     "winddown_claim_work_remains": (
         "your last message says the work is done, but {cwd} still has git residue "
         "(modified tracked files, unpushed commits, or an upstream-gone branch)."
@@ -77,6 +89,13 @@ def resumption(reason: str, session_id: str, cwd: str) -> str:
     derive = f"{env} python3 {shlex.quote(str(BIN / 'derive_contract.py'))} --bead <id>"
     verify = f"{env} bash {shlex.quote(str(BIN / 'verify'))}"
     explanation = _EXPLANATIONS.get(reason, "this turn ends with unproven work.").format(cwd=cwd or "the cwd")
+    if reason == "worker_no_handoff":
+        return (
+            f"Escapement stop gate ({reason}): {explanation} End your turn with a "
+            "message naming what you produced and where it is persisted -- omp "
+            "delivers your last message to your parent, which owns verifying the "
+            "outcome; or your parent can release you by sending 'stop'."
+        )
     if reason == "winddown_claim_work_remains":
         ways = (
             "(1) commit and push the remaining tracked changes, or clean them up "
@@ -127,6 +146,38 @@ def last_user_text(transcript_path: object) -> str | None:
         if texts:
             return "\n".join(texts)
     return None
+
+
+# A worker held this many times in a row for the same reason is let go: the cap
+# turns a gate bug into one recorded livelock signal, not unbounded spend.
+WORKER_BACKSTOP_BLOCKS = 3
+
+
+def worker_scope(decision: str, reason: str, handoff: object) -> tuple[str, str]:
+    """A worker's block, judged by its delegated scope: did it hand anything back."""
+    if decision != "block":
+        return decision, reason
+    if isinstance(handoff, str) and handoff.strip():
+        return "allow", "worker_handed_off"
+    return "block", "worker_no_handoff"
+
+
+def worker_backstop(thread_dir: pathlib.Path, decision: str, reason: str) -> tuple[str, str]:
+    """Count a worker's consecutive identical blocks; past the cap, allow."""
+    path = thread_dir / "worker_stop_blocks.json"
+    if decision != "block":
+        path.unlink(missing_ok=True)
+        return decision, reason
+    try:
+        prior = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        prior = {}
+    count = prior.get("count", 0) + 1 if isinstance(prior, dict) and prior.get("reason") == reason else 1
+    if count > WORKER_BACKSTOP_BLOCKS:
+        path.unlink(missing_ok=True)
+        return "allow", "worker_livelock_backstop"
+    path.write_text(json.dumps({"reason": reason, "count": count}), encoding="utf-8")
+    return decision, reason
 
 
 def _log_incident(record: dict) -> None:
@@ -183,12 +234,19 @@ def main() -> int:
         if decision == "allow" and reason == "conversational":
             if is_completion_claim(payload.get("last_assistant_message")) and git_work_remains(cwd):
                 decision, reason = "block", "winddown_claim_work_remains"
-        _log_incident({
+        if payload.get("parent_session"):
+            decision, reason = worker_scope(decision, reason, payload.get("last_assistant_message"))
+            held_for = reason
+            decision, reason = worker_backstop(thread_dir, decision, reason)
+        record = {
             "decision": decision,
             "reason": reason,
             "session_id": session_id,
             "payload_keys": sorted(payload.keys()),
-        })
+        }
+        if reason == "worker_livelock_backstop":
+            record["held_for"] = held_for
+        _log_incident(record)
         if decision == "block":
             print(json.dumps({"decision": "block", "reason": resumption(reason, session_id, cwd)}))
         return 0

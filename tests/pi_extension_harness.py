@@ -41,6 +41,7 @@ for (const call of JSON.parse(process.argv[3])) {
     sessionManager: {
       getSessionId() { return call.sessionId; },
       getBranch() { return branch; },
+      getHeader() { return call.header; },
     },
     ui: { notify() {} },
   };
@@ -126,14 +127,21 @@ def git_repo(path: Path, files: dict[str, str]) -> Path:
 class Session:
     """Pi events for one session, in the shapes Pi emits them."""
 
-    def __init__(self, cwd: Path) -> None:
+    def __init__(self, cwd: Path, parent_session: str | None = None) -> None:
         self.cwd = str(cwd)
         self.id = str(uuid.uuid4())
         self.branch: list[dict] = []
         self._calls = 0
+        # Pi's session header; a delegated worker's names its parent's file.
+        self.header = {"type": "session", "version": 3, "id": self.id, "cwd": self.cwd}
+        if parent_session:
+            self.header["parentSession"] = parent_session
 
     def _event(self, event: str, payload: dict) -> dict:
-        return {"event": event, "cwd": self.cwd, "sessionId": self.id, "branch": list(self.branch), "payload": payload}
+        return {
+            "event": event, "cwd": self.cwd, "sessionId": self.id, "header": self.header,
+            "branch": list(self.branch), "payload": payload,
+        }
 
     def user(self, text: str) -> None:
         self.branch.append({"role": "user", "content": text, "timestamp": 1})
@@ -143,6 +151,23 @@ class Session:
         self.branch.append({
             "type": "custom_message", "customType": custom_type, "content": text,
             "display": True, "timestamp": "2026-10-07T23:20:42.047Z",
+        })
+
+    def irc(self, sender: str, text: str, from_parent: bool) -> None:
+        """An omp IRC delivery, as the session file records it: a custom_message
+        entry, not a user message; `fromParent` marks the sender as this
+        session's parent."""
+        details = {"id": uuid.uuid4().hex[:16], "from": sender, "message": text}
+        if from_parent:
+            details["fromParent"] = True
+        self.branch.append({
+            "type": "custom_message",
+            "customType": "irc:incoming",
+            "content": f"<irc>\nIncoming IRC message from agent `{sender}`:\n\n{text}\n</irc>",
+            "display": True,
+            "details": details,
+            "attribution": "agent",
+            "timestamp": 1791415164493,  # omp stamps IRC with Date.now()
         })
 
     def say(self, text: str) -> dict:
