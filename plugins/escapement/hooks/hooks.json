@@ -31,126 +31,6 @@
           }
         ],
         "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 1 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 2 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 3 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 4 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 5 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 6 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 7 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 8 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 9 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 10 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 11 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      },
-      {
-        "hooks": [
-          {
-            "command": "python3 -B \"${PLUGIN_ROOT}/claude/hooks/inject_rules.py\" --part 12 --of 12",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
       }
     ],
     "PreToolUse": [
@@ -323,7 +203,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -333,7 +213,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -343,7 +223,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -353,7 +233,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -363,7 +243,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -373,7 +253,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -383,7 +263,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -393,7 +273,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -403,7 +283,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -413,7 +293,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -423,7 +303,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       },
       {
         "hooks": [
@@ -433,7 +313,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "startup|clear|compact"
       }
     ],
     "Stop": [

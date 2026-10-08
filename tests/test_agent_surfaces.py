@@ -433,11 +433,26 @@ def _canonical_hook_registrations(hooks):
                 command = hook.get("command", "")
                 script_match = re.search(r"([\w.-]+\.(?:py|sh))", command)
                 identity = script_match.group(1) if script_match else command.strip()
-                # Arguments make a different invocation (inject_rules' --part K),
-                # so they are part of the identity; a repeated command still collides.
+                # Only inject_rules' `--part K --of N` makes a distinct invocation of
+                # the same script; any other repeat, with or without arguments, collides.
                 args = command[script_match.end():].strip(' "') if script_match else ""
-                registrations.append((event, matcher, identity, args) if args else (event, matcher, identity))
+                part = args if re.fullmatch(r"--part \d+ --of \d+", args) else None
+                registrations.append((event, matcher, identity, part) if part else (event, matcher, identity))
     return registrations
+
+
+def test_only_part_arguments_distinguish_registrations_of_one_script():
+    def group(command):
+        return {"matcher": "", "hooks": [{"type": "command", "command": command}]}
+
+    parts = {"SessionStart": [group('python3 -B "x/inject_rules.py" --part 1 --of 2'),
+                              group('python3 -B "x/inject_rules.py" --part 2 --of 2')]}
+    other = {"SessionStart": [group('python3 -B "x/gate.py" --quiet'),
+                              group('python3 -B "x/gate.py" --verbose')]}
+    registrations = _canonical_hook_registrations(parts)
+    assert len(registrations) == len(set(registrations))
+    registrations = _canonical_hook_registrations(other)
+    assert len(registrations) != len(set(registrations)), "other arguments must still collide"
 
 
 def _manifest_codex_registrations():
@@ -1514,7 +1529,8 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
                 f"{rule_file.name}: detail held back without a path to read it"
             )
         else:
-            assert body in channel_b, (
+            # HTML comments (support-claims metadata) are renderer markup, not rule text.
+            assert re.sub(r"<!--.*?-->", "", body, flags=re.S) in channel_b, (
                 f"surviving channel dropped rule body: {rule_file.name}"
             )
 

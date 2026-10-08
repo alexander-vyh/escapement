@@ -58,7 +58,7 @@ PACKAGES = {
     "codex": {
         "hook": ROOT / "plugins/escapement/claude/hooks/inject_rules.py",
         "registration": ROOT / "plugins/escapement/hooks/hooks.json",
-        "events": ("SessionStart", "PreCompact"),
+        "events": ("SessionStart",),
     },
     # Pi's dispatcher runs a session gate with no arguments (gates.json).
     "pi": {
@@ -293,3 +293,102 @@ def test_a_summary_in_place_of_a_rule_fails(tmp_path, old_output):
 
     with pytest.raises(AssertionError):
         assert_reproduces(summarised, rules_dir)
+
+
+# --- Requirements a review found missing stay injected ----------------------
+# Each was once held back behind a detail marker (or summarised away). Moving a
+# marker back over one must fail here, on every host that ships the rule.
+
+PINNED_REQUIREMENTS = [
+    ("continuation-harness.md", 'carve-out does NOT cover a merge that triggers'),
+    ("continuation-harness.md", 'Do **not** pick up unrelated ready tasks from `bd ready` to drain the queue'),
+    ("continuation-harness.md", 'Config/docs work being TDD-exempt does NOT exempt it from a continuation-harness contract.'),
+    ("continuation-harness.md", '`permissionDecisionReason` — verbatim in substance'),
+    ("continuation-harness.md", 'If you edited a tracked,'),
+    ("continuation-harness.md", 'do NOT register a passing parse-check as the contract'),
+    ("continuation-harness.md", 'Don\'t write "I\'ll check back" as prose and end the turn'),
+    ("tdd-enforcement.md", '(d) a human ack'),
+    ("tdd-enforcement.md", '## Behavioral config is not exempt'),
+    ("tdd-enforcement.md", 'write the failing test FIRST, run it and confirm it fails *for the right reason*'),
+    ("tdd-enforcement.md", 'strategy has been reviewed for oracle quality'),
+    ("molecule-awareness.md", '**Scope changes are always human-driven.**'),
+    ("molecule-awareness.md", 'Do not ask the user to confirm the instruction they'),
+    ("outcome-ownership.md", 'has independently verified green status, you are durably authorized to follow the'),
+    ("outcome-ownership.md", 'Never make stopping one of the'),
+    ("outcome-ownership.md", '### Wind-Down Anti-Patterns (The Silent Killer)'),
+    ("outcome-ownership.md", '→ There is no follow-up. You are the follow-up. Do the remaining items NOW.'),
+    ("agent-teams-default.md", '**Always pair** for feature/epic work with behavioral specs'),
+    ("agent-teams-default.md", 'success criteria and NEVER from the code'),
+    ("agent-teams-default.md", 'including the tempting shortcut, and BLOCKS implementation until the named'),
+    ("agent-teams-default.md", 'NEVER accepting "tests pass"'),
+    ("agent-teams-default.md", 'do not dispatch execution for them'),
+    ("research-findings-persistence.md", 'If a file is missing or a stub, **re-dispatch or ping that agent** — do not'),
+    ("research-findings-persistence.md", 'uncertainty tags live **inline in the file**, never only in the message.'),
+    ("research-findings-persistence.md", '**prints the path and offers cleanup** — no'),
+    ("research-findings-persistence.md", 'The count check is the headline guard, so it **must** carry its own `|| exit 1`'),
+]
+
+
+def missing_pins(contexts: list[str], rules_dir: Path) -> list[str]:
+    injected = "\n".join(contexts)
+    return [
+        f"{rule}: {fragment}" for rule, fragment in PINNED_REQUIREMENTS
+        if (rules_dir / rule).exists() and fragment not in injected
+    ]
+
+
+def test_pinned_requirements_reach_the_session(shipped):
+    host, contexts, _, rules_dir = shipped
+    assert missing_pins(contexts, rules_dir) == [], host
+
+
+def test_pins_cover_files_each_host_ships():
+    for rule, _ in PINNED_REQUIREMENTS:
+        assert (CLAUDE_RULES / rule).exists(), f"pinned rule {rule} is not shipped"
+
+
+def test_a_marker_moved_back_over_a_pinned_requirement_fails(tmp_path):
+    """Negative control: hide the bd-ready prohibition in a detail region again."""
+    src = PACKAGES["claude"]["hook"]
+    hook = tmp_path / "plugin/hooks" / src.name
+    hook.parent.mkdir(parents=True)
+    shutil.copy2(src, hook)
+    rules_dir = Path(shutil.copytree(CLAUDE_RULES, tmp_path / "plugin/rules"))
+    path = rules_dir / "continuation-harness.md"
+    text = path.read_text(encoding="utf-8")
+    line = next(ln for ln in text.splitlines() if ln.startswith("Do **not** pick up unrelated ready tasks"))
+    path.write_text(
+        text.replace(line, f"{DETAIL_START}\n{line}\n{DETAIL_END}", 1), encoding="utf-8"
+    )
+    contexts = []
+    for args in registered_args(PACKAGES["claude"]["registration"], "SessionStart"):
+        result = run_hook(hook, args)
+        if result:
+            contexts.append(result["additionalContext"])
+
+    assert any("bd ready" in m for m in missing_pins(contexts, rules_dir))
+
+
+# --- Registration: only where the host can inject, only when it should ----
+
+def _inject_groups(registration: Path) -> dict[str, list[dict]]:
+    hooks = json.loads(registration.read_text(encoding="utf-8"))["hooks"]
+    return {
+        event: [g for g in groups if any("inject_rules.py" in h["command"] for h in g["hooks"])]
+        for event, groups in hooks.items()
+    }
+
+
+def test_codex_injects_at_startup_clear_and_compact_but_not_resume_or_precompact():
+    """Codex 0.160.1's PreCompact output cannot carry additionalContext, and its
+    SessionStart matcher filters on source (measured: '' also fires on resume,
+    which would stack the rules onto history again)."""
+    groups = _inject_groups(PACKAGES["codex"]["registration"])
+    assert groups.get("PreCompact", []) == []
+    assert groups["SessionStart"]
+    assert {g["matcher"] for g in groups["SessionStart"]} == {"startup|clear|compact"}
+
+
+def test_claude_injects_at_startup_clear_and_compact():
+    groups = _inject_groups(PACKAGES["claude"]["registration"])
+    assert {g["matcher"] for g in groups["SessionStart"]} == {"startup|clear|compact"}

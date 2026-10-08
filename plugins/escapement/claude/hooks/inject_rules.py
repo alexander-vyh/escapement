@@ -139,19 +139,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--part", type=int)
     parser.add_argument("--of", type=int)
     args = parser.parse_args(argv)
+    if (args.part is None) != (args.of is None):
+        parser.error("--part and --of go together")
+    if args.part is not None and (args.part < 1 or args.of < 1):
+        parser.error("--part and --of must be at least 1")
     try:
-        payload = json.load(sys.stdin)
+        json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
-        payload = {}
-    event = payload.get("hook_event_name") if isinstance(payload, dict) else None
+        pass
     rules_dir = Path(__file__).resolve().parent.parent / "rules"
     context = rules_context(rules_dir, args.part, args.of)
     if not context:
         return 0
     print(json.dumps({
         "hookSpecificOutput": {
-            # SessionStart, or PreCompact where the host re-injects after compaction.
-            "hookEventName": event if event in ("SessionStart", "PreCompact") else "SessionStart",
+            # Registered on SessionStart only (startup|clear|compact): Codex's
+            # PreCompact output cannot carry additionalContext.
+            "hookEventName": "SessionStart",
             "additionalContext": context,
         }
     }))

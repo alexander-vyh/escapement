@@ -67,12 +67,17 @@ def test_codex_plugin_layout_injects_the_packages_own_rule_variants(tmp_path):
     assert output["additionalContext"].endswith("\n\n# Teams\n\nDispatch reviewers with spawn_agent.\n")
 
 
-def test_codex_precompact_reinjection_names_its_event(tmp_path):
-    hook = _install(tmp_path, "p/claude/hooks", "p/claude/rules", {"a.md": "# A\n\nRule A.\n"})
-    output = _run(hook, "--part", "1", "--of", "2", event="PreCompact")
-
-    assert output["hookEventName"] == "PreCompact"
-    assert "Rule A." in output["additionalContext"]
+def test_bad_part_arguments_are_rejected(tmp_path):
+    hook = _install(tmp_path, "p/hooks", "p/rules", {"a.md": "# A\n\nRule A.\n"})
+    for args in (["--part", "0", "--of", "3"], ["--part", "-1", "--of", "3"],
+                 ["--part", "2"], ["--of", "3"], ["--part", "1", "--of", "0"]):
+        completed = subprocess.run(
+            [sys.executable, str(hook), *args], input="{}",
+            capture_output=True, text=True, timeout=10,
+        )
+        assert completed.returncode != 0, args
+        assert completed.stdout == "", args
+        assert "--part" in completed.stderr or "--of" in completed.stderr, args
 
 
 def test_rules_are_packed_whole_into_labelled_parts_under_the_limit(tmp_path):
@@ -91,7 +96,7 @@ def test_rules_are_packed_whole_into_labelled_parts_under_the_limit(tmp_path):
     assert "a.md" in first.split("\n", 1)[0] and "c.md" in second.split("\n", 1)[0]
 
 
-def test_budget_counts_utf8_bytes_not_characters(tmp_path):
+def test_budget_counts_utf8_bytes_as_codex_truncates(tmp_path):
     """Codex truncates by bytes: two 3,000-char rules of em-dashes are ~9 KB each."""
     dashes = "# Dash\n\n" + "—" * 2_900 + "\n"
     hook = _install(tmp_path, "plugin/hooks", "plugin/rules", {"a.md": dashes, "b.md": dashes})

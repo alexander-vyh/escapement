@@ -523,152 +523,80 @@
           "events": [
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 1 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 2 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 3 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 4 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 5 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 6 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 7 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 8 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 9 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 10 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 11 --of 12",
               "timeout_seconds": 10
             },
             {
               "event": "SessionStart",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 12 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 1 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 2 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 3 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 4 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 5 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 6 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 7 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 8 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 9 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 10 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inject_rules.py --part 11 --of 12",
-              "timeout_seconds": 10
-            },
-            {
-              "event": "PreCompact",
-              "matcher": "",
+              "matcher": "startup|clear|compact",
               "command": "python3 -B claude/hooks/inject_rules.py --part 12 --of 12",
               "timeout_seconds": 10
             }
           ],
           "fixtures": [
             "claude/hooks/tests/test_inject_rules.py::test_codex_plugin_layout_injects_the_packages_own_rule_variants",
-            "claude/hooks/tests/test_inject_rules.py::test_codex_precompact_reinjection_names_its_event"
+            "claude/hooks/tests/test_inject_rules.py::test_budget_counts_utf8_bytes_as_codex_truncates"
           ]
         },
         "pi": {

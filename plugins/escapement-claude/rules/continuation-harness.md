@@ -104,8 +104,10 @@ Config/docs work being TDD-exempt does NOT exempt it from a continuation-harness
 | Terraform / OpenTofu (config-authoring) | `tofu validate` then a deterministic plan assertion, e.g. `tofu plan -out=tfplan && tofu show -json tfplan \| jq -e '<assertion about resource_changes>'` |
 | Kubernetes manifests | `kubeconform <f>` then `kubectl apply --dry-run=server -f <f>` |
 
+<!-- escapement:detail:end -->
 If the real behavior can only be observed after merge (platform semantics, no sandbox), do NOT register a passing parse-check as the contract. Instead declare the contract's verification as the **post-merge observation command** and register a `ScheduleWakeup` to run it after merge, or surface a waiver to the user. A green parse check standing in for an unverified trigger change is exactly the oracle-downgrade the harness exists to prevent.
 
+<!-- escapement:detail:start -->
 ## How to verify
 
 When you consider the task done:
@@ -121,11 +123,11 @@ issue. If an unresolved consequential choice blocks that action, persist the dep
 and continue independent authorized work; documenting a failure is durable state, not
 completion.
 
+<!-- escapement:detail:end -->
 ## How to schedule resumption
 
 If your work is genuinely waiting on something external (CI, merge queue, DAG run, an external agent), use the `ScheduleWakeup` tool. Don't write "I'll check back" as prose and end the turn — prose-as-polling is the largest measured stall class (30%) and is exactly what this gate exists to prevent.
 
-<!-- escapement:detail:end -->
 ### Task-mode gate + external-event wait: use ScheduleWakeup, not task pickup
 
 <!-- escapement:detail:start -->
