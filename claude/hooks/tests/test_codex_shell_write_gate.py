@@ -36,9 +36,9 @@ def _repo(tmp_path):
     return repo
 
 
-def _shell(repo, env, command: str) -> dict | None:
+def _shell(repo, env, command: str, session: str | None = None) -> dict | None:
     """Codex's PreToolUse hooks, the shell command, then its PostToolUse hook."""
-    session = f"codex-{uuid.uuid4()}"
+    session = session or f"codex-{uuid.uuid4()}"
     before = payload("pre_tool_use_bash_with_workdir", cwd=str(repo),
                      tool_input={"command": command}, session_id=session)
     assert is_allowed(run(PRE, "shell_write_gate.py", before, env))
@@ -63,3 +63,17 @@ def test_codex_shell_write_without_tests_reaches_the_model(tmp_path):
 def test_codex_shell_docs_write_is_silent(tmp_path):
     repo = _repo(tmp_path)
     assert _shell(repo, isolated_env(tmp_path), "echo more >> docs/README.md") is None
+
+
+def test_codex_cd_into_another_repo_is_read_in_both_halves(tmp_path):
+    """The PreToolUse dispatcher follows a leading `cd`; the PostToolUse half must
+    read the same repository, or it compares the session's repo with the other
+    one's snapshot: it blames dirt there and misses the write here."""
+    home, other = _repo(tmp_path / "home"), _repo(tmp_path / "other")
+    env, session = isolated_env(tmp_path), f"codex-{uuid.uuid4()}"
+    assert _shell(home, env, "ls", session) is None
+    (home / "src" / "theirs.py").write_text("THEIRS = 1\n")  # another session, in home
+    output = _shell(home, env, f"cd {other} && echo 'VALUE = 3' > src/app.py", session)
+    text = context(output, POST)
+    assert "src/app.py" in text
+    assert "theirs.py" not in text, "dirt in the session's repo is not this call's write"

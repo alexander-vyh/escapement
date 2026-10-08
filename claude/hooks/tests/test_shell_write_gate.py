@@ -104,6 +104,8 @@ class Shell:
         }
         if event == "PostToolUse":
             payload["tool_response"] = {"stdout": "", "stderr": "", "interrupted": False}
+        elif event == "PostToolUseFailure":
+            payload["error"] = "Exit code 1"
         proc = subprocess.run([sys.executable, "-B", str(HOOK)], input=json.dumps(payload),
                               capture_output=True, text=True, env=self.env, timeout=60)
         assert proc.returncode == 0, proc.stderr
@@ -112,13 +114,18 @@ class Shell:
     def bash(self, command: str) -> dict | None:
         if self.pre:
             assert self._hook("PreToolUse", command) is None, "the snapshot never blocks"
-        subprocess.run(["bash", "-c", command], cwd=self.repo, check=True)
-        return self._hook("PostToolUse", command)
+        # Claude sends a command that exits non-zero to PostToolUseFailure.
+        failed = subprocess.run(["bash", "-c", command], cwd=self.repo).returncode != 0
+        return self._hook("PostToolUseFailure" if failed else "PostToolUse", command)
 
 
 def _feedback(output: dict | None) -> str:
     """What Claude feeds back to the model after the Bash call, else fail."""
     assert output is not None, "expected the shell write to be reported"
+    hook = output.get("hookSpecificOutput") or {}
+    if hook.get("hookEventName") == "PostToolUseFailure":
+        assert hook.get("additionalContext"), output
+        return hook["additionalContext"]
     assert output.get("decision") == "block", output
     return output["reason"]
 
@@ -277,3 +284,88 @@ def test_corrupt_session_state_fails_open(repo, env):
             path.write_text("{not json")
     shell.bash(HEREDOC)  # must not crash; the hook asserts exit 0
     assert shell.bash("ls") is None
+
+
+# --- Re-review of 1487b10 ----------------------------------------------------
+
+def test_a_write_followed_by_a_failing_command_is_held(repo, env):
+    """`cat > x.py ... && pytest` going red is the bypass itself: Claude reports a
+    non-zero exit as PostToolUseFailure, and the plugin must be listening there."""
+    hooks = json.loads((HOOK.parents[2] / "plugins" / "escapement-claude" / "hooks"
+                        / "hooks.json").read_text())["hooks"]
+    assert any(item["matcher"] == "Bash" and HOOK.name in hook["command"]
+               for item in hooks.get("PostToolUseFailure", []) for hook in item["hooks"])
+    shell = Shell(repo, env)
+    assert "src/impl.py" in _feedback(shell.bash("echo 'IMPL = 1' > src/impl.py; false"))
+    assert shell.bash("ls") is None
+
+
+def _git_failing_status(tmp_path: Path, env: dict) -> Path:
+    """A `git` on PATH whose `status` fails while the returned marker exists."""
+    real = subprocess.run(["which", "git"], capture_output=True, text=True, check=True).stdout.strip()
+    bin_dir, marker = tmp_path / "fakebin", tmp_path / "git-status-fails"
+    bin_dir.mkdir()
+    (bin_dir / "git").write_text(
+        f'#!/bin/sh\nif [ "$1" = status ] && [ -e "{marker}" ]; then exit 128; fi\n'
+        f'exec "{real}" "$@"\n')
+    (bin_dir / "git").chmod(0o755)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    return marker
+
+
+def test_a_failed_snapshot_is_unknown_not_clean(repo, env, tmp_path):
+    """git status failing before the call must not turn all existing dirt into
+    this call's writes: the call is skipped and the tree re-baselined."""
+    (repo / "src" / "legacy.py").write_text("OLD = 1\n")
+    marker = _git_failing_status(tmp_path, env)
+    marker.touch()
+    shell = Shell(repo, env)
+    assert shell.bash(f"rm {marker}") is None, "legacy.py is not this session's write"
+    reason = _feedback(shell.bash("echo 'RATE = 2' > src/pricing.py"))
+    assert "src/pricing.py" in reason and "legacy.py" not in reason
+
+
+def test_write_and_commit_in_one_call_is_held(repo, env):
+    reason = _feedback(Shell(repo, env).bash(
+        "echo 'RATE = 2' > src/pricing.py && git add src/pricing.py && "
+        "git -c user.email=t@t -c user.name=t commit -qm pricing"))
+    assert "src/pricing.py" in reason
+
+
+def test_a_reset_does_not_blame_the_history_it_undoes(repo, env):
+    """Someone else's commit, un-done by this session's reset, is not this session's write."""
+    (repo / "src" / "app.py").write_text("VALUE = 5\n")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", "theirs")
+    shell = Shell(repo, env)
+    assert shell.bash("git reset -q --soft HEAD~1") is None
+    assert shell.bash("ls") is None
+
+
+def test_a_huge_dirty_tree_is_skipped_not_hashed(repo, env):
+    """Past 2,000 dirty paths the hook stays silent rather than hash them all."""
+    junk = repo / "junk"
+    junk.mkdir()
+    for index in range(2001):
+        (junk / f"f{index}.txt").write_text("x")
+    shell = Shell(repo, env)
+    assert shell.bash("ls") is None
+    assert shell.bash(HEREDOC) is None
+
+
+def test_a_long_tdd_list_is_capped(repo, env):
+    command = " && ".join(f"echo 'X = {i}' > src/m{i:02d}.py" for i in range(12))
+    reason = _feedback(Shell(repo, env).bash(command))
+    tdd_part = reason.split("\n\n")[0]
+    assert "src/m00.py" in tdd_part and "src/m11.py" not in tdd_part
+    assert "4 more" in tdd_part
+
+
+def test_a_fast_forward_pull_is_not_this_sessions_write(repo, env):
+    """Commits that arrive during the call (a pull) were made before it: not named."""
+    _git(repo, "checkout", "-q", "-b", "upstream")
+    (repo / "src" / "app.py").write_text("VALUE = 6\n")
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", "up"],
+                   cwd=repo, check=True, capture_output=True,
+                   env={**os.environ, "GIT_COMMITTER_DATE": "2020-01-01T00:00:00"})
+    _git(repo, "checkout", "-q", "main")
+    assert Shell(repo, env).bash("git merge -q --ff-only upstream") is None
