@@ -167,6 +167,11 @@
       "id": "enforce_named_agents",
       "source": "claude/hooks/enforce_named_agents.py",
       "timeout_seconds": 5
+    },
+    {
+      "id": "shadow_verifier",
+      "source": "claude/hooks/shadow_verifier.py",
+      "timeout_seconds": 5
     }
   ],
   "mcp_gates": [
@@ -185,6 +190,11 @@
   ],
   "post_tool_gates": {
     "bash": [
+      {
+        "id": "shadow_verifier",
+        "source": "claude/hooks/shadow_verifier.py",
+        "timeout_seconds": 10
+      },
       {
         "id": "shell_write_gate",
         "source": "claude/hooks/shell_write_gate.py",

@@ -93,6 +93,10 @@ SHARED_HOOK_SUPPORT = {
     # before any gate runs. Omitting it silently restores the old behaviour:
     # every gate judges the session's directory instead of the command's.
     "claude/hooks/_effective_cwd.py",
+    # shadow_verifier's bounded runner and its challenger-dispatch evidence.
+    # Omitting either makes the hook fail at import: every landing goes unrecorded.
+    "claude/hooks/_shadow_run.py",
+    "claude/hooks/_shadow_challengers.py",
     "claude/hooks/_worktree_cli.py",
     "claude/hooks/_gate_signal.py",
     "claude/hooks/_advisory_dedupe.py",
@@ -180,6 +184,11 @@ CODEX_HOOK_SUPPORT = {
     # path. Without it, an explicitly authorized Codex repository is denied
     # fail-closed because the policy reader cannot be imported.
     "harness/bin/repo_outcome.py",
+    # shadow_verifier.py reads a bead's verify oracle through derive_contract
+    # (which imports init_contract). Without them the import fails, the hook
+    # swallows it by design, and Codex landings leave no shadow record at all.
+    "harness/bin/derive_contract.py",
+    "harness/bin/init_contract.py",
     # codex_stop_hook.py imports its decision core rather than reimplementing it;
     # verify_integrity.py is would_block_stop's own transitive sibling. Without
     # both, the Stop hook raises ImportError, fails open, and the Codex adapter
