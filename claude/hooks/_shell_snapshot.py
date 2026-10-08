@@ -8,8 +8,14 @@ the comparison is always "just before this command" against "just after it",
 never against an earlier call's snapshot, which would hand this call every
 foreign write made between calls.
 
-Every git call shares one deadline (`Budget`) well inside the host's 10s hook
-timeout. Anything that cannot be known is a blind status, never a clean tree.
+Every git call and every file hash shares one deadline (`Budget`) well inside
+the host's 10s hook timeout. Git runs with `--no-optional-locks`, so the hook's
+`git status` never takes .git/index.lock from under another session's `git add`.
+Anything that cannot be known is a blind status, never a clean tree.
+
+A pending snapshot whose after-call half never came (a killed command, a host
+that dropped the event) is swept after an hour, by the next before-half in the
+same session; a session's last orphans stay where they are.
 """
 
 from __future__ import annotations
@@ -41,16 +47,19 @@ _COMMIT_SUBJECT = re.compile(r"commit(?: \((?:amend|initial)\))?: ")
 class Budget:
     """One deadline for every git call a hook half makes."""
 
-    def __init__(self, seconds: float = 5.0) -> None:
+    def __init__(self, seconds: float = 4.0) -> None:
         self.deadline = time.monotonic() + seconds
 
+    def left(self) -> float:
+        return self.deadline - time.monotonic()
+
     def git(self, cwd: str | Path, *args: str) -> subprocess.CompletedProcess | None:
-        remaining = self.deadline - time.monotonic()
+        remaining = self.left()
         if remaining <= 0.05:
             return None
         try:
-            return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                                  text=True, timeout=remaining, check=False)
+            return subprocess.run(["git", "--no-optional-locks", *args], cwd=str(cwd),
+                                  capture_output=True, text=True, timeout=remaining, check=False)
         except (OSError, subprocess.TimeoutExpired):
             return None
 
@@ -113,23 +122,29 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
     if len(dirty) > MAX_PATHS:
         return {"status": "too-many-dirty"}
     head = budget.git(root, "rev-parse", "--verify", "-q", "HEAD")
+    if head is None:
+        return {"status": "unknown"}  # timed out: not the same as an unborn HEAD
     old = (before or {}).get("files") or {}
     files: dict[str, str] = {}
     left = HASH_BUDGET
     for name in dirty:
+        out_of_time = budget.left() <= 0.05
         if name in old:
             method = _method(old[name])
+            if method == "hash" and out_of_time:
+                files[name] = UNREAD  # cannot compare it now; never named
+                continue
         else:
             try:
                 size = (root / name).stat().st_size
             except OSError:
                 size = 0
-            method = "hash" if size <= min(HASH_LIMIT, left) else "stat"
+            method = "hash" if not out_of_time and size <= min(HASH_LIMIT, left) else "stat"
             left -= size if method == "hash" else 0
         files[name] = fingerprint(root / name, method)
     return {
         "status": "ok",
-        "head": head.stdout.strip() if head is not None and head.returncode == 0 else None,
+        "head": head.stdout.strip() if head.returncode == 0 else None,
         "files": files,
     }
 
@@ -138,11 +153,12 @@ def commits_during(budget: Budget, root: Path, old: str | None, new: str | None)
     """Files of commits this call made; None when HEAD moved for any other reason."""
     if old == new:
         return []
-    if not old or not new:
+    if not new:
         return None
     log = budget.git(root, "reflog", "show", "-n", "64", "--format=%H%x1f%gs", "HEAD")
     if log is None or log.returncode != 0:
         return None
+    subject = ""
     for line in log.stdout.splitlines():
         sha, _, subject = line.partition("\x1f")
         if sha == old:
@@ -150,8 +166,13 @@ def commits_during(budget: Budget, root: Path, old: str | None, new: str | None)
         if not _COMMIT_SUBJECT.match(subject):
             return None
     else:
-        return None  # the call's starting point is not in the recent reflog
-    diff = budget.git(root, "diff", "--name-only", "-z", old, new)
+        # Reached the reflog's end: only a repository born in this call starts there.
+        if old or not subject.startswith("commit (initial): ") or len(log.stdout.splitlines()) >= 64:
+            return None
+    if old:
+        diff = budget.git(root, "diff", "--name-only", "-z", old, new)
+    else:
+        diff = budget.git(root, "ls-tree", "-r", "--name-only", "-z", new)
     if diff is None or diff.returncode != 0:
         return None
     names = [name for name in diff.stdout.split("\0") if name]
@@ -204,16 +225,13 @@ def write_json(path: Path, value: dict) -> None:
         pass
 
 
-def _pending_path(directory: Path, call_id: str) -> Path | None:
-    if not _ID_RE.fullmatch(call_id) or call_id in (".", ".."):
-        return None
-    return directory / f"pending-{call_id}.json"
+def _pending_path(directory: Path, call_id: str) -> Path:
+    """Any non-empty id the host gives (OpenAI Responses ids carry a `|`)."""
+    digest = hashlib.sha256(call_id.encode("utf-8", "surrogatepass")).hexdigest()[:40]
+    return directory / f"pending-{digest}.json"
 
 
 def save_pending(directory: Path, call_id: str, root: Path, snap: dict) -> None:
-    path = _pending_path(directory, call_id)
-    if path is None:
-        return
     try:
         now = time.time()
         for stale in directory.glob("pending-*.json"):
@@ -221,23 +239,23 @@ def save_pending(directory: Path, call_id: str, root: Path, snap: dict) -> None:
                 stale.unlink(missing_ok=True)
     except OSError:
         pass
-    write_json(path, {"repo": str(root), "snapshot": snap})
+    write_json(_pending_path(directory, call_id),
+               {"repo": str(root), "snapshot": snap, "at": time.time()})
 
 
-def pop_pending(directory: Path, call_id: str) -> tuple[Path, dict] | None:
-    """This call's before-snapshot, consumed; None when its before-half left none."""
+def pop_pending(directory: Path, call_id: str) -> tuple[Path, dict, float | None] | None:
+    """(repo, before-snapshot, when it was taken), consumed; None when the
+    before-half left none."""
     path = _pending_path(directory, call_id)
-    if path is None:
-        return None
     pending = read_json(path)
     try:
         path.unlink(missing_ok=True)
     except OSError:
         pass
-    snap, repo = pending.get("snapshot"), pending.get("repo")
+    snap, repo, at = pending.get("snapshot"), pending.get("repo"), pending.get("at")
     if not isinstance(repo, str) or not usable(snap):
         return None
-    return Path(repo), snap
+    return Path(repo), snap, at if isinstance(at, (int, float)) else None
 
 
 def usable(snap: object) -> bool:

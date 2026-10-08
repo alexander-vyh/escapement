@@ -108,7 +108,8 @@ def _git_failing(tmp_path: Path, env: dict, subcommand: str) -> Path:
     bin_dir, marker = tmp_path / f"fakebin-{subcommand}", tmp_path / f"git-{subcommand}-fails"
     bin_dir.mkdir()
     (bin_dir / "git").write_text(
-        f'#!/bin/sh\nif [ "$1" = {subcommand} ] && [ -e "{marker}" ]; then exit 128; fi\n'
+        f'#!/bin/sh\nsub="$1"; [ "$sub" = --no-optional-locks ] && sub="$2"\n'
+        f'if [ "$sub" = {subcommand} ] && [ -e "{marker}" ]; then exit 128; fi\n'
         f'exec "{real}" "$@"\n')
     (bin_dir / "git").chmod(0o755)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
@@ -155,6 +156,8 @@ def test_a_reset_does_not_blame_the_history_it_undoes(repo, env):
     _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", "theirs")
     shell = Shell(repo, env)
     assert shell.bash("git reset -q --soft HEAD~1") is None
+    assert any(s.get("gate") == "shell_write_gate" and s.get("reason") == "head-moved"
+               for s in signals(env)), "a blind call must say so in telemetry"
     assert shell.bash("ls") is None
 
 

@@ -29,18 +29,33 @@ def _project(tmp_path: Path) -> Path:
     })
 
 
-def _ran(plugin: Path, env: dict, session: Session, repo: Path, command: str) -> dict:
+def _ran(plugin: Path, env: dict, session: Session, repo: Path, command: str,
+         call_id: str | None = None) -> dict:
     """Pi's tool_call, then bash runs `command`, then its tool_result.
 
     The tool_call runs the PreToolUse snapshot, so it is delivered before the
-    change is on disk; the outcome returned is the tool_result's.
+    change is on disk; the outcome returned is the tool_result's. `call_id`
+    replaces the harness's `call-N` with a provider's own id shape.
     """
     arguments = {"command": command}
-    (call,) = run(plugin, [session.tool_call("bash", arguments)], env)
+    call_event = session.tool_call("bash", arguments)
+    result_event = session.tool_result("bash", arguments, "done")
+    if call_id is not None:
+        call_event["payload"]["toolCallId"] = result_event["payload"]["toolCallId"] = call_id
+    (call,) = run(plugin, [call_event], env)
     assert not (call["result"] or {}).get("block"), call
     subprocess.run(["bash", "-c", command], cwd=repo, check=True)
-    (outcome,) = run(plugin, [session.tool_result("bash", arguments, "done")], env)
+    (outcome,) = run(plugin, [result_event], env)
     return outcome
+
+
+def test_pi_openai_responses_call_ids_still_pair_the_halves(plugin, tmp_path):
+    """Pi's openai-codex provider names calls `call_…|fc_…`; the gate must not go quiet."""
+    repo = _project(tmp_path)
+    outcome = _ran(plugin, pi_env(tmp_path), Session(repo), repo,
+                   "python3 -c \"open('src/app.py','w').write('VALUE = 4\\n')\"",
+                   call_id="call_Xy12AbC|fc_0123456789abcdef")
+    assert "src/app.py" in appended_text(outcome["result"])
 
 
 def test_pi_shell_write_without_tests_is_reported_in_the_result_once(plugin, tmp_path):

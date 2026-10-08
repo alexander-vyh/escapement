@@ -23,27 +23,40 @@ records HEAD and a fingerprint of every dirty path, filed under the host's
 tool-call id; just after it (PostToolUse, or PostToolUseFailure when the
 command exited non-zero) it consumes that same snapshot and names only the
 paths that are new or changed, plus the files of commits the call made (reflog
-`commit` entries only). The after-call half uses the repository the before-half
-resolved; it never resolves a `cd` itself. The before-half resolves a leading
-`cd` only on Claude; on Codex and Pi the dispatcher already has, and doing it
-twice would land in the wrong directory. See _shell_snapshot.
+`commit`, `commit (amend)` or `commit (initial)` entries only). The after-call
+half uses the repository the before-half resolved; it never resolves a `cd`
+itself. The before-half resolves a leading `cd` only on Claude; on Codex and
+Pi the dispatcher already has, and doing it twice would land in the wrong
+directory. Any tool-call id the host gives is accepted (it is hashed into a
+file name). See _shell_snapshot.
+
+The window is the time between the two halves. PreToolUse runs before the
+host's permission prompt, so on Claude, whose after-call payload carries the
+command's own `duration_ms`, a window more than 2s longer than the command ran
+names nothing: foreign writes made while a prompt waited are not this call's.
 
 Failing open. With no before-snapshot for this call -- a host that sends only
-the after-call half or no tool-call id, a before-half killed at the host
-timeout, no repository found -- the call names nothing; it is never compared
-with an older snapshot. A git status that fails or times out, more than 2,000
-dirty paths, or a HEAD moved by anything but this call's commits (pull, merge,
-rebase, reset, checkout) also names nothing, and records a `blind` gate signal
-so the blindness shows in telemetry. Git calls share a 5s budget per half.
+the after-call half, no tool-call id or session id, a before-half killed at
+the host timeout, no repository found -- the call names nothing; it is never
+compared with an older snapshot. A git status or HEAD lookup that fails or
+times out, more than 2,000 dirty paths, a HEAD moved by anything but this
+call's commits (pull, merge, rebase, reset, checkout), or a prompt wait also
+names nothing, and records a `blind` gate signal so the blindness shows in
+telemetry. Git calls and file hashing share a 4s budget per half; a file left
+unhashed when it runs out is never named.
 
 Known gaps, not built: Codex's `workdir` parameter is not in its payload, so a
 command run in another directory that way -- another worktree, say, which is
-common -- is invisible: its writes are not seen. Another session writing during
-this session's command is inside the window and is named. A write left running
-in the background after the call returns is not seen. `git stash pop`
-re-dirties files with new fingerprints and names them. Subagents that share the
-parent's session id share its state. A `cd` that is not the leading command is
-not followed.
+common -- is invisible: its writes are not seen. Codex sends no duration, so on
+Codex (and Pi) a write another session makes while a permission prompt waits
+is named. Another session writing during this session's command is inside the
+window and is named. A write left running in the background after the call
+returns is not seen. `git stash pop` re-dirties files with new fingerprints and
+names them. Subagents that share the parent's session id share its state, and
+two calls finishing at once can each rewrite the reported-once memory
+(reported.json), so a file may be reported twice. A session's last pending
+snapshots, if their after-call half never came, are left behind. A `cd` that
+is not the leading command is not followed.
 
 Exit codes:
   0 -- always; the report is the JSON on stdout
@@ -54,6 +67,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -93,6 +107,8 @@ def _load_tdd_gate():
 _ONCE = "This is reported once per file per session"
 _EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
 _SHOWN = 8
+# How much longer than the command's own run time the before/after window may be.
+_PROMPT_SLACK = 2.0
 
 
 def _unreported(memory: dict, key: str, names: list[str]) -> list[str]:
@@ -163,9 +179,12 @@ def run(data: dict) -> str | None:
     hook_event = data.get("hook_event_name", "") or data.get("hookEventName", "")
     if hook_event not in _EVENTS or data.get("tool_name") != "Bash":
         return None
+    started = time.time()
     session_dir = snap.session_dir(str(data.get("session_id") or data.get("sessionId") or ""))
     call_id = data.get("tool_use_id")
     if session_dir is None or not isinstance(call_id, str) or not call_id:
+        if hook_event == "PreToolUse":
+            _blind("no-session-id" if session_dir is None else "no-call-id")
         return None  # nothing pairs the two halves: say nothing
     budget = snap.Budget()
     if hook_event == "PreToolUse":
@@ -185,7 +204,12 @@ def run(data: dict) -> str | None:
     pending = snap.pop_pending(session_dir, call_id)
     if pending is None:
         return None
-    root, before = pending
+    root, before, taken_at = pending
+    duration_ms = data.get("duration_ms")
+    if isinstance(duration_ms, (int, float)) and not isinstance(duration_ms, bool) \
+            and taken_at is not None and started - taken_at > duration_ms / 1000 + _PROMPT_SLACK:
+        _blind("prompt-wait")  # the window held a permission prompt, not just the command
+        return None
     after = snap.take(budget, root, before)
     if not snap.usable(after):
         _blind(after.get("status", "unknown"))

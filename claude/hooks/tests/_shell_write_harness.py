@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -87,8 +88,11 @@ class Shell:
     `pre=False` is a host that delivers only the PostToolUse half.
     """
 
-    def __init__(self, repo: Path, env: dict, *, pre: bool = True) -> None:
+    def __init__(self, repo: Path, env: dict, *, pre: bool = True, call_id=None) -> None:
         self.repo, self.env, self.session, self.pre = repo, env, f"s-{uuid.uuid4()}", pre
+        # The host's tool-call id; Claude's shape unless a test names another.
+        self.call_id = call_id or (lambda: f"toolu_{uuid.uuid4().hex}")
+        self.duration_ms: int | None = None
 
     def _hook(self, event: str, command: str) -> dict | None:
         payload = {
@@ -103,17 +107,25 @@ class Shell:
             payload["tool_response"] = {"stdout": "", "stderr": "", "interrupted": False}
         elif event == "PostToolUseFailure":
             payload["error"] = "Exit code 1"
+        if event != "PreToolUse" and self.duration_ms is not None:
+            payload["duration_ms"] = self.duration_ms  # Claude 2.1.293 sends the command's run time
         proc = subprocess.run([sys.executable, "-B", str(HOOK)], input=json.dumps(payload),
                               capture_output=True, text=True, env=self.env, timeout=60)
         assert proc.returncode == 0, proc.stderr
         return json.loads(proc.stdout) if proc.stdout.strip() else None
 
-    def bash(self, command: str) -> dict | None:
-        self.call = f"toolu_{uuid.uuid4().hex}"
+    def bash(self, command: str, *, while_prompting=None) -> dict | None:
+        """`while_prompting` runs after PreToolUse and before the command: the
+        permission prompt's wait, which the command's duration_ms leaves out."""
+        self.call = self.call_id()
         if self.pre:
             assert self._hook("PreToolUse", command) is None, "the snapshot never blocks"
+        if while_prompting is not None:
+            while_prompting()
+        started = time.monotonic()
         # Claude sends a command that exits non-zero to PostToolUseFailure.
         failed = subprocess.run(["bash", "-c", command], cwd=self.repo).returncode != 0
+        self.duration_ms = int((time.monotonic() - started) * 1000)
         return self._hook("PostToolUseFailure" if failed else "PostToolUse", command)
 
 
