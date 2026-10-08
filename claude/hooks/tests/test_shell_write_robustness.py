@@ -92,7 +92,7 @@ def test_the_hash_or_stat_choice_is_made_before_the_call(repo, monkeypatch):
     assert before["files"]["src/b.py"].startswith("stat:")
     _git(repo, "checkout", "--", "src/a.py")  # the call
     after = snap.take(snap.Budget(), repo, before)
-    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [])
+    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [], [], [])
 
 
 def test_a_repositorys_first_commit_is_seen(tmp_path, env):
@@ -126,7 +126,9 @@ def test_a_foreign_write_during_a_slow_pre_half_and_a_prompt_is_not_blamed(repo,
     writer = threading.Timer(1.0, lambda: (repo / "src" / "theirs.py").write_text("THEIRS = 1\n"))
     writer.start()
     try:
-        assert Shell(repo, env).bash("ls", while_prompting=lambda: time.sleep(1.5)) is None
+        shell = Shell(repo, env)
+        shell.credit_pre_half = False  # the slow before-half is the point here
+        assert shell.bash("ls", while_prompting=lambda: time.sleep(1.5)) is None
     finally:
         writer.join()
     assert _blind(env, "prompt-wait")
@@ -168,7 +170,9 @@ def test_a_hashed_file_left_unhashed_when_time_runs_out_is_not_named(repo):
             return 0.0
 
     after = snap.take(SpentAfterGit(), repo, before)
-    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [])
+    # Not named, and not silently dropped either: it could not be checked.
+    names, _, out_of_time, unreadable = snap.written(snap.Budget(), repo, before, after, [])
+    assert names == [] and out_of_time == ["src/app.py"] and unreadable == []
 
 
 def test_a_worktree_rename_is_parsed_as_one_path(repo):

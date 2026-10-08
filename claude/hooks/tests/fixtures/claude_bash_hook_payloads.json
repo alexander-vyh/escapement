@@ -1,0 +1,44 @@
+{
+ "capture": {
+  "captured_at": "2026-10-07",
+  "claude_code": "2.1.293; claude -p --permission-mode bypassPermissions --setting-sources project --model claude-haiku-4-5-20251001",
+  "how": "A scratch git project's .claude/settings.json registered a stdin-dumping probe for PreToolUse, PostToolUse and PostToolUseFailure on Bash. The session was told to run exactly `echo 'IMPL = 1' > impl.py; false` with the Bash tool.",
+  "findings": [
+   "A Bash command that exits non-zero fires PostToolUseFailure, not PostToolUse; no PostToolUse payload was sent.",
+   "PostToolUseFailure carries duration_ms (the command's run time), the same tool_use_id as PreToolUse, error ('Exit code 1') and is_interrupt; it has no tool_response."
+  ]
+ },
+ "payloads": {
+  "pre_tool_use_bash": {
+   "session_id": "9dccdaed-128b-46c0-8720-413176cddb0e",
+   "transcript_path": "/Users/alexandervyhmeister/.claude/projects/-private-tmp-claude-502--Users-alexandervyhmeister-GitHub-escapement-1a0c2ac2-bc6b-43b5-8a94-00c8415cc97f-scratchpad-probe/9dccdaed-128b-46c0-8720-413176cddb0e.jsonl",
+   "cwd": "/private/tmp/claude-502/-Users-alexandervyhmeister-GitHub-escapement/1a0c2ac2-bc6b-43b5-8a94-00c8415cc97f/scratchpad/probe",
+   "prompt_id": "57ef5d0c-0d87-4d97-b8d3-59d2c2db034c",
+   "permission_mode": "bypassPermissions",
+   "hook_event_name": "PreToolUse",
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo 'IMPL = 1' > impl.py; false",
+    "description": "Write IMPL = 1 to impl.py and return false status"
+   },
+   "tool_use_id": "toolu_012Biga6zeJkZ9e8xvSejoAM"
+  },
+  "post_tool_use_failure_bash": {
+   "session_id": "9dccdaed-128b-46c0-8720-413176cddb0e",
+   "transcript_path": "/Users/alexandervyhmeister/.claude/projects/-private-tmp-claude-502--Users-alexandervyhmeister-GitHub-escapement-1a0c2ac2-bc6b-43b5-8a94-00c8415cc97f-scratchpad-probe/9dccdaed-128b-46c0-8720-413176cddb0e.jsonl",
+   "cwd": "/private/tmp/claude-502/-Users-alexandervyhmeister-GitHub-escapement/1a0c2ac2-bc6b-43b5-8a94-00c8415cc97f/scratchpad/probe",
+   "prompt_id": "57ef5d0c-0d87-4d97-b8d3-59d2c2db034c",
+   "permission_mode": "bypassPermissions",
+   "hook_event_name": "PostToolUseFailure",
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo 'IMPL = 1' > impl.py; false",
+    "description": "Write IMPL = 1 to impl.py and return false status"
+   },
+   "tool_use_id": "toolu_012Biga6zeJkZ9e8xvSejoAM",
+   "error": "Exit code 1",
+   "is_interrupt": false,
+   "duration_ms": 2637
+  }
+ }
+}

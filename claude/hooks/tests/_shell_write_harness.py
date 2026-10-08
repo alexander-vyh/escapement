@@ -94,6 +94,7 @@ class Shell:
         self.call_id = call_id or (lambda: f"toolu_{uuid.uuid4().hex}")
         self.duration_ms: int | None = None
         self.send_duration = True
+        self.credit_pre_half = True
 
     def _hook(self, event: str, command: str) -> dict | None:
         payload = {
@@ -119,14 +120,19 @@ class Shell:
         """`while_prompting` runs after PreToolUse and before the command: the
         permission prompt's wait, which the command's duration_ms leaves out."""
         self.call = self.call_id()
+        hook_started = time.monotonic()
         if self.pre:
             assert self._hook("PreToolUse", command) is None, "the snapshot never blocks"
+        # On a loaded test machine the before-half's own run can take seconds;
+        # unless a test is about that run, credit it to the command so the
+        # prompt check sees only the simulated prompt below.
+        credit = time.monotonic() - hook_started if self.credit_pre_half else 0.0
         if while_prompting is not None:
             while_prompting()
         started = time.monotonic()
         # Claude sends a command that exits non-zero to PostToolUseFailure.
         failed = subprocess.run(["bash", "-c", command], cwd=self.repo).returncode != 0
-        self.duration_ms = int((time.monotonic() - started) * 1000)
+        self.duration_ms = int((time.monotonic() - started + credit) * 1000)
         return self._hook("PostToolUseFailure" if failed else "PostToolUse", command)
 
 

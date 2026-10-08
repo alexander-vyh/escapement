@@ -47,7 +47,10 @@ missing duration on Claude also
 names nothing, and records a `blind` gate signal so the blindness shows in
 telemetry. Git calls and every file hash, including re-hashing a committed
 file, share a 4s budget per half; a file left unhashed when it runs out is
-never named. A file past 1MB is fingerprinted by size and mtime, so a new mtime
+never named, and a file left unchecked -- unhashed after the call, or a
+committed file there was no time to re-hash -- records an `out-of-time` blind
+signal. A dirty file that cannot be read (permission denied) is never named
+and records `unreadable`, once per call. A file past 1MB is fingerprinted by size and mtime, so a new mtime
 with the same size is not proof of a write: it is not named, and records a
 `stat-only` blind signal.
 
@@ -60,9 +63,30 @@ window and is named. A write left running in the background after the call
 returns is not seen. `git stash pop` re-dirties files with new fingerprints and
 names them. Subagents that share the parent's session id share its state, and
 two calls finishing at once can each rewrite the reported-once memory
-(reported.json), so a file may be reported twice. A session's last pending
-snapshots, if their after-call half never came, are left behind. A `cd` that
-is not the leading command is not followed.
+(reported.json), so a file may be reported twice. A `cd` that is not the
+leading command is not followed. A write into another working tree is seen
+only when a path in the command points into it (a gitignored .worktrees/<name>
+checkout, an absolute path in another clone); a script that writes there
+without naming the path is not, nor is a path built at run time (`$VAR`,
+`${PWD}/..`, `$HOME`, `os.path.join`), a glob in the target directory, brace
+expansion (`src/{a,b}.py`), or a path glued to a flag (`-o/path`). Writes to
+gitignored paths are never seen (status does not list them), and a `git init`
+outside any repository creates a tree no snapshot covered. A backgrounded
+call (`run_in_background`, a trailing `&`, nohup/setsid/disown) records
+`background`: what it writes after the after-half looks is not seen. A dirty
+submodule whose status code changes records `submodule`; its files are not
+named, and a further change to an already-dirty submodule is not seen. A
+payload with no cwd records `no-cwd`. A
+named repository git cannot confirm (timeout, safe.directory) records
+`unconfirmed`. Past 64 path tokens (`token-cap`) or 6
+repositories (`repo-cap`) the rest are not watched, and a named repository
+that cannot be snapshotted records its own blind. In a tree past
+_shell_snapshot.LARGE_INDEX, files inside untracked directories are not seen,
+and every call in such a tree records `untracked-dirs`. A path quoted inside
+another quoted string (`bash -c "... '/a b/x.py'"`, a `python -c` open) with a
+space in it is split on the space and not watched. Only the first 16k
+characters of a command are scanned for paths (`token-cap` past that). An after-half whose snapshot is gone -- never taken, or
+swept as an hour-old orphan -- records `no-pending`.
 
 Exit codes:
   0 -- always; the report is the JSON on stdout
@@ -72,6 +96,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -111,10 +136,15 @@ def _load_tdd_gate():
 
 
 _ONCE = "This is reported once per file per session"
+_CONCURRENT = ("These files changed while this command ran; another session writing "
+               "at the same time may have changed some of them.")
 _EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
 _SHOWN = 8
 # How much longer than the command's own run time the before/after window may be.
 _PROMPT_SLACK = 2.0
+# A command that leaves work running after it returns: a standalone trailing
+# `&`, or nohup/setsid/disown anywhere.
+_BACKGROUND = re.compile(r"(?:^|[^&])&\s*$|\b(?:nohup|setsid|disown)\b")
 
 
 def _unreported(memory: dict, key: str, names: list[str]) -> list[str]:
@@ -194,25 +224,16 @@ def run(data: dict) -> str | None:
         return None  # nothing pairs the two halves: say nothing
     budget = snap.Budget()
     if hook_event == "PreToolUse":
-        if _host(data) == "claude":  # Codex and Pi run this half behind the dispatcher,
-            data = _effective_cwd(data)  # which has already followed a leading `cd`
-        cwd = data.get("cwd")
-        root = snap.repo_root(budget, cwd) if isinstance(cwd, str) and cwd else None
-        if root is None:
-            snap.drop_pending(session_dir, call_id)
-            return None
-        before = snap.take(budget, root)
-        if snap.usable(before):
-            snap.save_pending(session_dir, call_id, root, before, started)
-        else:
-            snap.drop_pending(session_dir, call_id)
-            _blind(before.get("status", "unknown"))
+        _before_half(data, budget, session_dir, call_id, started)
         return None
 
     pending = snap.pop_pending(session_dir, call_id)
     if pending is None:
+        _blind("no-pending")  # the before-half never ran here, or its snapshot was swept
         return None
-    root, before, taken_at = pending
+    befores, taken_at = pending
+    if not befores:
+        return None  # the before-half ran and had nothing it could watch
     duration_ms = data.get("duration_ms")
     if not isinstance(duration_ms, (int, float)) or isinstance(duration_ms, bool):
         if _host(data) == "claude":  # Claude always sends it; without it the window is unknown
@@ -221,22 +242,101 @@ def run(data: dict) -> str | None:
     elif taken_at is None or started - taken_at > duration_ms / 1000 + _PROMPT_SLACK:
         _blind("prompt-wait")  # the window held a permission prompt, not just the command
         return None
+    memory_path = session_dir / "reported.json"
+    reported = snap.read_json(memory_path)
+    primary = next(iter(befores))
+    reports: list[str] = []
+    for root, before in befores.items():
+        report = _after_half(data, budget, root, before, primary, reported)
+        if report:
+            reports.append(report)
+    snap.write_json(memory_path, reported)
+    if not reports:
+        return None
+    return "\n\n".join(reports) + f"\n\n{_CONCURRENT}"
+
+
+def _before_half(data: dict, budget, session_dir: Path, call_id: str, started: float) -> None:
+    """Snapshot the cwd's repository and every one a path in the command names."""
+    if _host(data) == "claude":  # Codex and Pi run this half behind the dispatcher,
+        data = _effective_cwd(data)  # which has already followed a leading `cd`
+    cwd = data.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        _blind("no-cwd")  # nowhere to look from
+    root = snap.repo_root(budget, cwd) if isinstance(cwd, str) and cwd else None
+    tool_input = data.get("tool_input")
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if (isinstance(tool_input, dict) and tool_input.get("run_in_background") is True) or (
+            isinstance(command, str) and _BACKGROUND.search(command)):
+        _blind("background")  # it may still be writing after the after-half looks
+    roots = [root] if root is not None else []
+    unconfirmed = 0
+    if root is None and isinstance(cwd, str) and cwd and snap.disk_repo(Path(cwd)) is not None:
+        unconfirmed += 1
+        _blind("unconfirmed")  # a .git is there, but git would not say (safe.directory, timeout)
+    if isinstance(command, str) and isinstance(cwd, str) and cwd:
+        named_repos, token_cap = snap.named_repos(command, cwd)
+        if token_cap:
+            _blind("token-cap")  # paths past the token cap were not looked at
+        for named in named_repos:
+            # git, not the .git found on disk, says where the tree is: the same
+            # answer, in the same spelling, the cwd's repository got.
+            found = snap.repo_root(budget, str(named))
+            if found is None:
+                unconfirmed += 1
+                _blind("unconfirmed")  # timed out, or refused (safe.directory): not watched
+            elif found not in roots:
+                roots.append(found)
+    if len(roots) + unconfirmed > snap.MAX_REPOS:
+        _blind("repo-cap")  # repositories past the cap are not watched
+    snaps: dict[str, dict] = {}
+    for repo in roots[:snap.MAX_REPOS]:
+        before = snap.take(budget, repo)
+        if snap.usable(before):
+            snaps[str(repo)] = before
+        else:
+            _blind(before.get("status", "unknown"))
+    # Filed even when empty: it replaces any older snapshot under this id, and
+    # tells the after-half this call had nothing to watch rather than no snapshot.
+    snap.save_pending(session_dir, call_id, snaps, started)
+
+
+def _label(root: Path, primary: Path, names: list[str]) -> list[str]:
+    """How a path is shown: as written from the cwd's repository, else absolute."""
+    if root == primary:
+        return names
+    try:
+        base = root.relative_to(primary).as_posix() + "/"
+    except ValueError:
+        base = f"{root}/"
+    return [base + name for name in names]
+
+
+def _after_half(data: dict, budget, root: Path, before: dict, primary: Path,
+                reported: dict) -> str:
+    """The report for what this call wrote in one repository, or ""."""
     after = snap.take(budget, root, before)
     if not snap.usable(after):
         _blind(after.get("status", "unknown"))
-        return None
+        return ""
     committed = snap.commits_during(budget, root, before.get("head"), after.get("head"))
     if committed is None:
         _blind("head-moved")
-        return None
-    written, unproven = snap.written(budget, root, before, after, committed)
+        return ""
+    written, unproven, out_of_time, unreadable = snap.written(budget, root, before, after, committed)
     if unproven:
         _blind("stat-only")  # a large file's mtime moved, its size did not: no proof
+    if out_of_time:
+        _blind("out-of-time")  # a file the budget left no time to check
+    if unreadable:
+        _blind("unreadable")  # a dirty file that cannot be read, before or after
+    if after.get("untracked_dirs"):
+        _blind("untracked-dirs")  # a large tree: files in untracked directories are not listed
+    if (after.get("submodules") or {}) != (before.get("submodules") or {}):
+        _blind("submodule")  # a submodule's files are another repository's: not named
     if not written:
-        return None
+        return ""
     changed = list(after["files"]) + committed
-    memory_path = session_dir / "reported.json"
-    reported = snap.read_json(memory_path)
     memory = reported.get(str(root))
     memory = memory if isinstance(memory, dict) else {}
     reported[str(root)] = memory
@@ -252,7 +352,7 @@ def run(data: dict) -> str | None:
             surface="shell-write",
         )
         reports.append(
-            f"TDD: {_shown(untested)} changed through the shell but no test files have been "
+            f"TDD: {_shown(_label(root, primary, untested))} changed through the shell but no test files have been "
             f"modified yet. Write the failing test first. {_ONCE}; to go ahead "
             "without a test, carry on."
         )
@@ -271,11 +371,10 @@ def run(data: dict) -> str | None:
             file_count=len(names),
         )
         reports.append(
-            _brief_message(reason, root, names)
+            _brief_message(reason, root, _label(root, primary, names))
             + f"\n\n{_ONCE}; the files above were changed through the shell."
         )
-    snap.write_json(memory_path, reported)
-    return "\n\n".join(reports) or None
+    return "\n\n".join(reports)
 
 
 def main() -> int:

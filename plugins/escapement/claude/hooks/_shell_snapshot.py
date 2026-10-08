@@ -14,8 +14,19 @@ the host's 10s hook timeout. Git runs with `--no-optional-locks`, so the hook's
 Anything that cannot be known is a blind status, never a clean tree.
 
 A pending snapshot whose after-call half never came (a killed command, a host
-that dropped the event) is swept after an hour, by the next before-half in the
-same session; a session's last orphans stay where they are.
+that dropped the event) is swept after an hour by the next before-half in any
+session (the cross-session sweep runs at most once an hour).
+
+Which repositories: the cwd's, plus any repository a path in the command
+points into (`named_repos`) -- a gitignored .worktrees/<name> checkout, or an
+absolute path in another clone. The command only nominates where to look; what
+was written is still read from each tree's before/after state.
+
+Big trees: past LARGE_INDEX bytes of index, `git status` runs with the default
+`--untracked-files=normal` instead of `all`, so a new untracked directory is one
+entry and the files in it are not seen (recorded as `untracked-dirs`). Git's own
+untrackedCache and fsmonitor settings apply either way; nothing here turns
+them off.
 """
 
 from __future__ import annotations
@@ -24,6 +35,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -36,9 +48,31 @@ HASH_LIMIT = 1024 * 1024
 HASH_BUDGET = 64 * 1024 * 1024
 # Past this many dirty paths, or files in one call's commits, nothing is named.
 MAX_PATHS = 2000
+# A path that could not be read (dangling, permission-denied), and a path
+# left unhashed because the budget ran out: neither is ever named.
 UNREAD = "?"
+UNHASHED = "?unhashed"
 # A pending snapshot whose after-call half never came is dropped after this.
 _PENDING_TTL = 3600
+# Past this index size (about 100k tracked files), untracked files are not
+# listed one by one: `-uall` costs seconds per half at 200k files.
+LARGE_INDEX = 8 * 1024 * 1024
+# At most this many repositories are snapshotted for one call, found from at
+# most this many path tokens; past either cap the gate records a blind signal.
+MAX_REPOS = 6
+MAX_TOKENS = 64
+# Only this much of a command is scanned for path tokens (the token regex is
+# not linear on a long run of slashes); past it the gate records token-cap.
+MAX_SCAN = 16 * 1024
+# Shell words are runs between these; a path token is one with a `/` and at
+# least one other character (a bare `/` names nothing). A split, not a
+# lookahead regex, which went quadratic on a long run of slashes. The split is
+# linear; the per-token parent walk after it is not (escapement bead filed).
+_WORD_BREAK = re.compile(r"[\s'\"`<>|;&()=]+")
+
+
+def path_tokens(text: str) -> list[str]:
+    return [word for word in _WORD_BREAK.split(text) if "/" in word and word.strip("/")]
 # The reflog subject of a commit this call made. Anything else moved HEAD for
 # someone else's reasons: pull, merge, rebase, reset, checkout.
 _COMMIT_SUBJECT = re.compile(r"commit(?: \((?:amend|initial)\))?: ")
@@ -73,20 +107,85 @@ def repo_root(budget: Budget, cwd: str) -> Path | None:
     return Path(result.stdout.strip())
 
 
-def _dirty(budget: Budget, root: Path) -> list[str] | None:
-    """Changed, staged and untracked files; None when git could not say."""
-    result = budget.git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+def named_repos(command: str, cwd: str) -> tuple[list[Path], bool]:
+    """(working trees a path in `command` points into, found on disk without
+    git; whether path tokens past MAX_TOKENS went unread)."""
+    found: dict[str, Path] = {}
+    scanned = command[:MAX_SCAN]
+    tokens = list(dict.fromkeys(path_tokens(scanned) + _quoted_paths(scanned)))
+    for token in tokens[:MAX_TOKENS]:
+        try:
+            path = Path(os.path.expanduser(token))
+            path = path if path.is_absolute() else Path(cwd) / path
+            path = path.resolve(strict=False)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        directory = disk_repo(path)
+        if directory is not None:
+            found.setdefault(str(directory), directory)
+    return list(found.values()), len(tokens) > MAX_TOKENS or len(command) > MAX_SCAN
+
+
+def disk_repo(path: Path) -> Path | None:
+    """The nearest directory at or above `path` holding a `.git`, without git."""
+    for directory in (path, *path.parents):
+        try:
+            # Python 3.9 raises PermissionError under an unsearchable directory;
+            # the walk goes on to the directories above it.
+            if (directory / ".git").exists():
+                return directory
+        except OSError:
+            continue
+    return None
+
+
+def _quoted_paths(command: str) -> list[str]:
+    """Path words as the shell would split them, so a quoted path with spaces
+    stays one path; nothing when the command does not parse."""
+    try:
+        words = shlex.split(command, posix=True)
+    except ValueError:
+        return []
+    return [word for word in words if "/" in word and word.strip("/") and any(c.isspace() for c in word)]
+
+
+def _large(root: Path) -> bool:
+    limit = os.environ.get("ESCAPEMENT_SHELL_WRITE_LARGE_INDEX", "")
+    limit = int(limit) if limit.isdigit() else LARGE_INDEX
+    git = root / ".git"
+    try:
+        if git.is_file():  # a linked worktree: "gitdir: <its own git dir>"
+            text = git.read_text(encoding="utf-8").strip()
+            git = (root / text.partition("gitdir:")[2].strip()).resolve()
+        return (git / "index").stat().st_size > limit
+    except (OSError, ValueError):
+        return False
+
+
+def _dirty(budget: Budget, root: Path) -> tuple[list[str], list[str], dict[str, str]] | None:
+    """(changed, staged and untracked files; untracked directories not listed
+    file by file in a large tree; dirty submodules -> their status code), or
+    None when git could not say."""
+    untracked = "normal" if _large(root) else "all"
+    result = budget.git(root, "status", "--porcelain=v1", "-z", f"--untracked-files={untracked}")
     if result is None or result.returncode != 0:
         return None
     names: list[str] = []
+    codes: dict[str, str] = {}
     entries = iter(result.stdout.split("\0"))
     for entry in entries:
         if len(entry) < 4:
             continue
         names.append(entry[3:])
+        codes[entry[3:]] = entry[:2]
         if entry[0] in "RC" or entry[1] in "RC":
             next(entries, None)  # the rename's source path (staged, or an intent-to-add rename)
-    return [name for name in names if (root / name).is_file()]
+    dirs = [name for name in names if name.endswith("/")]
+    # A dirty submodule is a directory with no trailing slash: its files are
+    # another repository's, so only its status code is kept.
+    submodules = {name: codes[name] for name in names
+                  if not name.endswith("/") and (root / name).is_dir()}
+    return [name for name in names if (root / name).is_file()], dirs, submodules
 
 
 def fingerprint(path: Path, method: str) -> str:
@@ -116,9 +215,10 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
     by stat again and a hashed one is hashed again, so a path cannot look
     changed only because the hash budget ran out at a different place.
     """
-    dirty = _dirty(budget, root)
-    if dirty is None:
+    listed = _dirty(budget, root)
+    if listed is None:
         return {"status": "unknown"}
+    dirty, untracked_dirs, submodules = listed
     if len(dirty) > MAX_PATHS:
         return {"status": "too-many-dirty"}
     head = budget.git(root, "rev-parse", "--verify", "-q", "HEAD")
@@ -132,7 +232,7 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
         if name in old:
             method = _method(old[name])
             if method == "hash" and out_of_time:
-                files[name] = UNREAD  # cannot compare it now; never named
+                files[name] = UNHASHED  # cannot compare it now; never named
                 continue
         else:
             try:
@@ -142,11 +242,16 @@ def take(budget: Budget, root: Path, before: dict | None = None) -> dict:
             method = "hash" if not out_of_time and size <= min(HASH_LIMIT, left) else "stat"
             left -= size if method == "hash" else 0
         files[name] = fingerprint(root / name, method)
-    return {
+    taken = {
         "status": "ok",
         "head": head.stdout.strip() if head.returncode == 0 else None,
         "files": files,
     }
+    if untracked_dirs:
+        taken["untracked_dirs"] = untracked_dirs
+    if submodules:
+        taken["submodules"] = submodules
+    return taken
 
 
 def commits_during(budget: Budget, root: Path, old: str | None, new: str | None) -> list[str] | None:
@@ -186,20 +291,31 @@ def _stat_size(print_: str) -> str:
 
 
 def written(budget: Budget, root: Path, before: dict, after: dict,
-            committed: list[str]) -> tuple[list[str], list[str]]:
-    """(paths the call created, changed or committed; paths that only might have).
+            committed: list[str]) -> tuple[list[str], list[str], list[str], list[str]]:
+    """(named: paths the call created, changed or committed; unproven: paths that
+    only might have; out of time: paths the budget left unchecked; unreadable).
 
     A file fingerprinted by stat whose size is unchanged but whose mtime moved
     might have been rewritten with the same length, or only touched: that is not
-    proof, so it goes in the second list and is not named. Re-hashing a
-    committed file is charged to `budget`; without time left it is not named.
+    proof, so it is unproven. A path left UNHASHED after the call, or a
+    committed file there is no time left to re-hash (charged to `budget`), is
+    out of time. A path UNREAD on either side is unreadable. None of those is
+    named.
     """
     old, new = before["files"], after["files"]
     names: list[str] = []
     unproven: list[str] = []
+    out_of_time: list[str] = []
+    unreadable: list[str] = []
     for name, print_ in new.items():
         was = old.get(name)
-        if UNREAD in (print_, was) or was == print_:
+        if print_ == UNHASHED:
+            out_of_time.append(name)
+            continue
+        if UNREAD in (print_, was):
+            unreadable.append(name)
+            continue
+        if was == print_:
             continue
         if was is not None and _stat_size(was) and _stat_size(was) == _stat_size(print_):
             unproven.append(name)
@@ -209,12 +325,16 @@ def written(budget: Budget, root: Path, before: dict, after: dict,
         if name in new or name in names:
             continue
         if name in old:  # dirty before the call: committed as it was, or changed by it?
-            if old[name] == UNREAD or budget.left() <= 0.05:
+            if old[name] == UNREAD:
+                unreadable.append(name)
+                continue
+            if budget.left() <= 0.05:
+                out_of_time.append(name)
                 continue
             if fingerprint(root / name, _method(old[name])) == old[name]:
                 continue
         names.append(name)
-    return names, unproven
+    return names, unproven, out_of_time, unreadable
 
 
 # --- this session's own state ------------------------------------------------
@@ -252,41 +372,53 @@ def _pending_path(directory: Path, call_id: str) -> Path:
     return directory / f"pending-{digest}.json"
 
 
-def save_pending(directory: Path, call_id: str, root: Path, snap: dict, started: float) -> None:
-    """File the before-snapshot, stamped with when the before-half STARTED: a
-    write landing while it ran is not in the snapshot, so it counts as window."""
+def _sweep(directory: Path) -> None:
+    """Drop pending snapshots past their TTL: this session's every time, every
+    session's at most once an hour (a session's last orphans have no next call)."""
+    now = time.time()
+    globs = [directory.glob("pending-*.json")]
+    marker = directory.parent.parent / ".shell_write_gate.swept"
     try:
-        now = time.time()
-        for stale in directory.glob("pending-*.json"):
-            if now - stale.stat().st_mtime > _PENDING_TTL:
-                stale.unlink(missing_ok=True)
+        if not marker.exists() or now - marker.stat().st_mtime > _PENDING_TTL:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
+            globs.append(directory.parent.parent.glob("*/shell_write_gate/pending-*.json"))
     except OSError:
         pass
-    write_json(_pending_path(directory, call_id),
-               {"repo": str(root), "snapshot": snap, "at": started})
+    for found in globs:
+        try:
+            for stale in found:
+                if now - stale.stat().st_mtime > _PENDING_TTL:
+                    stale.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
-def drop_pending(directory: Path, call_id: str) -> None:
-    """Forget any snapshot filed under this id: this before-half has none to give."""
-    try:
-        _pending_path(directory, call_id).unlink(missing_ok=True)
-    except OSError:
-        pass
+def save_pending(directory: Path, call_id: str, snaps: dict[str, dict], started: float) -> None:
+    """File the before-snapshots (repository -> snapshot), stamped with when the
+    before-half STARTED: a write landing while it ran is not in the snapshot,
+    so it counts as window."""
+    _sweep(directory)
+    write_json(_pending_path(directory, call_id), {"repos": snaps, "at": started})
 
 
-def pop_pending(directory: Path, call_id: str) -> tuple[Path, dict, float | None] | None:
-    """(repo, before-snapshot, when it was taken), consumed; None when the
-    before-half left none."""
+def pop_pending(directory: Path, call_id: str) -> tuple[dict[Path, dict], float | None] | None:
+    """({repo: before-snapshot}, when they were taken), consumed; None when the
+    before-half left nothing at all. A before-half that ran but had nothing to
+    watch files an empty one, so ({}, at) is "nothing to compare", and None is
+    "the before-half never ran, or its snapshot was lost"."""
     path = _pending_path(directory, call_id)
     pending = read_json(path)
     try:
         path.unlink(missing_ok=True)
     except OSError:
         pass
-    snap, repo, at = pending.get("snapshot"), pending.get("repo"), pending.get("at")
-    if not isinstance(repo, str) or not usable(snap):
+    repos = pending.get("repos")
+    at = pending.get("at")
+    if not isinstance(repos, dict):
         return None
-    return Path(repo), snap, at if isinstance(at, (int, float)) else None
+    snaps = {Path(repo): snap for repo, snap in repos.items() if usable(snap)}
+    return snaps, at if isinstance(at, (int, float)) else None
 
 
 def usable(snap: object) -> bool:
