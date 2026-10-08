@@ -84,8 +84,8 @@ def _dirty(budget: Budget, root: Path) -> list[str] | None:
         if len(entry) < 4:
             continue
         names.append(entry[3:])
-        if entry[0] in "RC":
-            next(entries, None)  # the rename's source path
+        if entry[0] in "RC" or entry[1] in "RC":
+            next(entries, None)  # the rename's source path (staged, or an intent-to-add rename)
     return [name for name in names if (root / name).is_file()]
 
 
@@ -181,19 +181,40 @@ def commits_during(budget: Budget, root: Path, old: str | None, new: str | None)
     return [name for name in names if (root / name).is_file()]
 
 
-def written(root: Path, before: dict, after: dict, committed: list[str]) -> list[str]:
-    """Paths the call created or changed, and the files it committed."""
+def _stat_size(print_: str) -> str:
+    return print_.split(":")[1] if print_.startswith("stat:") else ""
+
+
+def written(budget: Budget, root: Path, before: dict, after: dict,
+            committed: list[str]) -> tuple[list[str], list[str]]:
+    """(paths the call created, changed or committed; paths that only might have).
+
+    A file fingerprinted by stat whose size is unchanged but whose mtime moved
+    might have been rewritten with the same length, or only touched: that is not
+    proof, so it goes in the second list and is not named. Re-hashing a
+    committed file is charged to `budget`; without time left it is not named.
+    """
     old, new = before["files"], after["files"]
-    names = [name for name, print_ in new.items()
-             if UNREAD not in (print_, old.get(name)) and old.get(name) != print_]
+    names: list[str] = []
+    unproven: list[str] = []
+    for name, print_ in new.items():
+        was = old.get(name)
+        if UNREAD in (print_, was) or was == print_:
+            continue
+        if was is not None and _stat_size(was) and _stat_size(was) == _stat_size(print_):
+            unproven.append(name)
+            continue
+        names.append(name)
     for name in committed:
         if name in new or name in names:
             continue
         if name in old:  # dirty before the call: committed as it was, or changed by it?
-            if old[name] == UNREAD or fingerprint(root / name, _method(old[name])) == old[name]:
+            if old[name] == UNREAD or budget.left() <= 0.05:
+                continue
+            if fingerprint(root / name, _method(old[name])) == old[name]:
                 continue
         names.append(name)
-    return names
+    return names, unproven
 
 
 # --- this session's own state ------------------------------------------------
@@ -231,7 +252,9 @@ def _pending_path(directory: Path, call_id: str) -> Path:
     return directory / f"pending-{digest}.json"
 
 
-def save_pending(directory: Path, call_id: str, root: Path, snap: dict) -> None:
+def save_pending(directory: Path, call_id: str, root: Path, snap: dict, started: float) -> None:
+    """File the before-snapshot, stamped with when the before-half STARTED: a
+    write landing while it ran is not in the snapshot, so it counts as window."""
     try:
         now = time.time()
         for stale in directory.glob("pending-*.json"):
@@ -240,7 +263,15 @@ def save_pending(directory: Path, call_id: str, root: Path, snap: dict) -> None:
     except OSError:
         pass
     write_json(_pending_path(directory, call_id),
-               {"repo": str(root), "snapshot": snap, "at": time.time()})
+               {"repo": str(root), "snapshot": snap, "at": started})
+
+
+def drop_pending(directory: Path, call_id: str) -> None:
+    """Forget any snapshot filed under this id: this before-half has none to give."""
+    try:
+        _pending_path(directory, call_id).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def pop_pending(directory: Path, call_id: str) -> tuple[Path, dict, float | None] | None:

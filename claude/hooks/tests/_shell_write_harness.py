@@ -93,6 +93,7 @@ class Shell:
         # The host's tool-call id; Claude's shape unless a test names another.
         self.call_id = call_id or (lambda: f"toolu_{uuid.uuid4().hex}")
         self.duration_ms: int | None = None
+        self.send_duration = True
 
     def _hook(self, event: str, command: str) -> dict | None:
         payload = {
@@ -107,7 +108,7 @@ class Shell:
             payload["tool_response"] = {"stdout": "", "stderr": "", "interrupted": False}
         elif event == "PostToolUseFailure":
             payload["error"] = "Exit code 1"
-        if event != "PreToolUse" and self.duration_ms is not None:
+        if event != "PreToolUse" and self.duration_ms is not None and self.send_duration:
             payload["duration_ms"] = self.duration_ms  # Claude 2.1.293 sends the command's run time
         proc = subprocess.run([sys.executable, "-B", str(HOOK)], input=json.dumps(payload),
                               capture_output=True, text=True, env=self.env, timeout=60)

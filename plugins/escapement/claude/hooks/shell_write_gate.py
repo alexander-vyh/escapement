@@ -30,20 +30,26 @@ Pi the dispatcher already has, and doing it twice would land in the wrong
 directory. Any tool-call id the host gives is accepted (it is hashed into a
 file name). See _shell_snapshot.
 
-The window is the time between the two halves. PreToolUse runs before the
-host's permission prompt, so on Claude, whose after-call payload carries the
-command's own `duration_ms`, a window more than 2s longer than the command ran
-names nothing: foreign writes made while a prompt waited are not this call's.
+The window runs from the START of the before-half (a write landing while it
+runs is not in its snapshot) to the start of the after-half. PreToolUse runs
+before the host's permission prompt, so on Claude, whose after-call payload
+carries the command's own `duration_ms`, a window more than 2s longer than the
+command ran names nothing: foreign writes made while a prompt waited are not
+this call's. A Claude payload without `duration_ms` names nothing either.
 
 Failing open. With no before-snapshot for this call -- a host that sends only
 the after-call half, no tool-call id or session id, a before-half killed at
 the host timeout, no repository found -- the call names nothing; it is never
 compared with an older snapshot. A git status or HEAD lookup that fails or
 times out, more than 2,000 dirty paths, a HEAD moved by anything but this
-call's commits (pull, merge, rebase, reset, checkout), or a prompt wait also
+call's commits (pull, merge, rebase, reset, checkout), a prompt wait, or a
+missing duration on Claude also
 names nothing, and records a `blind` gate signal so the blindness shows in
-telemetry. Git calls and file hashing share a 4s budget per half; a file left
-unhashed when it runs out is never named.
+telemetry. Git calls and every file hash, including re-hashing a committed
+file, share a 4s budget per half; a file left unhashed when it runs out is
+never named. A file past 1MB is fingerprinted by size and mtime, so a new mtime
+with the same size is not proof of a write: it is not named, and records a
+`stat-only` blind signal.
 
 Known gaps, not built: Codex's `workdir` parameter is not in its payload, so a
 command run in another directory that way -- another worktree, say, which is
@@ -193,11 +199,13 @@ def run(data: dict) -> str | None:
         cwd = data.get("cwd")
         root = snap.repo_root(budget, cwd) if isinstance(cwd, str) and cwd else None
         if root is None:
+            snap.drop_pending(session_dir, call_id)
             return None
         before = snap.take(budget, root)
         if snap.usable(before):
-            snap.save_pending(session_dir, call_id, root, before)
+            snap.save_pending(session_dir, call_id, root, before, started)
         else:
+            snap.drop_pending(session_dir, call_id)
             _blind(before.get("status", "unknown"))
         return None
 
@@ -206,8 +214,11 @@ def run(data: dict) -> str | None:
         return None
     root, before, taken_at = pending
     duration_ms = data.get("duration_ms")
-    if isinstance(duration_ms, (int, float)) and not isinstance(duration_ms, bool) \
-            and taken_at is not None and started - taken_at > duration_ms / 1000 + _PROMPT_SLACK:
+    if not isinstance(duration_ms, (int, float)) or isinstance(duration_ms, bool):
+        if _host(data) == "claude":  # Claude always sends it; without it the window is unknown
+            _blind("no-duration")
+            return None
+    elif taken_at is None or started - taken_at > duration_ms / 1000 + _PROMPT_SLACK:
         _blind("prompt-wait")  # the window held a permission prompt, not just the command
         return None
     after = snap.take(budget, root, before)
@@ -218,7 +229,9 @@ def run(data: dict) -> str | None:
     if committed is None:
         _blind("head-moved")
         return None
-    written = snap.written(root, before, after, committed)
+    written, unproven = snap.written(budget, root, before, after, committed)
+    if unproven:
+        _blind("stat-only")  # a large file's mtime moved, its size did not: no proof
     if not written:
         return None
     changed = list(after["files"]) + committed
