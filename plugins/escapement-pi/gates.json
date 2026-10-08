@@ -246,6 +246,11 @@
       "id": "serena_preference_injection",
       "source": "claude/hooks/serena_preference_injection.py",
       "timeout_seconds": 5
+    },
+    {
+      "id": "dsy_reminder",
+      "source": "claude/hooks/dsy_reminder.py",
+      "timeout_seconds": 5
     }
   ],
   "session_gates": [

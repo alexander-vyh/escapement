@@ -2308,6 +2308,55 @@
       }
     },
     {
+      "id": "dsy_reminder",
+      "description": "Inject the one-line 'DRY. SOLID. YAGNI.' design-principles reminder into the model's context on every prompt.",
+      "source": "claude/hooks/dsy_reminder.py",
+      "hosts": {
+        "codex": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/dsy_reminder.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_dsy_reminder.py::test_every_prompt_in_one_session_gets_the_reminder[codex]"
+          ]
+        },
+        "claude": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B ~/.claude/hooks/dsy_reminder.py"
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_dsy_reminder.py::test_every_prompt_in_one_session_gets_the_reminder[claude]"
+          ]
+        },
+        "pi": {
+          "status": "ready",
+          "events": [
+            {
+              "event": "UserPromptSubmit",
+              "matcher": "",
+              "command": "python3 -B claude/hooks/dsy_reminder.py",
+              "timeout_seconds": 5
+            }
+          ],
+          "fixtures": [
+            "claude/hooks/tests/test_dsy_reminder.py::test_every_prompt_in_one_session_gets_the_reminder[pi]",
+            "tests/test_pi_dsy_reminder_end_to_end.py::test_pi_prompt_context_carries_the_reminder_on_every_prompt"
+          ]
+        }
+      }
+    },
+    {
       "id": "session_cleanup",
       "description": "Clean up stale temp files on session start.",
       "source": "claude/hooks/session_cleanup.py",
