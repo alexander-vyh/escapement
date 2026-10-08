@@ -186,17 +186,20 @@ def _stat_size(print_: str) -> str:
 
 
 def written(budget: Budget, root: Path, before: dict, after: dict,
-            committed: list[str]) -> tuple[list[str], list[str]]:
-    """(paths the call created, changed or committed; paths that only might have).
+            committed: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """(paths the call created, changed or committed; paths that only might have;
+    committed paths there was no time left to check).
 
     A file fingerprinted by stat whose size is unchanged but whose mtime moved
     might have been rewritten with the same length, or only touched: that is not
     proof, so it goes in the second list and is not named. Re-hashing a
-    committed file is charged to `budget`; without time left it is not named.
+    committed file that was dirty before the call is charged to `budget`; with
+    no time left it goes in the third list and is not named.
     """
     old, new = before["files"], after["files"]
     names: list[str] = []
     unproven: list[str] = []
+    out_of_time: list[str] = []
     for name, print_ in new.items():
         was = old.get(name)
         if UNREAD in (print_, was) or was == print_:
@@ -209,12 +212,15 @@ def written(budget: Budget, root: Path, before: dict, after: dict,
         if name in new or name in names:
             continue
         if name in old:  # dirty before the call: committed as it was, or changed by it?
-            if old[name] == UNREAD or budget.left() <= 0.05:
+            if old[name] == UNREAD:
+                continue
+            if budget.left() <= 0.05:
+                out_of_time.append(name)
                 continue
             if fingerprint(root / name, _method(old[name])) == old[name]:
                 continue
         names.append(name)
-    return names, unproven
+    return names, unproven, out_of_time
 
 
 # --- this session's own state ------------------------------------------------

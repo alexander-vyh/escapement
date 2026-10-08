@@ -47,7 +47,8 @@ missing duration on Claude also
 names nothing, and records a `blind` gate signal so the blindness shows in
 telemetry. Git calls and every file hash, including re-hashing a committed
 file, share a 4s budget per half; a file left unhashed when it runs out is
-never named. A file past 1MB is fingerprinted by size and mtime, so a new mtime
+never named, and a committed file left unchecked records an `out-of-time`
+blind signal. A file past 1MB is fingerprinted by size and mtime, so a new mtime
 with the same size is not proof of a write: it is not named, and records a
 `stat-only` blind signal.
 
@@ -229,9 +230,11 @@ def run(data: dict) -> str | None:
     if committed is None:
         _blind("head-moved")
         return None
-    written, unproven = snap.written(budget, root, before, after, committed)
+    written, unproven, out_of_time = snap.written(budget, root, before, after, committed)
     if unproven:
         _blind("stat-only")  # a large file's mtime moved, its size did not: no proof
+    if out_of_time:
+        _blind("out-of-time")  # a committed file the budget left no time to check
     if not written:
         return None
     changed = list(after["files"]) + committed

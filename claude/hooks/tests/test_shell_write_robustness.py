@@ -92,7 +92,7 @@ def test_the_hash_or_stat_choice_is_made_before_the_call(repo, monkeypatch):
     assert before["files"]["src/b.py"].startswith("stat:")
     _git(repo, "checkout", "--", "src/a.py")  # the call
     after = snap.take(snap.Budget(), repo, before)
-    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [])
+    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [], [])
 
 
 def test_a_repositorys_first_commit_is_seen(tmp_path, env):
@@ -168,7 +168,7 @@ def test_a_hashed_file_left_unhashed_when_time_runs_out_is_not_named(repo):
             return 0.0
 
     after = snap.take(SpentAfterGit(), repo, before)
-    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [])
+    assert snap.written(snap.Budget(), repo, before, after, []) == ([], [], [])
 
 
 def test_a_worktree_rename_is_parsed_as_one_path(repo):
