@@ -84,6 +84,44 @@ def record_task_context_first_claim(path: pathlib.Path, proposed: Mapping) -> di
     )
 
 
+CLAIMED_BEADS = "claimed_beads.json"
+
+
+def _valid_claims(value: object) -> bool:
+    return isinstance(value, dict) and isinstance(value.get("ids"), list) and all(
+        is_issue_id(i) for i in value["ids"]
+    )
+
+
+def record_session_claim(thread_dir, task_id: str) -> dict:
+    """Add one claimed bead id to this session's claim set (escapement-xcbn).
+
+    The Stop gate's queue check holds a session only on beads it claimed, so every
+    claim is kept, not just the l9lo single binding (which a retire rewrites).
+    """
+    if not is_issue_id(task_id):
+        raise ValueError("claim id is invalid")
+    return mutate_trusted_atomic(
+        pathlib.Path(thread_dir) / CLAIMED_BEADS,
+        lambda: {"ids": [task_id]},
+        lambda current: current if task_id in current["ids"]
+        else {"ids": [*current["ids"], task_id]},
+        _valid_claims,
+    )
+
+
+def load_session_claims(thread_dir) -> set[str]:
+    """The bead ids this session claimed; empty when none are recorded or the file is untrusted."""
+    path = pathlib.Path(thread_dir) / CLAIMED_BEADS
+    if path.is_symlink() or not is_trusted_file(path):
+        return set()
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return set()
+    return set(value["ids"]) if _valid_claims(value) else set()
+
+
 def _valid_task_mode_incident(value: object, expected_session_id: str) -> bool:
     return (
         isinstance(value, dict)

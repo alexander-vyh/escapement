@@ -45,7 +45,9 @@ import stop_hook  # noqa: E402
 # Every agent-facing BLOCK message, by name.
 RESUMPTION = stop_hook.RESUMPTION_PROMPT.format(reason="no_completion_or_resumption_proof")
 TASKS_REMAIN = stop_hook._TASK_MODE_DISPLAY["tasks_remain_in_queue"]
-IMPLICIT = stop_hook._IMPLICIT_QUEUE_DISPLAY.format(verify_status=stop_hook._verify_status({}))
+IMPLICIT = stop_hook._IMPLICIT_QUEUE_DISPLAY.format(
+    verify_status=stop_hook._verify_status({}), held="esc-1"
+)
 
 ALL_MESSAGES = {
     "resumption": RESUMPTION,

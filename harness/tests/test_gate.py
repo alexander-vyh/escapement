@@ -812,13 +812,15 @@ def run_implicit_queue() -> int:
             results,
         )
 
-        # Test 2: verify passes, in-progress items in .beads/ repo → block.
+        # Test 2: verify passes, a bead THIS session claimed is in progress → block,
+        # naming it (escapement-xcbn: only claimed work holds a green session).
         td = tmp / "in-progress-block"
         td.mkdir()
         project_dir = tmp / "project-in-progress"
         project_dir.mkdir()
         (project_dir / ".beads").mkdir()
         (td / "contract.json").write_text(json.dumps(_passing_contract("in-progress")))
+        (td / "claimed_beads.json").write_text(json.dumps({"ids": ["t-0"]}))
         fakebin = make_fake_bd_implicit(tmp / "bin-ip", in_progress_items=1, ready_items=0)
         out = call_hook(
             {"session_id": "in-progress", "transcript_path": ""},
@@ -827,12 +829,13 @@ def run_implicit_queue() -> int:
         )
         _assert(
             out is not None and out.get("decision") == "block"
-            and "unfinished work" in out.get("reason", ""),
-            "implicit: verify passes, in-progress items → block (implicit_queue_in_progress)",
+            and "t-0" in out.get("reason", ""),
+            "implicit: verify passes, claimed bead in progress → block naming it",
             results,
         )
 
-        # Test 3: verify passes, ready items (no in-progress) → block.
+        # Test 3: verify passes, ready items nobody in this session claimed (other
+        # sessions' beads, own filed follow-ups) → allow (escapement-xcbn).
         td = tmp / "ready-block"
         td.mkdir()
         project_dir = tmp / "project-ready"
@@ -846,8 +849,8 @@ def run_implicit_queue() -> int:
             {"PATH": f"{fakebin}:{_os.environ.get('PATH', '')}"},
         )
         _assert(
-            out is not None and out.get("decision") == "block",
-            "implicit: verify passes, ready items (no in-progress) → block (implicit_queue_ready_items)",
+            out is None,
+            "implicit: verify passes, unclaimed ready items → allow",
             results,
         )
 
