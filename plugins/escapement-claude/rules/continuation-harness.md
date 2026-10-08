@@ -90,10 +90,12 @@ assertion, or a public workflow state check. Task closure such as `bd close <id>
 tracking state, not an independent outcome oracle. Sloppy contracts (`--verify "true"`)
 get caught at first-run human review for novel/`agent-declared` sources.
 
+<!-- escapement:detail:end -->
 ### Contracts for config work (you still owe one)
 
 Config/docs work being TDD-exempt does NOT exempt it from a continuation-harness contract. TDD-exemption means "no unit test"; the harness still wants proof the outcome happened. The right `--verify` for config is the appropriate rung of the behavioral-config ladder (see `tdd-enforcement.md` § "Behavioral config is not exempt"), NOT a parse check, and NOT `true`:
 
+<!-- escapement:detail:start -->
 | Config kind | `--verify` oracle |
 |-------------|-------------------|
 | Passive config / docs (data an app reads, prose) | parse check is fine: `python3 -c "import yaml; yaml.safe_load(open('f.yml'))"` / `python3 -c "import json; json.load(open('f.json'))"` |
@@ -123,16 +125,20 @@ completion.
 
 If your work is genuinely waiting on something external (CI, merge queue, DAG run, an external agent), use the `ScheduleWakeup` tool. Don't write "I'll check back" as prose and end the turn — prose-as-polling is the largest measured stall class (30%) and is exactly what this gate exists to prevent.
 
+<!-- escapement:detail:end -->
 ### Task-mode gate + external-event wait: use ScheduleWakeup, not task pickup
 
+<!-- escapement:detail:start -->
 When the task-mode gate blocks with `tasks_remain_in_queue` but your **session goal** is blocked on an external event (CI finishing, a merge completing, a scheduled dbt/DAG run, an external agent completing its work), the correct response is:
 
 ```
 ScheduleWakeup(delaySeconds=<when the event will complete>, reason="<what you're waiting for>", prompt="<same loop prompt>")
 ```
 
+<!-- escapement:detail:end -->
 Do **not** pick up unrelated ready tasks from `bd ready` to drain the queue and satisfy the gate. That is scope creep, not progress — you are doing work the user did not ask for in this session, and the session's actual outcome remains unverified.
 
+<!-- escapement:detail:start -->
 The three release paths from a task-mode block are:
 1. **Finish the actual session work** — drain the tasks that belong to this session's goal, verify the outcome.
 2. **ScheduleWakeup** — register a future check-in for when the external blocker clears.

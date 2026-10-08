@@ -340,13 +340,21 @@ def _keep_trusted_positions(
         return hooks
     ordered: dict[str, list[dict[str, Any]]] = {}
     for event, groups in hooks.items():
-        rank = {
-            _codex_group_identity(group): index
-            for index, group in enumerate(previous.get("hooks", {}).get(event, []))
-        }
-        ordered[event] = sorted(
-            groups, key=lambda group: rank.get(_codex_group_identity(group), len(rank))
-        )
+        before = previous.get("hooks", {}).get(event, [])
+        # A script registered several times (inject_rules' parts) shares one
+        # identity: its Nth group keeps the slot of its Nth previous group.
+        slots: dict[tuple[str, str], list[int]] = {}
+        for index, group in enumerate(before):
+            slots.setdefault(_codex_group_identity(group), []).append(index)
+        seen: dict[tuple[str, str], int] = {}
+        ranks = []
+        for group in groups:
+            identity = _codex_group_identity(group)
+            nth = seen.get(identity, 0)
+            seen[identity] = nth + 1
+            mine = slots.get(identity, [])
+            ranks.append(mine[nth] if nth < len(mine) else len(before))
+        ordered[event] = [group for _, group in sorted(zip(ranks, groups), key=lambda pair: pair[0])]
     return ordered
 
 

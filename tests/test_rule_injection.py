@@ -1,44 +1,42 @@
-"""Oracle for SessionStart rules injection.
+"""Oracle for SessionStart rules injection: the rule text itself, in parts.
 
 Business outcome
 ----------------
-Every always-on rule's binding requirement reaches the agent at session start
-and after compaction, on Claude, Codex and Pi. Before this, the injector
-concatenated every rule (~42 KB). Claude Code inlines a hook's
-``additionalContext`` only up to 10,000 characters; past that it saves the text
-to a file and shows a 2,000-character preview (documented at
-https://code.claude.com/docs/en/hooks, "capped at 10,000 characters", and
-observed: 10/10 replay sessions got the preview, 0 opened the file). So 12 of
-13 rules never reached the model, silently.
+Every always-on rule's text (each rule file minus its marked reference
+sections, which stay on disk behind a pointer) reaches the agent at session
+start on Claude, Codex and Pi.
+
+Host limits, measured (escapement-s8qr, 2026-10-07, see PR #269):
+- Claude Code 2.1.293: a single hook's additionalContext over 10,000 chars is
+  saved to a file and the model sees a 2 KB preview. The limit is per hook:
+  six hooks of 9,000 chars each (54,000 total) all arrived byte-identical.
+  Parallel hooks arrive in completion order, not registration order.
+- Codex 0.160.1: a hook output over ~10,000 BYTES (2,500 tokens at bytes/4) is
+  head+tail truncated with the middle elided. Also per hook: six 9,000-byte
+  outputs arrived intact. An 8,000-char output of 12,320 bytes was truncated,
+  so the budget is UTF-8 bytes, not characters.
+- Pi: no cap below the dispatcher's 1 MB; it runs the hook without arguments.
+
+So the injector emits ordered parts, each a self-describing single-line header
+plus whole rules, each part at most PART_LIMIT_BYTES.
 
 Independent source of truth
 ---------------------------
-Each rule file's own binding region (``escapement:binding`` markers), read
-from the package the host actually ships, and the packaged hook's stdout run
-the way a host runs it. The host limit is the documented constant above, not
-anything the hook declares.
+The rule files each host package ships. The oracle is the source itself: the
+parts' bodies, concatenated, must equal the shipped rules' heads byte for
+byte, in order. No phrase list, no hand-written summary: deleting or rewording
+any sentence of a rule's head makes the old output fail (proved below).
 
-Invalid solution classes this suite rejects
--------------------------------------------
-- Truncating the old concatenation to the limit (later rules vanish)
-  -> ``test_every_rules_binding_requirement_reaches_the_session``
-- A titles-only index -> same test (asserts the requirement text, not the title)
-- A size check that warns but still emits an oversized payload
-  -> ``test_oversized_bundle_fails_loud_and_still_fits``
-- Summaries hard-coded in the hook (a second source of truth)
-  -> ``test_binding_text_comes_from_the_rule_file``
-- A rule without a binding region silently dropped
-  -> ``test_rule_without_binding_is_named_loudly_with_its_path``
-- An index with no way to reach the full rule -> ``test_every_rule_names_its_full_file``
-- A broken install failing quietly -> ``test_missing_bundle_still_fails_loud``
-- A binding that drops a rule's hard prohibition
-  -> ``test_every_bold_prohibition_is_bound_or_explicitly_waived``
+The heads are derived here from the files with this module's own reader, and
+the parts come from executing each packaged hook exactly as its host's
+registration invokes it.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -47,262 +45,251 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-HOOK = ROOT / "claude" / "hooks" / "inject_rules.py"
-# Each host package's injector, found where that host runs it; rules are read
-# from ``<hook dir>/../rules``.
-PACKAGED_HOOKS = {
-    "repo": HOOK,
-    "claude": ROOT / "plugins" / "escapement-claude" / "hooks" / "inject_rules.py",
-    "codex": ROOT / "plugins" / "escapement" / "claude" / "hooks" / "inject_rules.py",
-    "pi": ROOT / "plugins" / "escapement-pi" / "claude" / "hooks" / "inject_rules.py",
+PART_LIMIT_BYTES = 9_000
+DETAIL_START = "<!-- escapement:detail:start -->"
+DETAIL_END = "<!-- escapement:detail:end -->"
+
+PACKAGES = {
+    "claude": {
+        "hook": ROOT / "plugins/escapement-claude/hooks/inject_rules.py",
+        "registration": ROOT / "plugins/escapement-claude/hooks/hooks.json",
+        "events": ("SessionStart",),
+    },
+    "codex": {
+        "hook": ROOT / "plugins/escapement/claude/hooks/inject_rules.py",
+        "registration": ROOT / "plugins/escapement/hooks/hooks.json",
+        "events": ("SessionStart", "PreCompact"),
+    },
+    # Pi's dispatcher runs a session gate with no arguments (gates.json).
+    "pi": {
+        "hook": ROOT / "plugins/escapement-pi/claude/hooks/inject_rules.py",
+        "registration": None,
+        "events": ("SessionStart",),
+    },
 }
 
-# Claude Code's documented inline cap for a hook's additionalContext.
-HOST_INLINE_LIMIT = 10_000
 
-BINDING = re.compile(
-    r"<!-- escapement:binding:start -->(.*?)<!-- escapement:binding:end -->", re.S
-)
+# --- The source: each shipped rule's head ----------------------------------
+
+def head_of(text: str) -> str:
+    """A rule file minus each closed detail region and its HTML comments."""
+    while True:
+        start = text.find(DETAIL_START)
+        end = text.find(DETAIL_END, start + 1) if start >= 0 else -1
+        if start < 0 or end < 0:
+            break
+        text = text[:start] + text[end + len(DETAIL_END):]
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
 
 
-def inject(hook: Path, event: str = "SessionStart") -> str:
-    """Run a hook and return the additionalContext it emits."""
-    result = subprocess.run(
-        [sys.executable, "-B", str(hook)],
+def heads(rules_dir: Path) -> list[tuple[str, str]]:
+    out = [(p.name, head_of(p.read_text(encoding="utf-8"))) for p in sorted(rules_dir.glob("*.md"))]
+    assert out, f"{rules_dir} ships no rules"
+    return out
+
+
+def has_detail(rules_dir: Path, name: str) -> bool:
+    text = (rules_dir / name).read_text(encoding="utf-8")
+    return head_of(text) != re.sub(r"<!--.*?-->", "", text, flags=re.S)
+
+
+# --- The output: each packaged hook, run as its host runs it ---------------
+
+def registered_args(registration: Path, event: str) -> list[list[str]]:
+    """The arguments each registered inject_rules command passes, in order."""
+    groups = json.loads(registration.read_text(encoding="utf-8"))["hooks"].get(event, [])
+    out = []
+    for group in groups:
+        for hook in group["hooks"]:
+            argv = shlex.split(hook["command"])
+            scripts = [i for i, a in enumerate(argv) if a.endswith("/inject_rules.py")]
+            if scripts:
+                out.append(argv[scripts[0] + 1:])
+    return out
+
+
+def run_hook(hook: Path, args: list[str], event: str = "SessionStart") -> dict | None:
+    completed = subprocess.run(
+        [sys.executable, "-B", str(hook), *args],
         input=json.dumps({"hook_event_name": event, "session_id": "s"}),
-        capture_output=True,
-        text=True,
+        capture_output=True, text=True, timeout=20,
     )
-    assert result.returncode == 0, result.stderr
-    payload = json.loads(result.stdout)
-    return payload["hookSpecificOutput"]["additionalContext"]
+    assert completed.returncode == 0, completed.stderr
+    if not completed.stdout.strip():
+        return None
+    return json.loads(completed.stdout)["hookSpecificOutput"]
 
 
-def binding_of(path: Path) -> str:
-    regions = BINDING.findall(path.read_text(encoding="utf-8"))
-    assert len(regions) == 1, f"{path.name}: needs exactly one binding region, has {len(regions)}"
-    text = regions[0].strip()
-    assert len(text) > 40, f"{path.name}: binding region is too thin to bind anything"
-    return text
-
-
-@pytest.fixture(scope="module", params=sorted(PACKAGED_HOOKS))
-def host(request) -> tuple[str, Path]:
-    hook = PACKAGED_HOOKS[request.param]
-    rules = hook.parent.parent / "rules"
-    assert sorted(rules.glob("*.md")), f"{rules} ships no rules"
-    return inject(hook), rules
-
-
-# --- The shipped bundles ---------------------------------------------------
-
-def test_every_rules_binding_requirement_reaches_the_session(host):
-    injected, rules = host
-    for path in sorted(rules.glob("*.md")):
-        assert binding_of(path) in injected, f"{path.name}: binding requirement not injected"
-
-
-def test_payload_is_inlined_by_the_host_not_saved_to_a_file(host):
-    injected, _ = host
-    assert len(injected) <= HOST_INLINE_LIMIT, (
-        f"injected {len(injected)} chars; Claude Code inlines at most {HOST_INLINE_LIMIT} "
-        f"and shows only a 2,000-char preview of anything larger — tighten a binding region"
+def contexts_for(host: str, event: str) -> tuple[list[str], int]:
+    """(non-empty additionalContext per registered part, registered part count)."""
+    package = PACKAGES[host]
+    arg_lists = (
+        registered_args(package["registration"], event) if package["registration"] else [[]]
     )
-    assert "[escapement] WARNING" not in injected, (
-        "a shipped bundle must fit without the over-budget path"
+    assert arg_lists, f"{host}: inject_rules is not registered for {event}"
+    out = []
+    for args in arg_lists:
+        result = run_hook(package["hook"], args, event)
+        if result is not None:
+            assert result["hookEventName"] == event
+            out.append(result["additionalContext"])
+    return out, len(arg_lists)
+
+
+# --- The oracle ------------------------------------------------------------
+
+def split_part(context: str) -> tuple[str, str]:
+    header, sep, body = context.partition("\n\n")
+    assert sep and "\n" not in header, "a part must open with a single header line"
+    return header, body
+
+
+def assert_reproduces(contexts: list[str], rules_dir: Path) -> None:
+    """The parts' bodies, in order, are exactly the shipped heads, in order,
+    and every part holds whole rules only."""
+    expected = heads(rules_dir)
+    bodies = [split_part(c)[1] for c in contexts]
+    assert "".join(bodies) == "".join(text for _, text in expected), (
+        "concatenated parts differ from the shipped rule files"
     )
+    cursor = 0
+    for body in bodies:
+        taken = ""
+        while len(taken) < len(body):
+            taken += expected[cursor][1]
+            cursor += 1
+        assert taken == body, "a part splits a rule; parts must hold whole rules"
 
 
-def test_every_rule_names_its_full_file(host):
-    injected, rules = host
-    assert str(rules.resolve()) in injected
-    for path in sorted(rules.glob("*.md")):
-        assert path.name in injected, f"{path.name}: no path to read the full rule"
+@pytest.fixture(scope="module", params=[
+    (host, event) for host, p in PACKAGES.items() for event in p["events"]
+], ids=lambda he: f"{he[0]}-{he[1]}")
+def shipped(request):
+    host, event = request.param
+    contexts, registered = contexts_for(host, event)
+    return host, contexts, registered, PACKAGES[host]["hook"].parent.parent / "rules"
 
 
-def test_imperative_framing_survives(host):
-    assert "OVERRIDE default behavior" in host[0]
+def test_parts_reproduce_the_shipped_rules_byte_for_byte(shipped):
+    _, contexts, _, rules_dir = shipped
+    assert_reproduces(contexts, rules_dir)
 
 
-def test_precompact_reinjects_the_same_index():
-    assert inject(HOOK, "PreCompact") == inject(HOOK, "SessionStart")
+def test_every_part_fits_the_measured_host_limit(shipped):
+    host, contexts, _, _ = shipped
+    # Pi has no inline cap; its dispatcher reads at most 1 MB of hook output.
+    limit = 1_048_576 if PACKAGES[host]["registration"] is None else PART_LIMIT_BYTES
+    for k, context in enumerate(contexts, 1):
+        size = len(context.encode("utf-8"))
+        assert size <= limit, f"{host} part {k} is {size} bytes"
 
 
-# --- Bindings keep the rules' teeth ----------------------------------------
-
-# Every bolded prohibition in a rule body, and how its binding carries it: a
-# span of the requirement that must appear in that rule's binding region, or a
-# waiver saying why the agent can safely meet it only on reading the full rule.
-# A new bolded prohibition fails this test until someone makes that call. Where
-# only a word or two is bolded ("Do **not** pick up..."), the key is the whole
-# sentence around it.
-PROHIBITIONS: dict[tuple[str, str], tuple[str, str]] = {
-    ("agent-teams-default.md", '"Roundtable" NEVER means writing simulated dialogue in your output.'):
-        ("bound", '"roundtable" never means simulated dialogue in your output'),
-    ("agent-teams-default.md", "- **Always pair** for feature/epic work with behavioral specs - **Consider pairing** for complex bug fixes where the fix could mask the root cause - **Skip pairing** for simple chores, config changes, one-liners"):
-        ("bound", "Always pair feature/epic implementation with an independent reviewing agent"),
-    ("agent-teams-default.md", "A blocked agent is not a blocked team."):
-        ("bound", "A blocked agent is not a blocked team: escalate the narrow choice"),
-    ("agent-teams-default.md", "Most research does NOT need this."):
-        ("waived", "qualifies the opt-in vocab-scout guidance; it narrows an optional "
-                   "practice and imposes nothing on the agent"),
-    ("agent-teams-default.md", "Subagents do not inherit this rule."):
-        ("bound", "Subagents do not inherit these rules: put the continuation discipline in every agent prompt"),
-    ("continuation-harness.md", "Attempt the merge; do not pre-judge repository authorization in conversation."):
-        ("bound", "Attempt the merge; do not pre-judge repository authorization"),
-    ("continuation-harness.md", "Do **not** pick up unrelated ready tasks from `bd ready` to drain the queue and satisfy the gate."):
-        ("bound", "Do not pick up unrelated `bd ready` tasks to drain the queue and satisfy the gate"),
-    ("continuation-harness.md", "On re-invocation, classify the run mechanically — do NOT do manual `ps`/file-activity forensics:"):
-        ("waived", "background-workflow watchdog procedure; only reached while running "
-                   "a watched background workflow, which sends the agent to the full rule"),
-    ("continuation-harness.md", 'The "irreversible external action" carve-out does NOT cover a merge that triggers auto-deploy.'):
-        ("bound", "The irreversible-external-action carve-out does not cover a merge that triggers auto-deploy"),
-    ("continuation-harness.md", 'merge and ship it live. Do NOT ask "want me to merge it now, or review the PR first?"'):
-        ("bound", "`auto_merge_on_green: true`, merge on green without asking"),
-    ("delicate-art-of-bureaucracy.md", "Coercion is a smell, not a strategy."):
-        ("bound", "A gate that only blocks, with no affordance to unblock, is coercive"),
-    ("delicate-art-of-bureaucracy.md", "Design intent does not survive implementation."):
-        ("waived", "an observation about how gates are experienced once shipped; it "
-                   "explains the rule rather than forbidding an action"),
-    ("gate-design.md", "Validate value, not presence."):
-        ("bound", "(3) validate value, not presence"),
-    ("molecule-awareness.md", "Do NOT use `bd mol show` to find formulas"):
-        ("waived", "formula-authoring procedure; only reached while creating a molecule, "
-                   "a task that sends the agent to the full rule"),
-    ("molecule-awareness.md", "Scope changes are always human-driven."):
-        ("bound", "Scope changes are always human-driven: never silently change scope, specifications, or task descriptions"),
-    ("outcome-ownership.md", "Closing every child is an intermediate artifact, not the parent's outcome"):
-        ("bound", "not code that compiles, tests that pass, or children that closed"),
-    ("outcome-ownership.md", "merge it and ship it live; do not ask."):
-        ("bound", "Where `.escapement/repo.json` authorizes it, merge it and ship it live; do not ask"),
-    ("research-findings-persistence.md", "never the payload."):
-        ("bound", "its message is a pointer to that file, never the payload"),
-    ("tdd-enforcement.md", "Lint alone is forbidden as the verification for trigger / auth / deploy-gating changes."):
-        ("bound", "Lint alone is forbidden as the verification for trigger / auth / deploy-gating changes"),
-    ("tdd-enforcement.md", "gates, not oracles"):
-        ("bound", "Lint alone is forbidden as the verification"),
-    ("tdd-enforcement.md", "structured waiver, not an exemption"):
-        ("bound", "file a structured waiver that names the post-merge observation"),
-    ("why-drilling.md", "Mark it unconfirmed, name who/what would confirm it, and proceed — do not block."):
-        ("bound", "mark it unconfirmed, name who or what would confirm it, and proceed — do not block"),
-    ("why-drilling.md", "floor, not a ceiling."):
-        ("waived", "scopes the probe (deeper drilling is opt-in elsewhere); it limits "
-                   "the rule rather than adding a requirement"),
-    ("worktree-discipline.md", "**Never** `git stash`, `git checkout`, `git clean`, or discard when the tree holds WIP you did not write — that destroys another writer's work."):
-        ("bound", "never stash, checkout, clean, or discard WIP you did not write"),
-    ("worktree-discipline.md", 'Prompt-level "you own these files" lanes are merge-planning notes, **never** the isolation mechanism; compliance-based lanes have leaked in practice.'):
-        ("bound", "prompt-level file lanes are never the isolation mechanism"),
-}
-_BOLD = re.compile(r"\*\*([^*]+?)\*\*")
-_PROHIBITION = re.compile(r"\b(forbidden|never|must not|do not|does not|not|always)\b", re.I)
-_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
-# A bound span must be long enough that gutting the requirement around a short
-# phrase ("do not block") still fails.
-MIN_BOUND_SPAN = 30
-
-
-def _prose(text: str) -> str:
-    """Rule text outside its binding region and fenced code."""
-    out, fenced = [], False
-    for line in BINDING.sub("", text).splitlines():
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced:
-            out.append(line)
-    return "\n".join(out)
-
-
-def bold_prohibitions(rules: Path) -> set[tuple[str, str]]:
-    found = set()
-    for path in sorted(rules.glob("*.md")):
-        for para in re.split(r"\n\s*\n", _prose(path.read_text(encoding="utf-8"))):
-            flat = " ".join(para.split())
-            for match in _BOLD.finditer(flat):
-                bold = match.group(1).strip()
-                if not _PROHIBITION.search(bold):
-                    continue
-                if len(bold.split()) > 2:
-                    found.add((path.name, bold))
-                    continue
-                ends = [e.end() for e in _SENTENCE_END.finditer(flat, 0, match.start())]
-                after = _SENTENCE_END.search(flat, match.end())
-                sentence = flat[ends[-1] if ends else 0:after.end() if after else len(flat)]
-                found.add((path.name, sentence.strip()))
-    return found
-
-
-def test_every_bold_prohibition_is_bound_or_explicitly_waived():
-    rules = ROOT / "claude" / "rules"
-    assert bold_prohibitions(rules) == set(PROHIBITIONS), (
-        "bolded prohibitions changed — bind each new one or waive it with a reason"
+def test_registration_carries_every_part_with_headroom(shipped):
+    host, contexts, registered, _ = shipped
+    if PACKAGES[host]["registration"] is None:
+        assert len(contexts) == 1, "Pi runs the hook once, unsplit"
+        return
+    assert len(contexts) < registered, (
+        f"{host}: {len(contexts)} parts fill all {registered} registered entries; "
+        "register more before the rules outgrow them"
     )
-    for (name, _), (kind, value) in PROHIBITIONS.items():
-        if kind == "waived":
-            assert len(value) >= 40, f"{name}: a waiver needs a real reason"
-            continue
-        assert len(value) >= MIN_BOUND_SPAN, f"{name}: bound span too short to prove anything"
-        assert value.lower() in binding_of(rules / name).lower(), (
-            f"{name}: binding drops the prohibition it must carry ({value!r})"
-        )
+    assert not any("WARNING" in c for c in contexts)
 
 
-# --- Synthetic bundles -----------------------------------------------------
+def test_every_part_is_self_describing_and_authoritative(shipped):
+    """Parts arrive in completion order, so each carries its own label,
+    the override framing, and pointers for what it holds back."""
+    host, contexts, _, rules_dir = shipped
+    total = len(contexts) if PACKAGES[host]["registration"] is None else None
+    expected = iter(heads(rules_dir))
+    for k, context in enumerate(contexts, 1):
+        header, body = split_part(context)
+        assert f"part {k} of " in header
+        if total is not None:
+            assert f"part {k} of {total}" in header
+        assert "OVERRIDE default behavior" in header and "MUST follow" in header
+        carried = ""
+        while len(carried) < len(body):
+            name, text = next(expected)
+            carried += text
+            assert name in header, f"{host} part {k} does not name {name}"
+            if has_detail(rules_dir, name):
+                assert f"{rules_dir.resolve()}/" in header, (
+                    f"{name}: held-back reference with no path to read it"
+                )
 
-def _fake_plugin(tmp_path: Path, files: dict[str, str]) -> Path:
-    """A package holding the injector and ``files`` as its rules bundle."""
-    root = tmp_path / "plugin"
-    (root / "hooks").mkdir(parents=True)
-    shutil.copy2(HOOK, root / "hooks" / HOOK.name)
-    (root / "rules").mkdir()
-    for name, body in files.items():
-        (root / "rules" / name).write_text(body, encoding="utf-8")
-    return root / "hooks" / HOOK.name
+
+# --- The oracle catches drift (it is the source, not a phrase list) --------
+# The "old output" is the shipped Claude package's real output, produced once;
+# each test then edits a copy of its rules and checks the oracle notices.
+
+CLAUDE_RULES = PACKAGES["claude"]["hook"].parent.parent / "rules"
 
 
-def _rule(title: str, binding: str, body: str = "Reference body.\n") -> str:
-    return (
-        f"# {title}\n\n<!-- escapement:binding:start -->\n{binding}\n"
-        f"<!-- escapement:binding:end -->\n\n{body}"
+@pytest.fixture(scope="module")
+def old_output() -> list[str]:
+    return contexts_for("claude", "SessionStart")[0]
+
+
+def _rules_copy(tmp_path: Path) -> Path:
+    return Path(shutil.copytree(CLAUDE_RULES, tmp_path / "rules"))
+
+
+def test_positive_control_old_output_matches_unchanged_rules(tmp_path, old_output):
+    assert_reproduces(old_output, _rules_copy(tmp_path))
+
+
+@pytest.mark.parametrize("rule", sorted(p.name for p in CLAUDE_RULES.glob("*.md")))
+def test_deleting_any_sentence_of_a_rule_fails_the_old_output(tmp_path, old_output, rule):
+    rules_dir = _rules_copy(tmp_path)
+    path = rules_dir / rule
+    text = path.read_text(encoding="utf-8")
+    sentence = max(
+        (line for line in head_of(text).splitlines() if "<!--" not in line), key=len
     )
+    path.write_text(text.replace(sentence, "", 1), encoding="utf-8")
+
+    with pytest.raises(AssertionError):
+        assert_reproduces(old_output, rules_dir)
 
 
-def test_binding_text_comes_from_the_rule_file(tmp_path):
-    hook = _fake_plugin(tmp_path, {
-        "zebra.md": _rule("Zebra Rule", "Always paint the stripes before the hooves dry."),
-    })
-    context = inject(hook)
-    assert "Always paint the stripes before the hooves dry." in context
-    assert "Zebra Rule" in context
+def test_rewording_a_prohibition_fails_the_old_output(tmp_path, old_output):
+    """The failure that sank the bindings: a prohibition softened in place."""
+    rules_dir = _rules_copy(tmp_path)
+    path = rules_dir / "continuation-harness.md"
+    text = path.read_text(encoding="utf-8")
+    weakened = text.replace("carve-out does NOT cover", "carve-out covers, when you feel like it,", 1)
+    assert weakened != text
+    path.write_text(weakened, encoding="utf-8")
+
+    with pytest.raises(AssertionError):
+        assert_reproduces(old_output, rules_dir)
 
 
-def test_reference_body_stays_on_disk(tmp_path):
-    hook = _fake_plugin(tmp_path, {
-        "a.md": _rule("A", "Do the binding thing every single time it applies.",
-                      "A long worked example that only matters once you are in it.\n"),
-    })
-    assert "only matters once you are in it" not in inject(hook)
+def test_the_hook_follows_an_edited_source(tmp_path):
+    """The other half: after a rule changes, the hook's new output reproduces it."""
+    src = PACKAGES["claude"]["hook"]
+    hook = tmp_path / "plugin/hooks" / src.name
+    hook.parent.mkdir(parents=True)
+    shutil.copy2(src, hook)
+    rules_dir = Path(shutil.copytree(CLAUDE_RULES, tmp_path / "plugin/rules"))
+    path = rules_dir / "continuation-harness.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("NOT", "not", 1), encoding="utf-8")
+    contexts = []
+    for args in registered_args(PACKAGES["claude"]["registration"], "SessionStart"):
+        result = run_hook(hook, args)
+        if result:
+            contexts.append(result["additionalContext"])
+
+    assert_reproduces(contexts, rules_dir)
 
 
-def test_rule_without_binding_is_named_loudly_with_its_path(tmp_path):
-    hook = _fake_plugin(tmp_path, {"plain.md": "# Plain Rule\n\nDo the thing.\n"})
-    context = inject(hook)
-    assert "WARNING" in context
-    assert "Plain Rule" in context and "plain.md" in context
+def test_a_summary_in_place_of_a_rule_fails(tmp_path, old_output):
+    """Negative control for the invalid class 'compact binding instead of text'."""
+    rules_dir = _rules_copy(tmp_path)
+    name, text = heads(rules_dir)[0]
+    summarised = [p.replace(text, f"# {name}\n\nFollow this rule.\n", 1) for p in old_output]
+    assert summarised != old_output
 
-
-def test_oversized_bundle_fails_loud_and_still_fits(tmp_path):
-    files = {
-        f"r{n:02}.md": _rule(f"Rule {n}", f"Requirement {n}: " + "x" * 900)
-        for n in range(20)
-    }
-    context = inject(_fake_plugin(tmp_path, files))
-    assert len(context) <= HOST_INLINE_LIMIT, "over-budget output must still be inlined"
-    # The warning must land inside the 2,000-char preview a host would show.
-    assert "WARNING" in context[:2000]
-    assert "r19.md" in context, "every rule must stay reachable by path"
-
-
-def test_missing_bundle_still_fails_loud(tmp_path):
-    """A broken install must be visible, not a silently ruleless session."""
-    context = inject(_fake_plugin(tmp_path, {}))
-    assert "WARNING" in context and "NOT injected" in context
+    with pytest.raises(AssertionError):
+        assert_reproduces(summarised, rules_dir)

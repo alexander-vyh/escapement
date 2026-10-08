@@ -59,6 +59,7 @@ These are the most insidious failures because they LOOK like completion but ARE 
 ❌ "I'll leave the remaining items for follow-up."
 → There is no follow-up. You are the follow-up. Do the remaining items NOW.
 
+<!-- escapement:detail:end -->
 ❌ "Want me to keep going?", "Should I continue, or stop here?", "Want any of those, or is this a good stopping point?"
 → Do not solicit stopping. If there is a next in-scope action, take it. If the
 outcome is verified, state that. If a real blocker prevents progress, name the
@@ -95,7 +96,6 @@ executes a deployment nor authorizes arbitrary commands. See `continuation-harne
 § Per-repo outcome authorization.
 
 
-<!-- escapement:detail:end -->
 ## The Verification Test
 
 Before declaring done, answer honestly: (1) Did I run the exact command or workflow the

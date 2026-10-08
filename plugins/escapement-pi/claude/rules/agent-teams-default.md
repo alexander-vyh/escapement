@@ -92,8 +92,6 @@ keep other authorized lanes running. A blocked agent is not a blocked team. Esca
 only the narrow decision after all independent authorized work has continued as far as
 it can.
 
-<!-- escapement:detail:start -->
-
 ## Agent Pairing for Quality
 
 When dispatching implementation agents, consider pairing them with independent
@@ -132,6 +130,7 @@ implementation-class checklist, and the dispatch templates.
 - **Consider pairing** for complex bug fixes where the fix could mask the root cause
 - **Skip pairing** for simple chores, config changes, one-liners
 
+<!-- escapement:detail:start -->
 ### Subtask Parallelism
 
 Agents aren't just for separate tasks. Within a single task, dispatch parallel

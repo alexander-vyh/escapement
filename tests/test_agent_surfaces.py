@@ -1467,9 +1467,23 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
         (ROOT / src).read_text() for src in _planned_rule_symlink_sources(plan)
     )
 
-    inj = _run_claude_rules_injector(CLAUDE_PLUGIN / "hooks" / "inject_rules.py")
-    assert inj.returncode == 0, inj.stderr
-    channel_b = json.loads(inj.stdout)["hookSpecificOutput"]["additionalContext"]
+    # Channel B as Claude receives it: every registered SessionStart part.
+    registered = json.loads((CLAUDE_PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
+    parts = []
+    for item in registered["SessionStart"]:
+        for hook in item["hooks"]:
+            argv = shlex.split(hook["command"])
+            script = next((i for i, a in enumerate(argv) if a.endswith("/inject_rules.py")), None)
+            if script is None:
+                continue
+            inj = _run_claude_rules_injector(
+                CLAUDE_PLUGIN / "hooks" / "inject_rules.py", argv[script + 1:]
+            )
+            assert inj.returncode == 0, inj.stderr
+            if inj.stdout.strip():
+                parts.append(json.loads(inj.stdout)["hookSpecificOutput"]["additionalContext"])
+    assert len(parts) > 1, "the rules must be split across registered parts"
+    channel_b = "\n".join(parts)
 
     combined = channel_a + "\n" + channel_b
     assert combined.count(RULE_DEDUP_PHRASE) == 1, (
@@ -1479,21 +1493,26 @@ def test_rules_delivered_exactly_once_across_both_channels(tmp_path):
     # Positive control: the surviving channel still delivers the sentinel AND every
     # bundled rule — the fix removed the duplicate, not the rules.
     #
-    # "Delivers" is each rule's binding requirement plus the path to the full file,
-    # not the verbatim body: whole bodies overflowed the host's inline limit (see
-    # tests/test_rule_injection.py for that contract). What must not happen is a
-    # rule going missing.
+    # "Delivers" is not always "verbatim in full": a rule may hold reference
+    # sections back behind detail markers, and the part carrying it names the
+    # rule's file (tests/test_rule_injection.py holds the byte-for-byte contract).
+    # What must not happen is a rule going missing, so assert on the rule's
+    # identity and on the pointer that makes the held-back part reachable.
     assert channel_b.count(RULE_DEDUP_PHRASE) == 1
     for rule_file in sorted((CLAUDE_PLUGIN / "rules").glob("*.md")):
         body = rule_file.read_text()
-        binding = body.split("<!-- escapement:binding:start -->", 1)[1]
-        binding = binding.split("<!-- escapement:binding:end -->", 1)[0].strip()
-        assert binding in channel_b, (
+        title = next(ln for ln in body.splitlines() if ln.startswith("# "))
+        assert title in channel_b, (
             f"surviving channel dropped rule: {rule_file.name}"
         )
-        assert rule_file.name in channel_b, (
-            f"{rule_file.name}: no path to read the full rule"
-        )
+        if "<!-- escapement:detail:start -->" in body:
+            assert rule_file.name in channel_b, (
+                f"{rule_file.name}: detail held back without a path to read it"
+            )
+        else:
+            assert body in channel_b, (
+                f"surviving channel dropped rule body: {rule_file.name}"
+            )
 
 
 # escapement (this change): plugins/escapement-pi/PI.md is injected in full by
@@ -1546,9 +1565,9 @@ def test_pi_dedup_guard_is_not_vacuous_without_the_manifest_flag(tmp_path):
     )
 
 
-def _run_claude_rules_injector(hook: Path) -> subprocess.CompletedProcess[str]:
+def _run_claude_rules_injector(hook: Path, args: list[str] = ()) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(hook)],
+        [sys.executable, str(hook), *args],
         input=json.dumps({"hook_event_name": "SessionStart", "source": "startup"}),
         capture_output=True,
         text=True,
