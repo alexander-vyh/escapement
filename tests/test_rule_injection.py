@@ -344,6 +344,26 @@ def test_pinned_requirements_reach_the_session(shipped):
     assert missing_pins(contexts, rules_dir) == [], host
 
 
+# Directives that pushed Codex/Pi agents to dispatch by default (Cake 129-tree
+# scan: "policy suggests always using parallel processing"). Removed on purpose;
+# re-adding one must fail here on every host.
+REMOVED_DIRECTIVES = [
+    "dispatch agents. This includes research",
+    "Everything else should go to agents",
+    "instead of dispatching a team",
+    "instead of dispatching explore agents",
+    "dispatch for it now",
+]
+INLINE_DEFAULT = "**Work inline by default.** Dispatch an agent only when"
+
+
+def test_dispatch_by_default_never_reaches_the_session(shipped):
+    host, contexts, _, _ = shipped
+    injected = "\n".join(contexts)
+    assert [d for d in REMOVED_DIRECTIVES if d in injected] == [], host
+    assert INLINE_DEFAULT in injected, host
+
+
 def test_pins_cover_files_each_host_ships():
     for rule, _ in PINNED_REQUIREMENTS:
         assert (CLAUDE_RULES / rule).exists(), f"pinned rule {rule} is not shipped"

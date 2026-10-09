@@ -161,13 +161,15 @@ frontmatter:
   pi:
 ---
 
-# Agent Teams as Default — Global Rule
+# Agent Teams — Global Rule
 
-## Default to Agents
+## When to Dispatch
 
-For any task beyond a single quick action, dispatch agents. This includes research, exploration, implementation, debugging, code review, investigation — anything that involves multiple steps or could benefit from parallelism.
-
-A single file read, one search, or a small edit is fine inline. Everything else should go to agents.
+**Work inline by default.** Dispatch an agent only when that clearly beats doing it
+yourself: independent work that can truly run in parallel, a broad search whose raw
+output would flood your context, or a review that must be independent of the author.
+Dispatch is never a policy obligation, and a child's output is never a reason to widen
+the question.
 
 ## Always Use Named Agents
 
@@ -300,9 +302,6 @@ faster delivery = easier verification.
 
 ## Anti-Patterns
 
-- Sequential inline web searches instead of parallel search agents
-- Reading 10 files one by one instead of dispatching explore agents
-- Doing all investigation yourself instead of dispatching a team
 - **Writing simulated persona dialogue instead of dispatching real agents**
 {{slot:anonymous_dispatch}}
 - **Winding down prematurely** — summarizing remaining work instead of doing it
@@ -315,15 +314,6 @@ subagent equally. Two additions specific to teams:
 - **A blocked agent is not a blocked team.** Escalate the narrow consequential choice and
   keep every independent authorized lane running.
 - **Subagents do not inherit this rule.** Put it in their prompts (block below).
-
-### Pre-Completion Checklist
-
-Beyond the outcome verification `outcome-ownership.md` already requires:
-
-1. **Did I dispatch all agents that could work in parallel?** If independent work
-   remains, dispatch for it now.
-2. **Could a review/QA agent independently verify this?** If the work is non-trivial,
-   dispatch one.
 
 ### For Subagents (Include in Every Agent Prompt)
 
