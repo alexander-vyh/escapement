@@ -184,6 +184,8 @@ def _aggregate(
     contexts: list[str] = []
     messages: list[str] = []
     blocks: list[str] = []
+    inspection_abort = False
+    inspection_handoff = False
     for result in results:
         message = result.get("systemMessage")
         if isinstance(message, str):
@@ -201,6 +203,8 @@ def _aggregate(
         reason = hook.get("permissionDecisionReason")
         if decision in DECISION_STRENGTH:
             decisions.append((decision, reason if isinstance(reason, str) else ""))
+        inspection_abort |= hook.get("inspectionAbort") is True and decision == "deny"
+        inspection_handoff |= hook.get("inspectionHandoff") is True
 
     output: dict[str, Any] = {}
     if blocks:
@@ -215,6 +219,8 @@ def _aggregate(
         )
         if reasons:
             hook_output["permissionDecisionReason"] = "\n\n".join(reasons)
+        if strongest == "deny" and inspection_abort:
+            hook_output["inspectionAbort"] = True
     messages = _unique([*messages, *warnings])
     if messages:
         output["systemMessage"] = "\n\n".join(messages)
@@ -228,6 +234,8 @@ def _aggregate(
     contexts = _unique(contexts)
     if contexts:
         hook_output["additionalContext"] = "\n\n".join(contexts)
+    if event == "Stop" and inspection_handoff:
+        hook_output["inspectionHandoff"] = True
     if len(hook_output) > 1:
         output["hookSpecificOutput"] = hook_output
     return output
@@ -247,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gate", action="append", required=True)
     parser.add_argument("--gate-timeout", action="append", type=float, default=[])
+    parser.add_argument("--fail-closed", action="store_true")
     args = parser.parse_args(argv)
     if args.gate_timeout and len(args.gate_timeout) != len(args.gate):
         parser.error("each --gate must have one --gate-timeout")
@@ -284,6 +293,18 @@ def main(argv: list[str] | None = None) -> int:
             results.append(result)
         if warning is not None:
             warnings.append(warning)
+    if args.fail_closed and warnings:
+        results.append({
+            "hookSpecificOutput": {
+                "hookEventName": _event_name(payload),
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    "Inspection boundary could not be checked. Report the evidence already "
+                    "available and mark missing comparisons unknown; do not retry opaque execution."
+                ),
+                "inspectionAbort": True,
+            },
+        })
     print(json.dumps(_aggregate(results, warnings, _event_name(payload))))
     return 0
 

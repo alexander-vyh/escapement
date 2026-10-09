@@ -146,6 +146,11 @@ def test_actual_parent_header_shares_counter_and_duplicate_delivery_is_idempoten
 def test_explicit_unreadable_or_invalid_parent_cannot_create_fresh_allowance(scope, binding):
     begin(scope)
     parent = scope["root"] / "parent.jsonl"
+    parent.write_text(json.dumps({"type": "session", "id": "parent"}) + "\n")
+    allowed(call(scope, "read", {"path": str(scope["evidence"])},
+                 session="child", parent_session=str(parent), call_id="bind"))
+    if binding == "missing":
+        parent.unlink()
     if binding == "not-json":
         parent.write_text("not json\n")
     elif binding == "oversized":
@@ -268,7 +273,12 @@ def test_stop_handoffs_without_renewal_or_counter_changes(scope, phase):
 
 def test_missing_parent_repeated_rejection_aborts_without_child_allowance(scope):
     begin(scope)
-    missing = str(scope["root"] / "missing-session")
+    parent = scope["root"] / "parent-session.jsonl"
+    parent.write_text(json.dumps({"type": "session", "id": "parent"}) + "\n")
+    allowed(call(scope, "read", {"path": str(scope["evidence"])},
+                 session="child", parent_session=str(parent), call_id="bind"))
+    parent.unlink()
+    missing = str(parent)
     first = denied(call(scope, "Eval", session="child", parent_session=missing))
     assert not first.get("inspectionAbort", False)
     second = denied(call(scope, "Eval", session="child", parent_session=missing, call_id="retry"))

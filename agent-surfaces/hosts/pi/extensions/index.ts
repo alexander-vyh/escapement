@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
@@ -13,11 +14,19 @@ type PiAPI = {
   sendUserMessage(content: string, options?: Record<string, unknown>): void;
 };
 type Gate = { id: string; source: string; timeout_seconds: number };
+type InspectionContext = {
+  cwd?: string;
+  signal?: AbortSignal;
+  abort(): void | Promise<void>;
+  sessionManager: { getSessionId(): string; getHeader?(): unknown };
+};
 type HookOutput = {
   hookEventName: string;
   permissionDecision?: "allow" | "ask" | "deny";
   permissionDecisionReason?: string;
   additionalContext?: string;
+  inspectionAbort?: boolean;
+  inspectionHandoff?: boolean;
 };
 type DispatcherResponse = {
   decision?: "block";
@@ -28,6 +37,7 @@ type DispatcherResponse = {
 type Runtime = {
   dispatcherPath: string;
   preToolGates: Map<string, Gate[]>;
+  rawToolGates: Gate[];
   // Gates for a tool with no list of its own: an extension's tool, which is
   // how pi-mcp-adapter's direct tools and mcpScript arrive.
   unlistedToolGates: Gate[];
@@ -89,6 +99,7 @@ function loadRuntime(): Runtime {
     ["ask", optionalGates(parsed.ask_gates)],
   ]);
   const unlistedToolGates = optionalGates(parsed.unlisted_tool_gates);
+  const rawToolGates = optionalGates(parsed.raw_tool_gates);
   const postToolGates = new Map<string, Gate[]>(
     Object.entries(byTool ?? {}).map(([tool, gates]) => [tool, optionalGates(gates)]),
   );
@@ -99,6 +110,7 @@ function loadRuntime(): Runtime {
     ...[...preToolGates.values()].flat(),
     ...[...postToolGates.values()].flat(),
     ...unlistedToolGates,
+    ...rawToolGates,
     ...contextGates,
     ...sessionGates,
     ...stopGates,
@@ -116,6 +128,7 @@ function loadRuntime(): Runtime {
     dispatcherPath: confinedFile(parsed.dispatcher),
     preToolGates,
     unlistedToolGates,
+    rawToolGates,
     postToolGates,
     contextGates,
     sessionGates,
@@ -148,6 +161,7 @@ function parseDispatcherResponse(stdout: string, event: unknown): DispatcherResp
     }
     const allowedHook = new Set([
       "hookEventName", "permissionDecision", "permissionDecisionReason", "additionalContext",
+      "inspectionAbort", "inspectionHandoff",
     ]);
     if (Object.keys(hook).some((key) => !allowedHook.has(key))) {
       return fail("dispatcher hookSpecificOutput contains unknown fields");
@@ -159,6 +173,11 @@ function parseDispatcherResponse(stdout: string, event: unknown): DispatcherResp
     for (const field of ["permissionDecisionReason", "additionalContext"]) {
       if (hook[field] !== undefined && typeof hook[field] !== "string") {
         return fail(`dispatcher ${field} must be a string`);
+      }
+    }
+    for (const field of ["inspectionAbort", "inspectionHandoff"]) {
+      if (hook[field] !== undefined && typeof hook[field] !== "boolean") {
+        return fail(`dispatcher ${field} must be a boolean`);
       }
     }
   }
@@ -178,8 +197,10 @@ function runDispatcher(
   payload: Record<string, unknown>,
   signal?: AbortSignal,
   cwd?: unknown,
+  strict = false,
 ): Promise<DispatcherResponse> {
   const argv = ["-B", runtime.dispatcherPath];
+  if (strict) argv.push("--fail-closed");
   for (const gate of gates) {
     argv.push("--gate", gate.source, "--gate-timeout", String(gate.timeout_seconds));
   }
@@ -291,6 +312,58 @@ export default function escapementPi(pi: PiAPI): void {
       : Array.isArray(run) ? run : []);
   };
 
+  const inspectionApplies = (context: InspectionContext): boolean => {
+    if (parentSessionOf(context)) return true;
+    const sessionId = sessionIdOf(context);
+    const configured = process.env.ESCAPEMENT_INSPECTION_STATE_DIR
+      || "~/.local/state/escapement/inspections";
+    const directory = configured === "~" ? homedir()
+      : configured.startsWith("~/") ? resolve(homedir(), configured.slice(2))
+      : resolve(context.cwd || process.cwd(), configured);
+    if (configured.startsWith("~") && configured !== "~" && !configured.startsWith("~/")) return true;
+    if (existsSync(resolve(directory, `.bound-${sessionId}.json`))) return true;
+    const path = resolve(directory, `${sessionId}.json`);
+    try {
+      if (statSync(path).size > 262144) return true;
+      const record: unknown = JSON.parse(readFileSync(path, "utf8"));
+      return !(record !== null && typeof record === "object" && !Array.isArray(record)
+        && "version" in record && record.version === 1
+        && "session_id" in record && record.session_id === sessionId
+        && "phase" in record && record.phase === "released");
+    } catch (error) {
+      return !(error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT");
+    }
+  };
+  const runInspection = (
+    loaded: Runtime, payload: Record<string, unknown>, context: InspectionContext,
+  ): Promise<DispatcherResponse | null> => {
+    if (loaded.rawToolGates.length === 0 || !inspectionApplies(context)) return Promise.resolve(null);
+    return runDispatcher(loaded, loaded.rawToolGates, {
+      ...payload, session_id: sessionIdOf(context), cwd: context.cwd,
+      parent_session: parentSessionOf(context) || null,
+    }, context.signal, context.cwd, true).then((result) => {
+      const output = result.hookSpecificOutput;
+      return output?.permissionDecision || output?.inspectionAbort || output?.inspectionHandoff
+        || result.decision === "block" ? result : null;
+    });
+  };
+
+  // Only host input ingress releases a scope; synthetic continuations do not.
+  pi.on("input", async (event, context) => {
+    if (runtime instanceof Error || !["interactive", "rpc"].includes(event.source)) return;
+    try {
+      const result = await runInspection(runtime, {
+        hook_event_name: "ExternalInput", input_source: event.source,
+      }, context);
+      if (result) surfaceDiagnostics(pi, result, { triggerTurn: false });
+    } catch (error) {
+      pi.sendMessage({
+        customType: "escapement", display: true,
+        content: `Inspection input release failed; existing boundary remains: ${error}`,
+      }, { triggerTurn: false });
+    }
+  });
+
   // SessionStart hooks run once when Pi starts, resumes or forks a session.
   // Their additionalContext is kept and re-appended to every turn's system
   // prompt below: Pi rebuilds the system prompt per turn, so this is how the
@@ -364,6 +437,38 @@ export default function escapementPi(pi: PiAPI): void {
   });
 
   pi.on("tool_call", async (event, context) => {
+    // Judge the physical call before projection can skip native/opaque tools.
+    if (runtime instanceof Error && inspectionApplies(context)) {
+      const reason = `Inspection admission unavailable: ${runtime.message}. Report existing evidence and unknown comparisons; handoff for configuration repair without retrying tools.`;
+      pi.sendMessage({ customType: "escapement", content: reason, display: true }, { triggerTurn: false });
+      await context.abort();
+      return { block: true, reason };
+    }
+    if (!(runtime instanceof Error)) {
+      try {
+        const result = await runInspection(runtime, {
+          hook_event_name: "PreToolUse", tool_use_id: event.toolCallId,
+          tool_name: event.toolName, tool_input: event.input,
+        }, context);
+        const hook = result?.hookSpecificOutput;
+        if (hook?.permissionDecision === "deny") {
+          const reason = hook.permissionDecisionReason || "Inspection boundary denied this call; report known findings and unknown comparisons.";
+          if (hook.inspectionAbort) {
+            pi.sendMessage({ customType: "escapement", content: reason, display: true }, { triggerTurn: false });
+            await context.abort();
+          }
+          return { block: true, reason };
+        }
+        // The strict boundary owns its pre-seeded, finite read/report lane.
+        // General implementation gates must not demand implementation from it.
+        if (result !== null) return;
+      } catch (error) {
+        const reason = `Inspection admission failed closed: ${error}. Report existing evidence; mark missing comparisons unknown and handoff, without retrying opaque work.`;
+        pi.sendMessage({ customType: "escapement", content: reason, display: true }, { triggerTurn: false });
+        await context.abort();
+        return { block: true, reason };
+      }
+    }
     // Read gates steer toward cheaper navigation; they are not a safety
     // brake, so a broken install or failed dispatch never blocks a read.
     const advisory = event.toolName === "read";
@@ -465,6 +570,21 @@ export default function escapementPi(pi: PiAPI): void {
   let stopHookActive = false;
   pi.on("agent_end", async (event, context) => {
     if (runtime instanceof Error || runtime.stopGates.length === 0) return;
+    try {
+      const inspection = await runInspection(runtime, { hook_event_name: "Stop" }, context);
+      if (inspection?.hookSpecificOutput?.inspectionHandoff
+        || inspection?.hookSpecificOutput?.inspectionAbort
+        || inspection?.hookSpecificOutput?.permissionDecision === "deny") {
+        surfaceDiagnostics(pi, inspection, { triggerTurn: false });
+        return;
+      }
+    } catch (error) {
+      pi.sendMessage({
+        customType: "escapement", display: true,
+        content: `Inspection handoff check failed closed: ${error}. Optional inspection will not be continued.`,
+      }, { triggerTurn: false });
+      return;
+    }
     const run = Array.isArray(event?.messages) ? event.messages : [];
     const sessionId = sessionIdOf(context);
     const lastAssistant = [...run].reverse().find((message) => message?.role === "assistant");

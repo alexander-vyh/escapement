@@ -137,6 +137,37 @@ checkout, and exercises the installed adapter with Bun. Virtual `xd://` device
 calls must pass while managed primary-checkout file writes remain blocked.
 Reload existing OMP sessions after an upgrade.
 
+### Bounded inspections (Pi / OMP)
+
+Inspection is an opt-in read/report mode, not a global token or CPU quota.
+Before the first inspection tool call, the host/operator binds the actual
+session ID to exact readable sources and new report destinations:
+
+```bash
+python3 -B plugins/escapement-pi/claude/hooks/inspection_boundary.py begin \
+  --session "$SESSION_ID" \
+  --source "$EVIDENCE_PATH" \
+  --artifact "$REPORT_PATH" \
+  --max-actions 24
+```
+
+Report parents must already exist; activation seeds empty reports without
+overwriting existing files. Nominate each readable file or directory explicitly;
+a directory nomination permits its listing, not recursive descendant access.
+Reads share a durable allowance across bound children and restarts. Bash, Eval,
+opaque tools and further delegation are prohibited before execution; exact
+existing-file report writers remain available, with two mutations per report.
+The first rejection changes the inspection to report-only. A repeated prohibited
+call aborts the turn; Stop hands off without scheduling more work. Missing
+comparisons must be reported as unknown, not rescued by a larger inventory.
+
+Only genuine interactive/RPC input releases the boundary, retaining history;
+synthetic continuations cannot renew it. Inspect state with the same CLI's
+`show --session "$SESSION_ID"` command. Reload existing OMP sessions after
+deployment. Unactivated sessions are unchanged. Codex and Claude enforcement
+remain unsupported until their raw-call binding, input and abort paths have
+equivalent native fixtures.
+
 ### Deploy after merge
 
 The repository's declared deployment command refreshes Claude, Codex and OMP:

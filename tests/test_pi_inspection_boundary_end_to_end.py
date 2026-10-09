@@ -154,6 +154,63 @@ def write_call(session, report, content):
     return event
 
 
+@pytest.mark.parametrize("state_setting", ["~/inspection-state", ""])
+def test_cli_state_path_activation_is_enforced_by_the_host(plugin, inspection, tmp_path, state_setting):
+    session, env, source, _report, _state = inspection
+    env = {**env, "ESCAPEMENT_INSPECTION_STATE_DIR": state_setting}
+    handoff = tmp_path / "handoff"
+    handoff.mkdir()
+    report = handoff / "bounded-report.md"
+    hook = Path(__file__).resolve().parents[1] / "claude/hooks/inspection_boundary.py"
+    activated = subprocess.run([
+        "python3", "-B", str(hook), "begin", "--session", session.id,
+        "--source", str(source), "--artifact", str(report), "--max-actions", "2",
+    ], cwd=session.cwd, env=env, capture_output=True, text=True, timeout=10)
+    assert activated.returncode == 0, activated.stderr
+    witness = tmp_path / "tilde-bypass"
+    [outcome] = run(plugin, [witness_call(session, "write", {
+        "path": "xd://opaque-device", "content": "{}",
+    }, witness)], env)
+    assert_inspection_denied(outcome, report)
+    assert not witness.exists()
+
+
+def test_state_persistence_failure_aborts_instead_of_repeating_nonterminal_denials(plugin, inspection, tmp_path):
+    session, env, source, report, state = inspection
+    [read] = run(plugin, [read_call(session, source)], env)
+    assert read["read"] == "Useful finding: the candidate preserves invoice provenance."
+    state.parent.chmod(0o555)
+    witness = tmp_path / "storage-failure-executor"
+    try:
+        [outcome] = run(plugin, [witness_call(session, "eval", {"code": "do not execute"}, witness)], env)
+    finally:
+        state.parent.chmod(0o755)
+    assert outcome["result"] and outcome["result"]["block"] is True, outcome
+    assert outcome["aborts"] == 1
+    assert not witness.exists()
+    assert not [item for item in outcome["sent"] if item["kind"] == "user"]
+
+
+@pytest.mark.parametrize("tool", ["read", "opaque-device"])
+def test_broken_inventory_cannot_open_an_activated_inspection(plugin, inspection, tmp_path, tool):
+    session, env, source, report, state = inspection
+    broken = tmp_path / "broken-plugin"
+    shutil.copytree(plugin, broken)
+    (broken / "gates.json").write_text("{", encoding="utf-8")
+    shutil.copyfile(plugin.parent / "probe.mjs", broken.parent / "probe.mjs")
+    if tool == "read":
+        event = read_call(session, source.parent / "outside.md")
+        event["observeAbort"] = True
+    else:
+        event = witness_call(session, "write", {"path": "xd://opaque-device", "content": "{}"},
+                             tmp_path / "broken-inventory-executor")
+    [outcome] = run(broken, [event], env)
+    assert outcome["result"] and outcome["result"]["block"] is True, outcome
+    assert outcome["aborts"] == 1
+    assert "read" not in outcome and "executed" not in outcome
+    assert not [item for item in outcome["sent"] if item["kind"] == "user"]
+
+
 def test_nominated_evidence_and_exact_report_remain_useful_after_denial(plugin, inspection, tmp_path):
     session, env, source, report, state = inspection
     [read] = run(plugin, [read_call(session, source)], env)
@@ -179,26 +236,50 @@ def test_nominated_evidence_and_exact_report_remain_useful_after_denial(plugin, 
     assert json.loads(state.read_text(encoding="utf-8"))["rejected"] == 1
 
 
-def test_seeded_existing_file_writer_can_persist_read_only_child_report(plugin, inspection, tmp_path):
+@pytest.mark.parametrize("route", ["direct-mcp", "native-device"])
+def test_seeded_existing_file_writer_can_persist_read_only_child_report(plugin, inspection, tmp_path, route):
     session, env, source, report, state = inspection
+    session = Session(Path(session.cwd))
+    state = state.parent / f"{session.id}.json"
+    report.unlink()
+    hook = Path(__file__).resolve().parents[1] / "claude/hooks/inspection_boundary.py"
+    activated = subprocess.run([
+        "python3", "-B", str(hook), "begin", "--session", session.id,
+        "--source", str(source), "--artifact", str(report), "--max-actions", "3",
+    ], cwd=session.cwd, env=env, capture_output=True, text=True, timeout=10)
+    assert activated.returncode == 0, activated.stderr
+    assert report.read_text(encoding="utf-8") == ""
     parent_file = tmp_path / "actual-parent.jsonl"
     parent_file.write_text(json.dumps(session.header) + "\n", encoding="utf-8")
     child = Session(Path(session.cwd), parent_session=str(parent_file))
     [read] = run(plugin, [read_call(child, source)], env)
     assert read["result"] is None, read
     assert read["read"] == "Useful finding: the candidate preserves invoice provenance."
-    report.write_text("# Findings\nPending bounded handoff.\n", encoding="utf-8")
+    forbidden = tmp_path / "forbidden-child-execution"
+    [denied] = run(plugin, [witness_call(child, "eval", {"code": "opaque work"}, forbidden)], env)
+    assert_inspection_denied(denied, report)
+    assert not forbidden.exists()
+    assert report.read_text(encoding="utf-8") == ""
     content = "# Findings\n" + read["read"] + "\nComparison: unknown.\n"
-    arguments = {"relative_path": str(report), "needle": "Pending bounded handoff.",
-                 "repl": read["read"] + "\nComparison: unknown.", "mode": "literal"}
-    event = child.tool_call("mcp__serena_replace_content", arguments)
+    arguments = {"relative_path": str(report), "needle": r"\A\Z",
+                 "repl": content, "mode": "regex"}
+    event = child.tool_call("mcp__serena_replace_content", arguments) if route == "direct-mcp" else child.tool_call(
+        "write", {"path": "xd://mcp__serena_replace_content", "content": json.dumps(arguments)},
+    )
+    # The mounted Serena writer's empty-file regex is independently smoke-proven.
+    # This fixture exercises admission and its empty-file filesystem effect.
     event["executor"] = {"kind": "replace", "path": str(report),
-                         "before": arguments["needle"], "after": arguments["repl"]}
+                         "before": "", "after": content}
     [written] = run(plugin, [event], env)
     assert written["result"] is None, written
     assert written["executed"] is True
     assert report.read_text(encoding="utf-8") == content
-    assert json.loads(state.read_text(encoding="utf-8"))["admitted"] > 0
+    history = json.loads(state.read_text(encoding="utf-8"))
+    assert history["admitted"] == 1
+    assert history["rejected"] == 1
+    assert history["phase"] == "report"
+    assert history["report_writes"] == {str(report.resolve()): 1}
+    assert not (state.parent / f"{child.id}.json").exists()
 
 
 @pytest.mark.parametrize("route", ["outside-read", "uri-read", "wrong-report-write", "recursive-list", "delegate"])
@@ -253,7 +334,12 @@ def test_real_parent_child_share_allowance_across_extension_reloads(plugin, insp
 
 def test_unreadable_explicit_parent_binding_fails_closed(plugin, inspection, tmp_path):
     parent, env, source, report, state = inspection
-    child = Session(Path(parent.cwd), parent_session=str(tmp_path / "missing-parent.jsonl"))
+    parent_file = tmp_path / "actual-parent.jsonl"
+    parent_file.write_text(json.dumps(parent.header) + "\n", encoding="utf-8")
+    child = Session(Path(parent.cwd), parent_session=str(parent_file))
+    [read] = run(plugin, [read_call(child, source)], env)
+    assert read["read"] == "Useful finding: the candidate preserves invoice provenance."
+    parent_file.unlink()
     witness = tmp_path / "unbound-child-executor"
     [outcome] = run(plugin, [witness_call(child, "eval", {"language": "py", "code": "print('child')"}, witness)], env)
     decision = outcome["result"]
@@ -262,6 +348,31 @@ def test_unreadable_explicit_parent_binding_fails_closed(plugin, inspection, tmp
     assert any(word in decision["reason"].lower() for word in ("report", "handoff"))
     assert not witness.exists()
 
+
+
+@pytest.mark.parametrize("activated", [False, True])
+def test_unactivated_or_released_child_keeps_ordinary_execution_gates(plugin, inspection, tmp_path, activated):
+    parent, env, source, report, state = inspection
+    parent_file = tmp_path / "ordinary-parent.jsonl"
+    parent_file.write_text(json.dumps(parent.header) + "\n", encoding="utf-8")
+    child = Session(Path(parent.cwd), parent_session=str(parent_file))
+    if activated:
+        [read] = run(plugin, [read_call(child, source)], env)
+        assert read["read"] == "Useful finding: the candidate preserves invoice provenance."
+        external = parent._event("input", {
+            "type": "input", "text": "Implement the approved repair.", "images": [], "source": "rpc",
+        })
+        run(plugin, [external], env)
+        assert json.loads(state.read_text(encoding="utf-8"))["phase"] == "released"
+    else:
+        state.unlink()
+    witness = tmp_path / "ordinary-gate-bypass"
+    [outcome] = run(plugin, [witness_call(child, "bash", {
+        "command": "git worktree add ../bad feat/bad",
+    }, witness)], env)
+    assert outcome["result"] and outcome["result"]["block"] is True, outcome
+    assert "escapement-worktree create" in outcome["result"]["reason"]
+    assert not witness.exists()
 
 def test_second_rejection_aborts_without_follow_up_or_allowance_reset(plugin, inspection, tmp_path):
     session, env, source, report, state = inspection
@@ -295,10 +406,21 @@ def test_only_external_user_input_releases_scope_preserving_history(plugin, insp
     rejected_witness = tmp_path / "rejected"
     [first] = run(plugin, [witness_call(session, "eval", {"code": "inspect"}, rejected_witness)], env)
     assert_inspection_denied(first, report)
+    for revision in ("# Findings\nProvenance retained.\nComparison: unknown.\n",
+                     "# Findings\nInvoice provenance retained.\nComparison: unknown.\n"):
+        [written] = run(plugin, [write_call(session, report, revision)], env)
+        assert written["result"] is None
+        assert report.read_text(encoding="utf-8") == revision
     before = json.loads(state.read_text(encoding="utf-8"))
     synthetic = session.prompt("Synthetic continuation: complete the optional comparison.")
     [prompt] = run(plugin, [synthetic], env)
     assert json.loads(state.read_text(encoding="utf-8")) == before, prompt
+    for source_value in ("extension", None):
+        payload = {"type": "input", "text": "Synthetic: expand the comparison.", "images": []}
+        if source_value is not None:
+            payload["source"] = source_value
+        [ignored] = run(plugin, [session._event("input", payload)], env)
+        assert json.loads(state.read_text(encoding="utf-8")) == before, ignored
     after_synthetic = tmp_path / "synthetic-executor"
     [still_denied] = run(plugin, [witness_call(session, "renamed_eval", {"code": "inspect"}, after_synthetic)], env)
     assert_inspection_denied(still_denied, report)
@@ -311,8 +433,7 @@ def test_only_external_user_input_releases_scope_preserving_history(plugin, insp
     [released_input] = run(plugin, [external], env)
     released = json.loads(state.read_text(encoding="utf-8"))
     assert released["phase"] == "released", released_input
-    for field in ("session_id", "sources", "artifacts", "max_actions", "admitted", "seen_calls", "rejected"):
-        assert released[field] == history[field], f"Release destroyed historical {field}"
+    assert released == {**history, "phase": "released"}, "Release changed historical inspection accounting"
     ordinary_witness = tmp_path / "ordinary-implementation"
     [ordinary] = run(plugin, [witness_call(session, "eval", {"language": "py", "code": "approved repair"}, ordinary_witness)], env)
     assert ordinary["result"] is None, ordinary
@@ -447,8 +568,7 @@ console.log(JSON.stringify({
     assert result["aborts"] == 1
     assert result["followUps"] == []
     assert result["afterExternal"]["phase"] == "released"
-    for field in ("session_id", "sources", "artifacts", "max_actions", "admitted", "seen_calls", "rejected"):
-        assert result["afterExternal"][field] == result["beforeExternal"][field]
+    assert result["afterExternal"] == {**result["beforeExternal"], "phase": "released"}
     assert result["normal"] is None
     assert (repo / "normal-witness").read_text(encoding="utf-8") == "executor reached\n"
 
@@ -520,14 +640,24 @@ def test_report_mutation_loop_is_finite_and_third_write_aborts_before_executor(p
     # Count actual physical report mutations, even through a different writer.
     second_arguments = {"relative_path": str(report), "needle": "Invoice provenance retained.",
                         "repl": "Useful finding: invoice provenance retained.", "mode": "literal"}
-    second_event = session.tool_call("mcp__serena_replace_content", second_arguments)
+    parent_file = tmp_path / "report-parent.jsonl"
+    parent_file.write_text(json.dumps(session.header) + "\n", encoding="utf-8")
+    child = Session(Path(session.cwd), parent_session=str(parent_file))
+    second_event = child.tool_call("write", {
+        "path": "xd://mcp__serena_replace_content", "content": json.dumps(second_arguments),
+    })
     second_event["executor"] = {"kind": "replace", "path": str(report),
                                 "before": second_arguments["needle"], "after": second_arguments["repl"]}
     [second] = run(plugin, [second_event], env)
     assert second["result"] is None, second
     stable_content = "# Findings\nUseful finding: invoice provenance retained.\nComparison: unknown.\n"
     assert report.read_text(encoding="utf-8") == stable_content
-    third_event = write_call(session, report, "# Findings\nUnbounded third revision.\n")
+    other_child = Session(Path(session.cwd), parent_session=str(parent_file))
+    third_arguments = {"relative_path": str(report), "needle": "Useful finding:",
+                       "repl": "Unbounded third revision:", "mode": "literal"}
+    third_event = other_child.tool_call("mcp__escapement_serena_replace_content", third_arguments)
+    third_event["executor"] = {"kind": "replace", "path": str(report),
+                               "before": third_arguments["needle"], "after": third_arguments["repl"]}
     third_event["observeAbort"] = True
     [third] = run(plugin, [third_event], env)
     assert_inspection_denied(third, report)
@@ -538,3 +668,5 @@ def test_report_mutation_loop_is_finite_and_third_write_aborts_before_executor(p
     record = json.loads(state.read_text(encoding="utf-8"))
     assert record["phase"] == "report"
     assert record["report_writes"][str(report.resolve())] == 2
+    assert not (state.parent / f"{child.id}.json").exists()
+    assert not (state.parent / f"{other_child.id}.json").exists()
