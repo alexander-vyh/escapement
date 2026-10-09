@@ -34,6 +34,10 @@ Give each `runs.run` / `runs.all` item an explicit `output` path; its returned o
 payload.** The child that *has* the work persists it, rather than relying on the lead to
 catch a fleeting message. This survives both child exit and lead-transcript compaction.
 
+**A child with no file-write tool** returns its full payload instead, and the lead
+persists that payload verbatim at once. Persistence is bookkeeping: never a reason to
+compute more, re-dispatch, or delay the answer.
+
 - **Where:** a **gitignored** `.research/<topic>-<date>/<NN>-<agent>.md`. The dispatch's
   **first action ensures `.research/` is in `.gitignore`** (add if absent). NOT `docs/` —
   that commits PII-bearing output into a product repo. NOT `/tmp` — it vanishes, which is
@@ -71,8 +75,8 @@ The count check is the headline guard, so it **must** carry its own `|| exit 1`
 (do not rely on `set -e` for a bare `test`). Without it, a run with 3 of 10 files
 present would fall through to the loop and pass — the gate that doesn't fire.
 
-If a file is missing or a stub, **re-dispatch or ping that agent** — do not
-synthesize from the transcript.
+If a file is missing or a stub, **persist the payload the agent returned**; re-dispatch
+or ping only when it returned no substance. Never invent findings it did not deliver.
 
 <!-- escapement:detail:start -->
 **Day-2 escalation (only if the observe phase shows agents skipping the file):**

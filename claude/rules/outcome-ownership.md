@@ -21,6 +21,11 @@ them. Record them in the repository's task-state system, preserve enough evidenc
 future owner, and continue the delegated outcome. Do not execute adjacent scope or stop
 the current work to ask whether every discovered improvement should be included.
 
+**An answered question is done.** Once you hold an answer the user can act on, deliver it
+and name what you did not check. More confidence, completeness, or inventory — hashing
+every copy, widening a scan, proving a mechanism on yourself — is adjacent scope, not a
+blocker, unless a specific unresolved fact would change the answer.
+
 ## Anti-Patterns (Real Examples — Never Do These)
 
 ❌ "The Dependabot warnings are pre-existing — not from this change."
