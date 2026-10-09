@@ -75,16 +75,9 @@ General agent-team hygiene, not research-specific. Home: `agent-teams-default.md
 
 Before dispatch, name the observable answer, exact evidence sources, report
 destinations, and stop condition. Match each assignment to tools the child
-actually has; preseed reports for existing-file-only writers. An unavailable
-optional comparison is **unknown**, not authority to launch a global scan,
-hash every worktree, invent another artifact, or rescue an impossible assignment.
-Return the useful evidence when it answers the question.
-
-Pi/OMP can enforce a strict, explicitly activated read/report boundary; see
-README's **Bounded inspections** for host binding and limits. Activation must
-precede tool execution. Further delegation and opaque execution are forbidden
-inside that boundary. Do not claim an unactivated session is mechanically
-bounded, or that an advisory context warning is a runtime limit.
+actually has. An unavailable optional comparison is **unknown**, not authority to
+launch a global scan, hash every worktree, invent another artifact, or rescue an
+impossible assignment. Return the useful evidence when it answers the question.
 
 ## The principle: nothing load-bearing on the wire
 

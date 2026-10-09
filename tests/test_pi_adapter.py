@@ -95,6 +95,51 @@ def test_root_package_resources_resolve_inside_the_package() -> None:
     assert any((ROOT / entry).glob("*.md") for entry in pi["subagents"]["agents"]), "Pi agents dir holds no agents"
 
 
+def test_generated_gate_inventory_exactly_matches_pi_ready_manifest_gates() -> None:
+    manifest = _manifest()
+    adapter = manifest["adapters"]["pi"]
+    inventory = json.loads((PI_ROOT / "gates.json").read_text(encoding="utf-8"))
+
+    tools = [
+        adapter["target_matcher"], *adapter["file_target_matchers"], adapter["read_target_matcher"],
+        adapter["agent_target_matcher"], adapter["mcp_target_matcher"], adapter["ask_target_matcher"],
+    ]
+    post_tool = {
+        tool: _pi_gates(manifest, {tool}, None, adapter["post_tool_source_event"]) for tool in tools
+    }
+    assert inventory == {
+        "version": 1,
+        "dispatcher": "claude/hooks/codex_pretool_dispatch.py",
+        "gates": _pi_ready_bash_gates(manifest),
+        "file_gates": _pi_ready_file_gates(manifest),
+        "read_gates": _pi_gates(manifest, {adapter["read_target_matcher"]}, None, adapter["source_event"]),
+        "agent_gates": _pi_gates(manifest, {adapter["agent_target_matcher"]}, None, adapter["source_event"]),
+        "mcp_gates": _pi_gates(manifest, {adapter["mcp_target_matcher"]}, None, adapter["source_event"]),
+        # An extension's tool (pi-mcp-adapter direct tools, mcpScript) has no
+        # list of its own and is judged by the MCP gates.
+        "unlisted_tool_gates": _pi_gates(manifest, {adapter["mcp_target_matcher"]}, None, adapter["source_event"]),
+        # omp's blocking `ask` has its own list (escapement-fo4v).
+        "ask_gates": _pi_gates(manifest, {adapter["ask_target_matcher"]}, None, adapter["source_event"]),
+        "post_tool_gates": {tool: gates for tool, gates in post_tool.items() if gates},
+        "context_gates": _pi_gates(manifest, None, None, adapter["context_source_event"]),
+        "session_gates": _pi_gates(manifest, None, None, adapter["session_source_event"]),
+        "stop_gates": _pi_gates(manifest, None, None, adapter["stop_source_event"]),
+    }
+    assert inventory["file_gates"], (
+        "Pi must ship the file-write gates; an empty list means Pi has no brake "
+        "on file growth, which is the gap this inventory key exists to close"
+    )
+    assert inventory["gates"], "Pi must ship at least one behavioral gate"
+    # Every gate named must also be SHIPPED. gates.json names a gate by path and
+    # the dispatcher opens it from the plugin root, so a gate listed but not
+    # vendored reads as a healthy inventory with the brake missing.
+    lists = {key: inventory[key] for key in inventory if key.endswith("gates") and key != "post_tool_gates"}
+    lists.update({f"post_tool_gates.{tool}": gates for tool, gates in inventory["post_tool_gates"].items()})
+    for key, gates in lists.items():
+        sources = [gate["source"] for gate in gates]
+        assert len(sources) == len(set(sources)), f"Pi {key} must not duplicate gates"
+        missing = [s for s in sources if not (PI_ROOT / s).is_file()]
+        assert not missing, f"Pi {key} names gates it does not ship: {missing}"
 
 
 def test_renderer_recomputes_pi_inventory_when_shared_manifest_changes() -> None:
@@ -117,6 +162,342 @@ def test_renderer_recomputes_pi_inventory_when_shared_manifest_changes() -> None
     assert changed["gates"][-1]["id"] == "pi_inventory_mutation_control"
 
 
+EXPECTED_TS_FUNCTIONS = {
+    "fail",
+    "confinedFile",
+    "loadRuntime",
+    "parseDispatcherResponse",
+    "runDispatcher",
+    "surfaceDiagnostics",
+    # payloads.ts -- the one place a Pi payload is read, and only to rewrite
+    # it into the Claude shape a gate already reads. None of these decides
+    # anything about the call.
+    "claudeToolCall",
+    # A workflowScript's children, each mapped exactly as a one-child call.
+    "claudeToolCalls",
+    "textOf",
+    "claudeTranscript",
+    # Host identity, not policy: reads Pi's session id off the handler context
+    # so the payload carries the same `session_id` every gate already reads on
+    # Claude. It decides nothing about the tool call. Passing a per-call id here
+    # silently defeated per-session dedup in discovery-close-gate, which is why
+    # this is a named, tested seam rather than two inline narrowings.
+    "sessionIdOf",
+    # Host plumbing, same category: forwards the per-call working directory the
+    # Bash tool already declares. It reads no command text and decides nothing;
+    # resolving a `cd` prefix stays in the dispatcher.
+    "cwdOf",
+    # Transcript and host identity (escapement-by3e): a worker's parent speaks
+    # over IRC, which the transcript must carry as the user it is; and the
+    # session header's parentSession is forwarded so pi_stop_hook -- not the
+    # bridge -- decides what a delegated worker owes.
+    "branchMessages",
+    "parentSessionOf",
+}
+
+
+def _extension_source() -> str:
+    """Every module of the rendered extension, entry first. A check that read
+    only index.ts would leave each sibling module a blind spot."""
+    modules = sorted(EXTENSION_MODULES, key=lambda path: path.name != "index.ts")
+    assert [path.name for path in modules][:1] == ["index.ts"]
+    return "\n".join(path.read_text(encoding="utf-8") for path in modules)
+
+
+def _top_level_body(source: str, name: str) -> str:
+    return source.split(f"function {name}(", 1)[1].split("\n}\n", 1)[0]
+
+
+def _assert_thin_pi_extension(source: str) -> None:
+    """The Pi extension is a bridge, not a policy engine.
+
+    Asserted as properties rather than as occurrence counts. The previous
+    version pinned things like ``run_dispatcher.count("payload") == 2`` and the
+    exact text of a for-loop, which made every legitimate refactor look like a
+    policy violation while catching nothing the properties below miss.
+
+    What must hold, across every extension module: one dispatcher process per
+    event, one tool handler, no gate named in TypeScript, no dispatcher path in
+    TypeScript, no decision logic in the transport or the diagnostics, no
+    inspection of tool content, tool input read only by the payload mapping,
+    and no functions beyond the bridge's own.
+    """
+    run_dispatcher = source.split("function runDispatcher", 1)[1].split(
+        "function surfaceDiagnostics", 1
+    )[0]
+    diagnostics = source.split("function surfaceDiagnostics", 1)[1].split(
+        "export default function", 1
+    )[0]
+    response_parser = source.split("function parseDispatcherResponse", 1)[1].split(
+        "function runDispatcher", 1
+    )[0]
+
+    assert source.count("spawn(") == 1, "one tool event must start one dispatcher"
+    assert source.count('pi.on("tool_call"') == 1
+
+    # The prompt, session, post-tool and stop handlers compose host text, PI.md
+    # and gate output. A string literal of their own beyond the failure
+    # notices and payload plumbing is prose policy that lives only in Pi.
+    allowed_literals = {
+        "`${event.systemPrompt}\\n\\nEscapement Pi configuration error: ${runtime.message}`",
+        "`Escapement Pi prompt-context hooks failed: ${error}`",
+        "`Escapement Pi session-start hooks failed: ${error}`",
+        "`Escapement Pi post-tool hooks failed: ${error}`",
+        "`Escapement Pi stop hooks failed: ${error}`",
+        '"Escapement stop hooks blocked this stop"',
+        '"UserPromptSubmit"',
+        '"SessionStart"',
+        '"PostToolUse"',
+        '"Stop"',
+        '"startup"',
+        '"info"',
+        '"string"',
+        '"text"',
+        '"message"',
+        '"assistant"',
+        '"block"',
+        '"escapement"',
+        '"followUp"',
+        '"nextTurn"',
+        '""',
+        '"\\n\\n"',
+    }
+    for event in ("before_agent_start", "session_start", "tool_result", "agent_end", "session_shutdown"):
+        # A one-line handler has no closing `});` line; the entry function's
+        # own closing brace bounds it, so a sibling module is never read as
+        # part of the last handler.
+        handler = source.split(f'pi.on("{event}"', 1)[1].split("\n  });\n", 1)[0].split("\n}\n", 1)[0]
+        for literal in re.findall(r'`[^`]*`|"(?:[^"\\\\]|\\\\.)*"', handler):
+            assert literal in allowed_literals, (
+                f"{event} handler adds text of its own: {literal}. "
+                "Prompt policy belongs in PI.md or a context gate."
+            )
+
+    # The extension must not read what the tool is doing. Every mutation that
+    # smuggles policy into TypeScript has to look at the payload to decide.
+    # One regex test is plumbing, not policy: the mapping asks whether a file
+    # tool's path is a URI (omp's xd://, local://) rather than a file on disk.
+    mapping = _top_level_body(source, "claudeToolCall")
+    assert mapping.count("URI_SCHEME.test(path)") == 1
+    uninspected = source.replace("URI_SCHEME.test(path)", "", 1)
+    for inspector in (".includes(", ".indexOf(", ".match(", ".search(", ".test(", ".exec("):
+        assert inspector not in uninspected, (
+            f"TypeScript inspects tool content via {inspector}; policy belongs in a gate"
+        )
+
+    # Tool input is read in exactly one place: the mapping onto the Claude
+    # payload (plus cwdOf, which forwards a declared working directory).
+    # Everywhere else a Pi tool's input may only be handed to that mapping.
+    elsewhere = source
+    for name in ("claudeToolCall", "claudeToolCalls", "cwdOf"):
+        elsewhere = elsewhere.replace(_top_level_body(source, name), "")
+    handed_to_mapping = sum(
+        elsewhere.count(f"{name}(event.toolName, event.input)")
+        for name in ("claudeToolCall", "claudeToolCalls")
+    )
+    assert elsewhere.count(".input") == handed_to_mapping, (
+        "a Pi tool's input is read outside the payload mapping; policy belongs in a gate"
+    )
+    assert elsewhere.count(".arguments") == 2 and "claudeToolCall(block.name, block.arguments)" in elsewhere, (
+        "a transcript tool call's arguments are read outside the payload mapping"
+    )
+    assert "args." not in elsewhere and "args[" not in elsewhere, (
+        "a Pi tool's arguments are read outside the payload mapping"
+    )
+
+    # The bridge may block for exactly three reasons: a gate said so, its
+    # configuration is broken, or the dispatcher failed. A `reason:` that is a
+    # TypeScript literal is the extension inventing policy of its own -- which
+    # is how every remaining mutant below smuggles it in without touching the
+    # transport or adding a helper.
+    handler = source.split('pi.on("tool_call"', 1)[1]
+    allowed_reasons = {
+        'hook.permissionDecisionReason || "Escapement blocked this Pi tool call"',
+        '`Escapement Pi configuration error: ${runtime.message}`',
+        '`Escapement Pi adapter error: ${error}`',
+        '"Escapement received an invalid Pi Bash payload"',
+    }
+    for match in re.finditer(r"reason: (.+?),?\n", handler):
+        reason = match.group(1).strip().rstrip(",").removesuffix("};").strip()
+        assert reason in allowed_reasons, (
+            f"extension blocks with a reason of its own: {reason}. "
+            "Policy belongs in a gate, not in the bridge."
+        )
+
+    declared = set(re.findall(r"^\s*(?:export )?function (\w+)", source, re.M))
+    assert declared == EXPECTED_TS_FUNCTIONS, (
+        f"unexpected TypeScript functions: {declared ^ EXPECTED_TS_FUNCTIONS}. "
+        "A new helper here is usually policy that belongs in a gate."
+    )
+
+    # Transport and diagnostics carry decisions; they must not make them.
+    assert "permissionDecision" not in run_dispatcher
+    assert "hookSpecificOutput" not in run_dispatcher
+    assert "child.stdin.end(JSON.stringify(payload));" in run_dispatcher
+    assert "permissionDecision" not in diagnostics
+    assert "block:" not in diagnostics
+    assert "throw " not in diagnostics
+    assert "pi.sendMessage(" in diagnostics
+    assert "JSON.parse(stdout)" in response_parser
+    assert "return {" not in response_parser
+
+    # The bridge runs the inventory as given. Selecting among gates -- by
+    # filtering the list or by comparing an id -- is the extension deciding
+    # which policy applies, which is the manifest's job.
+    runtime_loader = source.split("function loadRuntime", 1)[1].split(
+        "function parseDispatcherResponse", 1
+    )[0]
+    for scope, name in ((runtime_loader, "loadRuntime"), (run_dispatcher, "runDispatcher")):
+        assert ".filter(" not in scope, (
+            f"{name} selects among gates; it must run the inventory as given"
+        )
+    inventory = json.loads((PI_ROOT / "gates.json").read_text(encoding="utf-8"))
+    for key, gates in inventory.items():
+        if not key.endswith("gates"):
+            continue
+        lists = gates.values() if isinstance(gates, dict) else [gates]
+        for gate in (gate for gate_list in lists for gate in gate_list):
+            # Whole identifiers only: `stop_hook_active` is Claude's Stop
+            # payload field, not a reference to the stop_hook gate.
+            assert not re.search(rf"(?<![\w-]){re.escape(gate['id'])}(?![\w-])", source), (
+                f"extension names {gate['id']}; the bridge must not know a gate by id"
+            )
+
+    assert "codex_pretool_dispatch.py" not in source, (
+        "the generated inventory, not TypeScript, owns the dispatcher path"
+    )
+    for gate_specific_policy in (
+        "beads_worktree_guard.py",
+        "test_oracle_brief_gate.py",
+        "implementation_echo_test_gate.py",
+        "file_complexity_gate.py",
+    ):
+        assert gate_specific_policy not in source
+
+
+def test_pi_extension_is_a_thin_single_dispatch_bridge() -> None:
+    _assert_thin_pi_extension(_extension_source())
+
+
+def _mutate(source: str, anchor: str, replacement: str) -> str:
+    """A mutant whose anchor vanished would equal the source and prove nothing."""
+    assert anchor in source, f"mutation anchor is gone: {anchor!r}"
+    return source.replace(anchor, replacement, 1)
+
+
+def test_pi_architecture_check_rejects_selective_typescript_policy() -> None:
+    source = _extension_source()
+    call_anchor = "    const mapped = claudeToolCall(event.toolName, event.input);"
+    mutants = {
+        "string inspection before dispatch": _mutate(
+            source,
+            call_anchor,
+            '    if (String(event.input?.command).includes("rm -rf")) {\n'
+            '      return { block: true, reason: "TypeScript safety policy" };\n'
+            "    }\n" + call_anchor,
+        ),
+        "policy helper": _mutate(
+            source,
+            "function runDispatcher",
+            "function invalidBash(value: unknown): boolean {\n"
+            '  return typeof value !== "string" || value === "rm -rf";\n'
+            "}\n\nfunction runDispatcher",
+        ),
+        "transport inspection": _mutate(
+            source,
+            "  const argv =",
+            '  if (JSON.stringify(payload).indexOf("rm -rf") >= 0) {\n'
+            '    return Promise.resolve({ hookSpecificOutput: { permissionDecision: "deny" } });\n'
+            "  }\n  const argv =",
+        ),
+        "transport regex": _mutate(
+            source,
+            "  const argv =",
+            "  if (/sudo/.test(JSON.stringify(payload))) {\n"
+            '    return Promise.resolve({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } });\n'
+            "  }\n  const argv =",
+        ),
+        "input read outside the mapping": _mutate(
+            source,
+            call_anchor,
+            '    if (Object.values(event.input ?? {}).some((value) => value === "sudo")) return;\n' + call_anchor,
+        ),
+        "cwd policy": _mutate(
+            source,
+            call_anchor,
+            '    if (context.cwd === "/") {\n'
+            '      return { block: true, reason: "TypeScript root policy" };\n'
+            "    }\n" + call_anchor,
+        ),
+        "parser policy": _mutate(
+            source,
+            "  const result = JSON.parse(stdout);",
+            "  const result = JSON.parse(stdout);\n"
+            "  if (/sudo/.test(stdout)) {\n"
+            '    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } };\n'
+            "  }",
+        ),
+        "diagnostics policy": _mutate(
+            source,
+            "  if (messages.length === 0) return;",
+            "  if (/credential/.test(String(messages))) {\n"
+            '    throw new Error("TypeScript diagnostics policy");\n'
+            "  }\n  if (messages.length === 0) return;",
+        ),
+        "inventory filter": _mutate(
+            source,
+            '    ["bash", parsed.gates],',
+            '    ["bash", parsed.gates.filter((gate: Gate) => gate.id !== "merge_authorization_gate")],',
+        ),
+        "transport filter": _mutate(
+            source,
+            "  for (const gate of gates) {\n    argv.push(",
+            '  for (const gate of gates) {\n    if (gate.id === "merge_authorization_gate") continue;\n    argv.push(',
+        ),
+        "prompt prose": _mutate(
+            source,
+            "if (added) sections.push(added);",
+            'if (added) sections.push(added);\n    sections.push("Pi-only policy: never execute sudo");',
+        ),
+        "second tool handler": _mutate(
+            source,
+            '  pi.on("before_agent_start",',
+            '  pi.on("tool_call", async ({ input }) => {\n'
+            "    const value = Object.values(input ?? {})[0];\n"
+            '    return value === "sudo" ? { block: true, reason: "Pi-only policy" } : undefined;\n'
+            "  });\n\n"
+            '  pi.on("before_agent_start",',
+        ),
+        "stop prose": _mutate(
+            source,
+            "    surfaceDiagnostics(pi, result, { triggerTurn: false });\n    stopHookActive =",
+            '    pi.sendUserMessage("Pi-only policy: summarize before stopping", { deliverAs: "followUp" });\n'
+            "    surfaceDiagnostics(pi, result, { triggerTurn: false });\n    stopHookActive =",
+        ),
+        # payloads.ts is scanned like index.ts: a sibling module is no hiding place.
+        "inspection in the payload module": _mutate(
+            source,
+            "export function textOf(content: unknown): string {\n",
+            "export function textOf(content: unknown): string {\n"
+            '  if (String(content).includes("sudo")) return "";\n',
+        ),
+        "gate id in the payload module": _mutate(
+            source,
+            "export function textOf(content: unknown): string {\n",
+            "export function textOf(content: unknown): string {\n"
+            '  if (content === "root_checkout_guard") return "";\n',
+        ),
+        "arguments read by the transcript": _mutate(
+            source,
+            "        } else if (block?.type === \"toolCall\") {\n",
+            "        } else if (block?.type === \"toolCall\") {\n"
+            '          if (block.arguments?.command === "sudo") continue;\n',
+        ),
+    }
+    for name, mutant in mutants.items():
+        with pytest.raises(AssertionError):
+            _assert_thin_pi_extension(mutant)
+            pytest.fail(f"architecture check accepted the {name} mutant")
 
 
 def test_pi_extension_runs_one_dispatcher_per_tool_call_for_allow_and_deny(
