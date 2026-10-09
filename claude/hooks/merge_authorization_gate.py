@@ -140,8 +140,16 @@ def _is_substantive_waiver(reason: Optional[str]) -> bool:
     return len(reason.strip()) >= MIN_WAIVER_REASON_LEN and normalized not in WAIVER_PLACEHOLDERS
 
 
+_DISABLE_AUTO_RE = re.compile(r"(?:^|\s)--disable-auto(?:\s|$)")
+
+
 def _is_merge_command(command: str) -> bool:
-    return is_gh_pr_command(command, "merge")
+    if not is_gh_pr_command(command, "merge"):
+        return False
+    # `--disable-auto` cancels a queued auto-merge and merges nothing, unless another
+    # `gh pr merge` rides in the same command.
+    return not (_DISABLE_AUTO_RE.search(command)
+                and len(re.findall(r"gh\s+pr\s+merge\b", command)) == 1)
 
 
 def _authorizes_auto_merge(cwd: str) -> Optional[bool]:
@@ -182,8 +190,9 @@ def _not_green_reason(status, command: str) -> str:
         f"This repo declares auto_merge_on_green, which is an authorization to merge "
         f"when the checks pass — not an authorization to merge. Escape paths:\n"
         f"  (1) Inspect it yourself: `gh pr checks {status.ref or ''}`.\n"
-        f"  (2) Let GitHub hold the condition: re-run with `--auto`, which merges the "
-        f"PR the moment its checks go green.\n"
+        f"  (2) If the base branch REQUIRES these checks, re-run with `--auto` and "
+        f"GitHub holds the merge until they pass. Without required checks `--auto` "
+        f"merges at once, so it is judged here like any other merge.\n"
         f"  (3) Wait for the run to finish and retry.\n"
         f"  (4) If merging without green is genuinely correct here, get the user's "
         f"explicit go-ahead THIS turn and retry with "
@@ -232,8 +241,7 @@ def main() -> int:
             reason = (
                 "merge_authorization_gate: the green-status observer could not be "
                 "imported, so check state is unobservable. An unresolvable check is "
-                "never upgraded into an authorization. Escape: re-run with `--auto` so "
-                "GitHub holds the green condition, or append "
+                "never upgraded into an authorization. Escape: wait and retry, or append "
                 "`# merge-authorization-waiver: <reason>` after getting the user's "
                 "explicit go-ahead this turn."
             )

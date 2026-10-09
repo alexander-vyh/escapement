@@ -43,14 +43,24 @@ def _check(name: str, conclusion: str | None, status: str = "COMPLETED") -> dict
     return entry
 
 
-def _stub_gh(tmp_path: Path, payload: dict | None, exit_code: int = 0, stderr: str = "") -> Path:
-    """A `gh` on PATH that answers `pr view --json ...` with a fixed payload."""
+def _stub_gh(tmp_path: Path, payload: dict | None, exit_code: int = 0, stderr: str = "",
+             protection: dict | None = None) -> Path:
+    """A `gh` on PATH that answers `pr view --json ...` with a fixed payload, and
+    `gh api .../protection/required_status_checks` with `protection` — or, when that is
+    None, the 404 GitHub returns for an unprotected branch."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     gh = bin_dir / "gh"
     gh.write_text(
         "#!/usr/bin/env python3\n"
         "import json, sys\n"
+        "if sys.argv[1:2] == ['api']:\n"
+        f"    protection = {json.dumps(json.dumps(protection) if protection is not None else '')}\n"
+        "    if not protection:\n"
+        "        sys.stderr.write('gh: Branch not protected (HTTP 404)')\n"
+        "        sys.exit(1)\n"
+        "    sys.stdout.write(protection)\n"
+        "    sys.exit(0)\n"
         f"payload = {json.dumps(json.dumps(payload) if payload is not None else '')}\n"
         f"sys.stderr.write({json.dumps(stderr)})\n"
         "sys.stdout.write(payload)\n"
@@ -144,13 +154,60 @@ def test_unobservable_state_is_denied(tmp_path):
     assert "could not be observed" in decision["permissionDecisionReason"]
 
 
-def test_auto_flag_is_allowed_without_observing(tmp_path):
-    """`--auto` hands the same green condition to GitHub, so we honor it rather than
-    duplicate it. No stub gh is installed: reaching for one would prove we ignored the
-    delegation."""
+PENDING = {"number": 7, "state": "OPEN", "baseRefName": "main", "statusCheckRollup": [
+    _check("pytest", None, status="IN_PROGRESS")]}
+REQUIRES_PYTEST = {"contexts": ["pytest"], "checks": [{"context": "pytest"}]}
+
+
+def test_auto_is_honored_when_the_base_requires_checks(tmp_path):
+    """Branch protection makes GitHub hold an `--auto` merge until pytest passes, so the
+    gate delegates rather than duplicates."""
     repo = _repo(tmp_path, AUTHORIZED)
-    _, decision = _run_gate(repo, "gh pr merge 7 --squash --auto", None, tmp_path)
+    bin_dir = _stub_gh(tmp_path, PENDING, protection=REQUIRES_PYTEST)
+    _, decision = _run_gate(repo, "gh pr merge 7 --squash --auto", bin_dir, tmp_path)
     assert decision is None
+
+
+def test_auto_on_an_unprotected_base_is_judged_like_any_merge(tmp_path):
+    """The defect: with no required checks GitHub has nothing to wait for, so `--auto`
+    merged #284 and #285 at once with pytest still running."""
+    repo = _repo(tmp_path, AUTHORIZED)
+    bin_dir = _stub_gh(tmp_path, PENDING)
+    _, decision = _run_gate(repo, "gh pr merge 7 --squash --auto", bin_dir, tmp_path)
+    assert decision is not None and decision["permissionDecision"] == "deny"
+    assert "requires no status checks" in decision["permissionDecisionReason"]
+
+
+def test_auto_with_required_checks_unrelated_to_ci_still_needs_some(tmp_path):
+    """An empty required-checks list is no protection for green."""
+    repo = _repo(tmp_path, AUTHORIZED)
+    bin_dir = _stub_gh(tmp_path, PENDING, protection={"contexts": [], "checks": []})
+    _, decision = _run_gate(repo, "gh pr merge 7 --auto", bin_dir, tmp_path)
+    assert decision is not None and decision["permissionDecision"] == "deny"
+
+
+def test_auto_on_an_unprotected_base_merges_a_green_pr(tmp_path):
+    """Positive control: the fix must not turn `--auto` into a blanket deny."""
+    repo = _repo(tmp_path, AUTHORIZED)
+    bin_dir = _stub_gh(tmp_path, {"number": 7, "state": "OPEN", "baseRefName": "main",
+                                  "statusCheckRollup": [_check("pytest", "SUCCESS")]})
+    _, decision = _run_gate(repo, "gh pr merge 7 --auto", bin_dir, tmp_path)
+    assert decision is None
+
+
+def test_disable_auto_is_not_a_merge(tmp_path):
+    """Cancelling a queued auto-merge merges nothing; denying it blocked the repair."""
+    repo = _repo(tmp_path, AUTHORIZED)
+    bin_dir = _stub_gh(tmp_path, PENDING)
+    result, decision = _run_gate(repo, "gh pr merge 285 --disable-auto", bin_dir, tmp_path)
+    assert decision is None and result.stdout.strip() == ""
+
+
+def test_disable_auto_chained_with_a_real_merge_is_still_gated(tmp_path):
+    repo = _repo(tmp_path, AUTHORIZED)
+    bin_dir = _stub_gh(tmp_path, PENDING)
+    _, decision = _run_gate(repo, "gh pr merge 9 --disable-auto && gh pr merge 7", bin_dir, tmp_path)
+    assert decision is not None and decision["permissionDecision"] == "deny"
 
 
 def test_unconfigured_repo_is_still_denied(tmp_path):
