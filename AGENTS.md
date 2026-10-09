@@ -203,6 +203,14 @@ This guidance applies to live sessions. If the host session exits, this wait
 cannot automatically resume it; durable wakeup depends on the host's supported
 capabilities. Do not add a scheduler, controller, or hook to implement this wait.
 
+## Skill selection follows the assignment
+
+Use a skill when explicitly requested or when its prerequisites match the
+assigned work. Availability alone is not a reason to invoke it. Reuse known
+task and workflow state; add discovery only for information required by the
+outcome. Generic implementation does not require OpenSpec or ticket discovery.
+Delegate concrete implementation, testing, or review within the assignment.
+
 # Codex Adapter Notes
 
 Codex reads repository instructions from `AGENTS.md` and repo skills from
