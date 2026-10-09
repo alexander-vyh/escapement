@@ -324,7 +324,7 @@ DOCTRINE_REQUIREMENTS = {
     ),
     Path("claude/skills/beads-execution/SKILL.md"): (
         "block only the affected task",
-        "continue independent ready tasks",
+        "continue independent authorized ready tasks",
         "every remaining route",
     ),
 }
