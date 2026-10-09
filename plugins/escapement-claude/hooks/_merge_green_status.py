@@ -111,12 +111,26 @@ def extract_pr_ref(command: str) -> Optional[str]:
 
 
 def delegates_to_github(command: str) -> bool:
-    """`gh pr merge --auto` asks GitHub to merge when its own checks go green.
+    """`gh pr merge --auto` asks GitHub to merge once the base branch's requirements pass.
 
-    That is the safeguard this module exists to enforce, enforced by the platform rather
-    than by us, so it is honored instead of duplicated.
+    That only holds the merge for green when the base branch REQUIRES status checks; with
+    none required GitHub merges at once. See `_base_requires_checks`.
     """
     return bool(_AUTO_RE.search(command or ""))
+
+
+def _base_requires_checks(base: Optional[str], cwd: str, run) -> bool:
+    """True only when GitHub reports required status checks on `base` — the one case in
+    which `--auto` actually waits for green. Any failure to observe that is False."""
+    if not base:
+        return False
+    try:
+        result = run(["gh", "api", f"repos/{{owner}}/{{repo}}/branches/{base}"
+                      "/protection/required_status_checks"], cwd)
+        data = json.loads(result.stdout) if result.returncode == 0 else {}
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(data, dict) and bool(data.get("contexts") or data.get("checks"))
 
 
 def _normalize(entry: dict) -> str:
@@ -189,13 +203,6 @@ def observe(
     runner: Optional[Callable[[Sequence[str], str], subprocess.CompletedProcess]] = None,
 ) -> GreenStatus:
     """Resolve the target PR's check state for a `gh pr merge` command."""
-    if delegates_to_github(command):
-        return GreenStatus(
-            "auto-delegated",
-            "--auto hands the green condition to GitHub, which merges only when its own "
-            "checks pass",
-        )
-
     ref = extract_pr_ref(command)
     run = runner or _default_runner
 
@@ -205,7 +212,7 @@ def observe(
     args = ["gh", "pr", "view"]
     if ref:
         args.append(ref)
-    args += ["--json", "statusCheckRollup,state,number"]
+    args += ["--json", "statusCheckRollup,state,number,baseRefName"]
 
     try:
         result = run(args, cwd)
@@ -229,4 +236,19 @@ def observe(
 
     status = classify_rollup(rollup)
     number = payload.get("number")
-    return GreenStatus(status.state, status.detail, ref or (f"#{number}" if number else None))
+    ref = ref or (f"#{number}" if number else None)
+    if status.state == "green" or not delegates_to_github(command):
+        return GreenStatus(status.state, status.detail, ref)
+    base = payload.get("baseRefName")
+    if _base_requires_checks(base, cwd, run):
+        return GreenStatus(
+            "auto-delegated",
+            f"--auto hands the green condition to GitHub; {base} requires status checks",
+            ref,
+        )
+    return GreenStatus(
+        status.state,
+        f"{status.detail}; --auto would merge at once because {base or 'the base branch'} "
+        "requires no status checks",
+        ref,
+    )
