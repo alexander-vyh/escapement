@@ -211,37 +211,53 @@ but that is a second line of defense. The first line is you.
 
 **"Roundtable" NEVER means writing simulated dialogue in your output.** It ALWAYS means real named agents that independently analyze and communicate via messages (relayed through you on Pi).
 
+## Assignment contract
+
+Use agents regularly for independent work, research, testing, and review.
+Every child receives its assigned outcome before dispatch. State the scope and
+allowed effects: repositories, evidence, file ownership, commands, and writes.
+State completion criteria and the handoff to the lead; a completed review or
+research assignment returns findings rather than delivering the parent's build.
+Reviewers report findings and recheck assigned repairs; they do not repair or
+implement without a new assignment. Implementers may fix what causally blocks
+their assigned outcome only within the authorized scope and allowed effects.
+For adjacent findings, report them and do not fix them. A parent applies the
+same boundary before assigning repairs; a child's discovery adds no authority.
+Use `bd ready` to select only authorized tasks; readiness is not delegated scope.
+Unknown optional evidence does not block a useful answer. Return available
+findings and the precise uncertainty; the parent persists returned payloads
+without recomputing them merely because the child lacked file tools.
+
 ## Continuation Discipline for Dispatched Agents
 
 **Every agent prompt MUST include this block** (copy verbatim into the prompt):
 
 > **CONTINUATION DISCIPLINE:** DO NOT wind down prematurely. DO NOT summarize
-> remaining work and stop. If a problem stands between you and your assigned
-> outcome, fix it. Anything beyond that outcome — other beads, the rest of the
+> remaining work and stop. Reviewers report and recheck; they do not repair or implement.
+> If a problem stands between you and your assigned
+> outcome, repair it only within your assigned scope and allowed effects. Anything beyond that outcome — other beads, the rest of the
 > epic, adjacent bugs or cleanup — is not yours: report it to your lead (or
 > `bd create` it) and do not fix it. If you hit an obstacle, investigate and work
 > around it — do not report it as a reason to stop. You are done when the OUTCOME
-> is verified end-to-end, not when you've made an attempt. Run the actual
-> test/command/workflow and confirm it passes. "I believe this works" is not
-> verification — "the tests pass" is verification.
+> meets your assignment completion criteria and is handed off. Verify the assigned
+> result against its oracle; passing tests alone does not establish the parent outcome.
 
 **For the main agent coordinating the team:**
 
-DO NOT STOP after collecting agent results. If any agent reports unresolved issues,
-dispatch a follow-up agent or send instructions to fix them. If the
-integrated result fails verification (full test suite, end-to-end check), dispatch
-agents to fix the failures. Summarizing what agents accomplished is not completion —
-the verified outcome is completion.
+Deliver the assigned result after collecting agent findings and verifying its
+completion criteria. Route causal blockers to an implementer only within the
+parent's delegated authority. Record adjacent findings without dispatching repair.
+Optional unavailable evidence is unknown; it does not authorize a rescue scan or
+prevent delivering supported findings. Continue independent authorized lanes.
 
 ## Verification
 
 After agents return:
-1. **Review each summary** — Understand what changed
-2. **Check for conflicts** — Did agents edit same code?
-3. **Run full suite** — Verify all fixes work together
-4. **Spot check** — Agents can make systematic errors
+1. Review the returned evidence against each assignment's completion criteria.
+2. Check ownership conflicts before integrating writes.
+3. Run checks relevant to the delegated outcome and independently verify it.
+4. Route failing checks only when they causally block that outcome; report unrelated failures.
 5. **Shut down the team** — stop any agent still running (Codex `interrupt_agent`; Pi `subagent({ action: "stop", id })`)
-6. **If ANY verification step fails** — dispatch new agents to fix, do NOT report partial success
 
 ## Agent Pairing for Quality
 
@@ -373,13 +389,11 @@ to miss). Its job is three questions:
 3. **What is mis-scoped?** — a finding attached to the wrong layer, or one true
    finding masquerading as the symptom of a deeper one.
 
-**Feed gaps back as a new round.** Each gap the critic surfaces is a *new* finding
-with no verdict yet — so it re-enters the loop: dispatch a lens at it, then verify
-it adversarially like any other. The critic does not get the last word; it
-*restarts* the loop with the findings the first pass could never have produced.
-Run the critic again on the next round, not once, but inside the review round
-cap: at most 2 review rounds, then file each remaining gap with `bd create`
-instead of another round.
+**Classify gaps within the assignment.** The critic reports evidence and does not
+implement or dispatch repairs. Causal blockers go to the assigned implementer;
+adjacent findings are recorded. Re-review uses the round cap: 2 review rounds,
+round two checks repairs rather than opening a new sweep; nonblocking leftovers
+use `bd create`.
 
 ```
 # After the per-lens roundtable reports (Codex shown; on Pi run the same prompt as
@@ -395,8 +409,8 @@ spawn_agent(
       1. MISSING: gaps owned by no lens that ran. Name the gap + the absent lens.
       2. UNDERSTATED: findings whose severity should be calibrated UP (not just down).
       3. MIS-SCOPED: findings attached to the wrong layer or masking a deeper cause.
-    Each gap you name is a NEW finding with no verdict — it will be dispatched to a
-    lens and verified. Do not rubber-stamp; if nothing is missing, say so explicitly
+    Classify each gap against the assigned outcome. Report causal blockers and
+    adjacent findings separately; do not implement repairs or start another review. Do not rubber-stamp; if nothing is missing, say so explicitly
     and justify why the lens set was exhaustive for this artifact.
     [CONTINUATION DISCIPLINE block here]"
 )

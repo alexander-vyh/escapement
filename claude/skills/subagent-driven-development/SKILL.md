@@ -11,6 +11,23 @@ Execute a plan by dispatching fresh **named team** subagents per task, with two-
 
 **Core principle:** Fresh named subagent per task + two-stage review (spec then quality) = high quality, fast iteration
 
+## Assignment contract
+
+Use agents regularly for independent work, research, testing, and review.
+Every child receives its assigned outcome before dispatch. State the scope and
+allowed effects: repositories, evidence, file ownership, commands, and writes.
+State completion criteria and the handoff to the lead; a completed review or
+research assignment returns findings rather than delivering the parent's build.
+Reviewers report findings and recheck assigned repairs; they do not repair or
+implement without a new assignment. Implementers may fix what causally blocks
+their assigned outcome only within the authorized scope and allowed effects.
+For adjacent findings, report them and do not fix them. A parent applies the
+same boundary before assigning repairs; a child's discovery adds no authority.
+Use `bd ready` to select only authorized tasks; readiness is not delegated scope.
+Unknown optional evidence does not block a useful answer. Return available
+findings and the precise uncertainty; the parent persists returned payloads
+without recomputing them merely because the child lacked file tools.
+
 ## Beads Integration
 
 Named agents and beads are complementary — beads tracks *what* to do, naming enables *how* they coordinate.
@@ -33,12 +50,12 @@ For each task in the plan:
 1. **Dispatch named implementer on the team**
 2. **Handle implementer status** (DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED)
 3. **Dispatch named spec reviewer on the team**
-4. **If issues:** SendMessage fix instructions to implementer (same agent, retains context)
+4. **If in-scope causal blockers:** SendMessage fix instructions to implementer (same agent, retains context)
 5. **Dispatch named quality reviewer on the team**
-6. **If issues:** SendMessage fix instructions to implementer
+6. **If in-scope causal blockers:** SendMessage fix instructions to implementer
 7. **Mark task complete**
 
-### After all tasks
+### After all assigned tasks
 
 Dispatch named final-reviewer on the team for entire implementation.
 
@@ -52,7 +69,9 @@ Dispatch named final-reviewer on the team for entire implementation.
 Agent(
   name="impl-task1",
   description="Implement hook installation script",
-  prompt="[Full task text from plan]
+  prompt="[Assigned outcome and task text from the delegated plan]
+    [Scope and allowed effects: repository, owned files, commands and permitted writes]
+    [Completion criteria and evidence handoff to the lead]
     [Scene-setting context: where this fits in the overall plan]
     [Constraints, patterns to follow, files to touch]
     Use SendMessage to ask questions.
@@ -70,7 +89,8 @@ Agent(
   name="spec-reviewer-task1",
   description="Review spec compliance for task 1",
   prompt="Review the implementation by impl-task1 against this spec:
-    [Full spec text]
+    [Assigned task requirements and evidence; scope: read-only checks, no writes]
+    [Completion: report requirement evidence and hand off findings; no repairs]
     Before reviewing any file path, verify it exists with Glob or Read. Never assume a path exists based on convention.
     Check: Does the code match the spec exactly?
     - Missing requirements?
@@ -90,7 +110,8 @@ Agent(
   subagent_type="adversarial-reviewer",
   description="Review code quality for task 1",
   prompt="Review code quality for the commits by impl-task1.
-    [Git SHAs or file paths for the relevant changes]
+    [Assigned outcome, relevant Git SHAs/files, scope: read-only checks, no writes]
+    [Completion: report evidence and separate causal blockers from adjacent findings]
     Before reviewing any file path, verify it exists with Glob or Read. Never assume a path exists based on convention.
     Check: Is the code well-written?
     - Test coverage adequate?
@@ -102,7 +123,7 @@ Agent(
 
 ### Review loop via SendMessage:
 
-When a reviewer finds issues, send fixes back to the implementer:
+When a reviewer reports in-scope causal blockers, send fixes back to the implementer:
 
 ```
 SendMessage(
@@ -146,7 +167,7 @@ Match depth of work to task type. Do not converge on an answer before reaching t
 ```
 You: I'm using Subagent-Driven Development to execute this plan.
 
-[Read plan file, extract all tasks]
+[Read delegated plan, select authorized tasks and assignment boundaries]
 
 Task 1: Hook installation script
 
@@ -188,7 +209,7 @@ impl-recovery: Done, committed
 
 [Mark Task 2 complete]
 
-[After all tasks]
+[After all assigned tasks]
 Agent(name="final-reviewer", subagent_type="adversarial-reviewer", prompt="Final review...")
 final-reviewer: All requirements met, ready to merge
 
@@ -199,21 +220,20 @@ Done!
 
 **For the coordinator (you):**
 
-DO NOT STOP after a task completes. Check `More tasks remain?` and KEEP GOING.
-If a reviewer finds issues, repair and re-review inside the review round cap: at
-most 2 review rounds, then file each remaining non-blocking finding with
-`bd create` (a finding that causally blocks the outcome gets one more repair
-round, then escalate). Do not report "issues found" and stop. If the final reviewer finds problems, dispatch agents to fix them. The
-process ends when ALL tasks are done AND the final review passes AND verification
-confirms the outcome end-to-end. Anything short of that is not done.
+Continue the authorized tasks in the delegated plan, without adding adjacent
+findings to execution. Route reviewer-reported causal blockers to the implementer.
+Repair and re-review inside the round cap: at most 2 review rounds, then record
+nonblocking findings with `bd create`; a finding that causally blocks the delegated
+outcome gets one more repair round, then escalate that blocker. Completion means
+the assigned tasks and outcome are verified, with nonblocking findings reported.
 
 **For every implementer prompt, append this block:**
 
 > **CONTINUATION DISCIPLINE:** DO NOT wind down prematurely. DO NOT summarize
 > remaining work and stop. If a problem stands between you and your assigned
-> outcome, fix it. Anything beyond that outcome — other beads, the rest of the
+> outcome, repair it only within your assigned scope and allowed effects. Anything beyond that outcome — other beads, the rest of the
 > epic, adjacent bugs or cleanup — is not yours: report it to your lead (or
-> `bd create` it) and do not fix it. If a test fails, debug and fix it — do not report
+> `bd create` it) and do not fix it. If an assigned verification fails, debug and fix its causal blocker within your allowed effects — do not report
 > the failure and stop. If you hit an obstacle, investigate and work around it.
 > You are done when your implementation works end-to-end, tests pass, and you've
 > self-reviewed. "I made good progress" is not DONE. "Tests pass and the feature
@@ -222,7 +242,8 @@ confirms the outcome end-to-end. Anything short of that is not done.
 **For every reviewer prompt, append this block:**
 
 > **CONTINUATION DISCIPLINE:** DO NOT rubber-stamp incomplete work. Read the ACTUAL
-> code, not just the report. If you find issues, report ALL of them — do not stop
+> code, not just the report. Reviewers report findings; they do not repair or implement.
+> Classify causal blockers and adjacent findings; return evidence at completion. If you find issues, report ALL of them — do not stop
 > after finding the first one. Your job is complete when you have verified every
 > requirement against the actual implementation code.
 
@@ -232,12 +253,12 @@ confirms the outcome end-to-end. Anything short of that is not done.
 - Dispatch agents without `name` (they're anonymous and unaddressable)
 - Start implementation on main/master without explicit user consent
 - Skip reviews (spec compliance OR code quality)
-- Proceed with unfixed issues
+- Proceed with unresolved causal blockers to the assigned outcome
 - Dispatch multiple implementation subagents in parallel (conflicts)
 - Skip scene-setting context
 - Accept "close enough" on spec compliance
 - **Start code quality review before spec compliance is ✅**
-- **Stop after partial completion** — all tasks must be done, not just some
+- **Stop after partial completion** — all assigned tasks must be done, not just some
 - **Summarize remaining work instead of doing it** — that is premature wind-down
 
 ## Integration
@@ -247,7 +268,7 @@ confirms the outcome end-to-end. Anything short of that is not done.
 - Work on a feature branch, not main: `git checkout -b <branch-name>`
 
 **Final code review:**
-- After all tasks pass, run `/code-review` for a diff-level pass, or dispatch an `adversarial-reviewer` agent against the branch as the final gate before merge.
+- After all assigned tasks pass, run `/code-review` for a diff-level pass, or dispatch an `adversarial-reviewer` agent against the branch as the final gate before merge.
 
 **Merging:**
 - Push the branch: `git push -u origin <branch-name>`
