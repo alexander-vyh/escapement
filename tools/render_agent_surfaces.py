@@ -691,6 +691,15 @@ def rendered_targets(
         openspec_surfaces.update(_openspec_projection_targets(root, canon_dir=Path(canon_dir)))
     targets.update(openspec_surfaces)
 
+    # OpenSpec's Claude counterparts are project commands, but must also ship
+    # in the installed plugin so repositories can remove their local copies.
+    for skill in manifest.get("skills", []):
+        counterpart = skill.get("hosts", {}).get("claude", {}).get("counterpart", "")
+        if counterpart.startswith(".claude/commands/"):
+            source_path = root / counterpart
+            rel = source_path.relative_to(root / ".claude" / "commands")
+            targets[root / CLAUDE_PLUGIN_ROOT / "commands" / rel] = openspec_surfaces[source_path]
+
     def skill_files(skills_root: Path) -> list[Path]:
         # On-disk skills plus freshly projected ones, so a new canon skill is
         # vendored on its first render instead of drifting until the second.
