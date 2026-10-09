@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PI_ROOT = ROOT / "plugins" / "escapement-pi"
 
 PROBE = """
+const fs = await import("node:fs/promises");
 const { default: extension } = await import(process.argv[2]);
 const handlers = new Map();
 const sent = [];
@@ -35,9 +36,11 @@ for (const call of JSON.parse(process.argv[3])) {
   // A message is wrapped as Pi's session entry; an entry that is not a message
   // (an omp custom_message notice) is already one.
   const branch = (call.branch ?? []).map((item) => (item.type ? item : { type: "message", message: item }));
+  let aborts = 0;
   const context = {
     cwd: call.cwd,
     signal: new AbortController().signal,
+    abort() { aborts += 1; },
     sessionManager: {
       getSessionId() { return call.sessionId; },
       getBranch() { return branch; },
@@ -46,8 +49,39 @@ for (const call of JSON.parse(process.argv[3])) {
     ui: { notify() {} },
   };
   const before = sent.length;
-  const result = (await handlers.get(call.event)(call.payload, context)) ?? null;
-  results.push({ result, sent: sent.slice(before) });
+  const handler = handlers.get(call.event);
+  // A pre-input-event extension must fail the release oracle on admission,
+  // not because this carrier cannot dispatch an absent optional event.
+  if (!handler && call.event !== "input") throw new Error(`No handler for ${call.event}`);
+  const result = (handler ? await handler(call.payload, context) : null) ?? null;
+  const outcome = { result, sent: sent.slice(before) };
+  if (call.observeAbort) outcome.aborts = aborts;
+  // Opt-in executor substitutes have filesystem effects only after admission.
+  // Never eval/exec submitted programs (including the recorded hash inventory).
+  if (call.executor && !result?.block && aborts === 0) {
+    const executor = call.executor;
+    if (executor.kind === "witness") {
+      await fs.writeFile(executor.path, executor.content, "utf8");
+      outcome.executed = true;
+    } else if (executor.kind === "read") {
+      const text = await fs.readFile(executor.path, "utf8");
+      const lines = text.split("\\n");
+      outcome.read = executor.start
+        ? lines.slice(executor.start - 1, executor.end).join("\\n")
+        : text;
+    } else if (executor.kind === "write") {
+      await fs.writeFile(executor.path, executor.content, "utf8");
+      outcome.executed = true;
+    } else if (executor.kind === "replace") {
+      const text = await fs.readFile(executor.path, "utf8");
+      if (!text.includes(executor.before)) throw new Error("Existing-file fixture target missing");
+      await fs.writeFile(executor.path, text.replace(executor.before, executor.after), "utf8");
+      outcome.executed = true;
+    } else {
+      throw new Error(`Unknown fixture executor ${executor.kind}`);
+    }
+  }
+  results.push(outcome);
 }
 console.log(JSON.stringify(results));
 """

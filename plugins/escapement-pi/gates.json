@@ -1,6 +1,13 @@
 {
   "version": 1,
   "dispatcher": "claude/hooks/codex_pretool_dispatch.py",
+  "raw_tool_gates": [
+    {
+      "id": "inspection_boundary",
+      "source": "claude/hooks/inspection_boundary.py",
+      "timeout_seconds": 5
+    }
+  ],
   "gates": [
     {
       "id": "test_oracle_brief_gate",
@@ -297,6 +304,11 @@
       "id": "stop_hook",
       "source": "harness/bin/pi_stop_hook.py",
       "timeout_seconds": 30
+    },
+    {
+      "id": "inspection_boundary",
+      "source": "claude/hooks/inspection_boundary.py",
+      "timeout_seconds": 5
     },
     {
       "id": "oracle_downgrade_stop",
