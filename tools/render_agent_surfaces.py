@@ -1092,12 +1092,11 @@ def _validate_pi_events(root: Path, manifest: dict[str, Any], hook: dict[str, An
         adapter.get("context_source_event"),
         adapter.get("session_source_event"),
         adapter.get("stop_source_event"),
-        "ExternalInput",
     )
     for event in entry.get("events", []):
         name, matcher = event.get("event"), event.get("matcher")
         if name in tool_events:
-            if matcher not in tool_targets and not (name == "PreToolUse" and matcher == "*"):
+            if matcher not in tool_targets:
                 errors.append(f"hook {item_id}: Pi {name} matcher {matcher!r} is not a translated Pi tool")
         elif name not in whole_events:
             errors.append(f"hook {item_id}: Pi event {name!r} is not translated by the Pi adapter")

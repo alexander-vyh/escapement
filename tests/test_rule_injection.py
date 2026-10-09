@@ -325,6 +325,7 @@ PINNED_REQUIREMENTS = [
     ("outcome-ownership.md", '**An answered question is done.** Once you hold an answer the user can act on, deliver it'),
     ("research-findings-persistence.md", 'If a file is missing or a stub, **persist the payload the agent returned**; re-dispatch'),
     ("research-findings-persistence.md", 'persists that payload verbatim at once. Persistence is bookkeeping: never a reason to'),
+    ("research-findings-persistence.md", 'An unavailable optional comparison is **unknown**, not authority to'),
     ("research-findings-persistence.md", 'uncertainty tags live **inline in the file**, never only in the message.'),
     ("research-findings-persistence.md", '**prints the path and offers cleanup** — no'),
     ("research-findings-persistence.md", 'The count check is the headline guard, so it **must** carry its own `|| exit 1`'),

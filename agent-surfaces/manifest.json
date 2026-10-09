@@ -1037,47 +1037,6 @@
       }
     },
     {
-      "id": "inspection_boundary",
-      "description": "Enforce an explicitly activated, finite read/report inspection at raw tool admission; repeated prohibited work aborts without a continuation.",
-      "source": "claude/hooks/inspection_boundary.py",
-      "hosts": {
-        "codex": {
-          "status": "unsupported",
-          "unsupported_reason": "Raw inspection admission, parent binding, authenticated external input release and abort have not been exercised on Codex. The context-burn advisory is not this boundary."
-        },
-        "claude": {
-          "status": "unsupported",
-          "unsupported_reason": "The strict inspection boundary depends on host-proven raw admission, external input and abort; no Claude lifecycle fixture proves these."
-        },
-        "pi": {
-          "status": "ready",
-          "events": [
-            {
-              "event": "PreToolUse",
-              "matcher": "*",
-              "command": "python3 -B claude/hooks/inspection_boundary.py",
-              "timeout_seconds": 5
-            },
-            {
-              "event": "ExternalInput",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inspection_boundary.py",
-              "timeout_seconds": 5
-            },
-            {
-              "event": "Stop",
-              "matcher": "",
-              "command": "python3 -B claude/hooks/inspection_boundary.py",
-              "timeout_seconds": 5
-            }
-          ],
-          "fixtures": [
-            "tests/test_pi_inspection_boundary_end_to_end.py"
-          ]
-        }
-      }
-    },
-    {
       "id": "context_burn_detector",
       "description": "Detect excessive inline research without agent dispatch.",
       "source": "claude/hooks/context_burn_detector.py",

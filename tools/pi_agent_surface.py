@@ -203,15 +203,6 @@ def ready_ask_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return gates
 
 
-def ready_raw_tool_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    """Admission gates for each physical call, before host-tool projection."""
-    gates: list[dict[str, Any]] = []
-    for hook in manifest.get("hooks", []):
-        events = _explicit_pi_events(hook, "PreToolUse", {"*"})
-        gates.extend(_gate(hook, event) for event in (events or [])[:1])
-    return gates
-
-
 def pi_tool_targets(adapter: dict[str, Any]) -> list[str]:
     """Every Pi tool the extension maps onto a Claude tool payload."""
     return [
@@ -256,7 +247,6 @@ def ready_stop_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _pi_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     listed = [
-        *ready_raw_tool_gates(manifest),
         *ready_bash_gates(manifest),
         *ready_file_gates(manifest),
         *ready_read_gates(manifest),
@@ -329,7 +319,6 @@ def render_gate_inventory(manifest: dict[str, Any]) -> str:
     payload = {
         "version": 1,
         "dispatcher": "claude/hooks/codex_pretool_dispatch.py",
-        "raw_tool_gates": ready_raw_tool_gates(manifest),
         "gates": ready_bash_gates(manifest),
         "file_gates": ready_file_gates(manifest),
         "read_gates": ready_read_gates(manifest),
