@@ -1,6 +1,6 @@
 ---
 name: beads-execution
-description: Use when the user mentions beads, bead, bd, or asks to execute/work on/run/start a bead task or issue (e.g. "execute bead cake-4cq.1.1", "work on task X", "run the beads tasks", "start bead work"). Reads tasks from bd ready, dispatches subagents, writes status back to beads.
+description: Use only when the user explicitly asks to execute, work on, run, or start tracked Beads work. Informational mentions and task IDs alone do not authorize execution.
 ---
 
 # Beads-Driven Execution
@@ -10,15 +10,32 @@ fresh subagents per task, running two-stage review (spec then quality), and
 writing status back to beads on completion.
 
 **Why this over subagent-driven-development:** Beads is the source of truth for
-what needs to happen. This skill reads from beads instead of extracting tasks
+task state; delegated intent determines which tasks are authorized. This skill reads from beads instead of extracting tasks
 from a plan file. Completion updates flow back to beads, enabling crash
 recovery, user visibility, and correct dependency resolution.
 
-**Core principle:** `bd ready` drives dispatch. `bd update --claim` marks
+**Core principle:** Authorized task scope filters `bd ready` before dispatch. `bd update --claim` marks
 ownership. `bd close` marks completion. Beads is always accurate.
 
 **Announce at start:** "I'm using beads-execution to execute tasks from the
 beads graph."
+
+## Assignment contract
+
+Use agents regularly for independent work, research, testing, and review.
+Every child receives its assigned outcome before dispatch. State the scope and
+allowed effects: repositories, evidence, file ownership, commands, and writes.
+State completion criteria and the handoff to the lead; a completed review or
+research assignment returns findings rather than delivering the parent's build.
+Reviewers report findings and recheck assigned repairs; they do not repair or
+implement without a new assignment. Implementers may fix what causally blocks
+their assigned outcome only within the authorized scope and allowed effects.
+For adjacent findings, report them and do not fix them. A parent applies the
+same boundary before assigning repairs; a child's discovery adds no authority.
+Use `bd ready` to select only authorized tasks; readiness is not delegated scope.
+Unknown optional evidence does not block a useful answer. Return available
+findings and the precise uncertainty; the parent persists returned payloads
+without recomputing them merely because the child lacked file tools.
 
 ## When to Use
 
@@ -75,9 +92,9 @@ session.
 
 This skill can be invoked in several ways:
 
-- `/beads-execution` — run all ready tasks from `bd ready`, in priority order
+- `/beads-execution` — resolve the delegated task scope before claiming ready work
 - `/beads-execution cake-4cq.1.1` — run a specific task by ID
-- `"execute bead cake-4cq.1.1"` — natural language, skill matches on "bead"
+- `"execute bead cake-4cq.1.1"` — explicit execution intent
 - `"work on task cake-4cq.1.1"` — natural language with task reference
 - `"run the beads tasks"` — run all ready tasks
 
@@ -87,7 +104,7 @@ repository-declared landing and verification outcome. Do not expand a bounded
 invocation to unrelated ready beads; continue only causally in-scope work that
 the completed task unblocks.
 
-**If no task ID is provided**, use `bd ready` to determine what to work on next.
+**If no task ID is provided**, inspect `bd ready` and select only the delegated task, epic descendants, or explicitly authorized ready-work graph. A bare mention is not execution intent; missing scope blocks claiming work, not read-only inspection.
 
 ## The Process
 
@@ -95,9 +112,9 @@ the completed task unblocks.
 digraph process {
     rankdir=TB;
 
-    "Check for interrupted tasks" [shape=box];
-    "Run bd ready to get actionable tasks" [shape=box];
-    "Any tasks ready?" [shape=diamond];
+    "Check owned assigned interrupted tasks" [shape=box];
+    "Run bd ready and filter authorized tasks" [shape=box];
+    "Any authorized tasks ready?" [shape=diamond];
 
     subgraph cluster_per_task {
         label="Per Task (sequential)";
@@ -114,15 +131,15 @@ digraph process {
         "Close task: bd close" [shape=box];
     }
 
-    "Run bd ready again" [shape=box];
-    "All tasks complete" [shape=box];
+    "Run bd ready and filter again" [shape=box];
+    "All assigned tasks complete" [shape=box];
     "Dispatch final code reviewer" [shape=box];
     "Finish: push + open PR" [shape=box, style=filled, fillcolor=lightgreen];
 
-    "Check for interrupted tasks" -> "Run bd ready to get actionable tasks";
-    "Run bd ready to get actionable tasks" -> "Any tasks ready?";
-    "Any tasks ready?" -> "Claim task: bd update --claim" [label="yes"];
-    "Any tasks ready?" -> "All tasks complete" [label="no"];
+    "Check owned assigned interrupted tasks" -> "Run bd ready and filter authorized tasks";
+    "Run bd ready and filter authorized tasks" -> "Any authorized tasks ready?";
+    "Any authorized tasks ready?" -> "Claim task: bd update --claim" [label="yes"];
+    "Any authorized tasks ready?" -> "All assigned tasks complete" [label="no"];
     "Claim task: bd update --claim" -> "Build implementer prompt from beads metadata";
     "Build implementer prompt from beads metadata" -> "Dispatch implementer subagent";
     "Dispatch implementer subagent" -> "Handle implementer status";
@@ -136,9 +153,9 @@ digraph process {
     "Quality passes?" -> "Close task: bd close" [label="yes"];
     "Quality passes?" -> "Resume implementer to fix (quality)" [label="no"];
     "Resume implementer to fix (quality)" -> "Dispatch code quality reviewer subagent";
-    "Close task: bd close" -> "Run bd ready again";
-    "Run bd ready again" -> "Any tasks ready?";
-    "All tasks complete" -> "Dispatch final code reviewer";
+    "Close task: bd close" -> "Run bd ready and filter again";
+    "Run bd ready and filter again" -> "Any authorized tasks ready?";
+    "All assigned tasks complete" -> "Dispatch final code reviewer";
     "Dispatch final code reviewer" -> "Finish: push + open PR";
 }
 ```
@@ -151,8 +168,7 @@ On session start, before doing anything else:
 bd list --status in_progress
 ```
 
-If any tasks are in_progress with no running agent, they were interrupted by a
-session crash. For each interrupted task:
+Tasks in_progress with no running agent may be interrupted; verify ownership and durable evidence before resuming. For each interrupted task within the delegated scope and your ownership:
 
 1. Check git log — did the implementer commit work before the crash?
 2. If commits exist: resume at the review stage (dispatch spec reviewer)
@@ -169,25 +185,25 @@ bd ready --json
 This returns tasks with no active blockers. Parse the JSON to get task IDs,
 titles, and descriptions.
 
-If no tasks are ready, check if all tasks are closed (`bd list`). If yes, proceed
-to final review. If tasks exist but are blocked, report the blockers and stop.
+If no authorized tasks are ready, check whether the assigned tasks are complete (`bd show <id>`). If yes, proceed
+to final review. If assigned tasks remain blocked, continue independent authorized lanes and report the narrow dependency.
 
 ### Parallel Dispatch (Default Behavior)
 
-**When multiple tasks are ready, dispatch them in parallel.** Do not ask — just
+**When multiple authorized tasks are ready, dispatch them in parallel.** Do not ask — just
 do it. Independent tasks run simultaneously; that's the whole point.
 
-1. Run `bd ready --json` to get all actionable tasks
-2. Filter out epics (issue_type == "epic") — those are containers, not work
-3. For each ready task (up to 3 concurrent — the coordinator cognitive limit):
+1. Run `bd ready --json` to inspect ready task state
+2. Filter to authorized tasks before claiming; omit epic containers and unrelated ready work
+3. For each authorized ready task (up to 3 concurrent — the coordinator cognitive limit):
    - Claim it: `bd update <task-id> --claim`
    - Build the implementer prompt from beads metadata (see §2b below)
    - Dispatch: `Agent(isolation: "worktree", run_in_background: true,
      description: "Implement <task-id>: <title>")`
 4. As agents complete, run review for each (can overlap with running agents)
 5. After review passes: `bd close <task-id>`
-6. Run `bd ready` again — newly unblocked tasks form the next wave
-7. Repeat until no tasks remain
+6. Run `bd ready` again — newly unblocked authorized tasks form the next wave
+7. Repeat until the assigned graph is complete
 
 **Only run sequentially when:**
 - A single task is ready (nothing to parallelize)
@@ -448,7 +464,9 @@ initial verdict; it may add discrepancies or evidence to it.
 
 **Triage routing rules (applied by the coordinator, not the reviewer):**
 
-After receiving classified findings, route each category:
+Before routing, classify whether each finding causally blocks the assigned outcome.
+Report adjacent findings without repair or escalation. Apply these routes only to
+in-scope causal blockers:
 
 1. **patch** → Resume implementer with specific fix requests. Re-review after fixes
    (round cap: 2 review rounds, then `bd create` the rest).
@@ -458,20 +476,20 @@ After receiving classified findings, route each category:
    structured path for when the spec itself is wrong or incomplete.
 4. **defer** → Create a new beads task for the deferred concern. Do NOT block current
    work. Close the current finding — it's tracked separately now.
-5. **reject** → **Hard stop.** Present to user: "The implementation approach conflicts
+5. **reject** → Block the affected task and dependents only. Present to user: "The implementation approach conflicts
    with the design: [description]. This needs a decision before we can proceed."
    Do not resume implementer until the user decides.
 
 **Loopback rules:**
-- `patch` and `intent_gap` loop to implementer → re-review (tight loop, no escalation;
+- In-scope causal `patch` and `intent_gap` loop to implementer → re-review (tight loop, no escalation;
   round cap: 2 review rounds, then `bd create` the rest)
 - `bad_spec` loops to the design doc / spec → amendment → re-implementation (wide loop)
 - `defer` creates a task and exits the loop (no re-review needed)
-- `reject` exits the loop entirely (hard stop, user decision required)
+- `reject` blocks the affected lane when a consequential decision is required; independent authorized lanes continue
 
-If a review produces ONLY `patch` findings, the fix-and-re-review cycle should
-complete without user involvement (round cap: 2 review rounds, then `bd create` the rest). If ANY `bad_spec` or `reject` findings exist,
-the user must be involved before proceeding.
+If a review produces ONLY in-scope causal `patch` findings, the fix-and-re-review cycle should
+complete without user involvement (round cap: 2 review rounds, then `bd create` the rest). If an in-scope `bad_spec` or `reject` requires a consequential decision,
+request that decision for the affected lane while continuing independent authorized work.
 
 **Triage event logging (silent — never surface to user):**
 
@@ -563,13 +581,13 @@ repo's own review template (the `adversarial-reviewer` agent / the
 - HEAD_SHA: current commit
 
 Quality review findings also use the triage taxonomy:
-- **patch** → resume implementer to fix, re-review (round cap: 2 review rounds, then `bd create` the rest)
+- **In-scope causal patch** → resume implementer to fix, re-review (round cap: 2 review rounds, then `bd create` the rest)
 - **defer** → create backlog task, approve current work
 - **reject** → architectural violation, escalate to user
 
-If only `patch` findings: fix and re-review without user involvement (round cap:
+If only in-scope causal `patch` findings: fix and re-review without user involvement (round cap:
 2 review rounds, then `bd create` the rest).
-If `defer` or `reject`: involve the user.
+Record/report `defer` findings without blocking the assigned outcome. Escalate a `reject` only when it blocks that outcome and requires a consequential decision; continue independent authorized work.
 
 ### 2g. Close the Task
 
@@ -733,9 +751,9 @@ Before closing the final execution step, verify anti-metrics from the design doc
 
 After all agents in the current wave complete, pass review, and merge:
 
-1. Run `bd ready` — newly unblocked tasks are the next wave
-2. Dispatch all ready tasks in parallel (same as Step 1)
-3. Repeat until `bd ready` returns no tasks
+1. Run `bd ready` — newly unblocked authorized tasks are the next wave
+2. Dispatch authorized ready tasks in parallel (same as Step 1)
+3. Repeat until the authorized task graph is complete
 
 **Do not wait for the user between waves.** The graph drives the schedule. When
 a wave completes, the next wave starts automatically. Report progress as you go:
@@ -745,9 +763,9 @@ is now unblocked. Dispatching."
 
 ## Step 4: Final Review and Finish
 
-When all tasks are complete:
+When all assigned tasks are complete:
 
-1. Run `bd list` to confirm everything is closed
+1. Run `bd show` for the assigned IDs to confirm their acceptance criteria; unrelated work remains unchanged
 2. Dispatch a final code reviewer for the entire implementation
 3. Resolve the landing policy from `.escapement/repo.json` through
    `harness/bin/repo_outcome.py`, unless session context already provides the
@@ -787,20 +805,18 @@ Match depth of work to task type. Do not converge on an answer before reaching t
 
 **For the coordinator (you):**
 
-DO NOT STOP between waves. When a wave completes, run `bd ready` and dispatch the
-next wave IMMEDIATELY. Do not summarize progress and wait for permission. Do not
-report "Wave 1 complete, here's what's left" and stop. The wave loop (Step 3) runs
-until `bd ready` returns no tasks. If the final review finds problems, dispatch
-agents to fix them. The process ends when ALL beads tasks are closed AND the final
-review passes AND the outcome is verified end-to-end.
+Continue waves of authorized tasks without asking to reconfirm ordinary means.
+Readiness does not add scope. Complete the assigned graph and verify the delegated
+outcome; unrelated ready tasks remain unclaimed. Route final-review causal blockers
+to implementers within that authority; report adjacent findings without repair.
 
 **For every implementer prompt (append to §2b template):**
 
 > **CONTINUATION DISCIPLINE:** DO NOT wind down prematurely. DO NOT summarize
 > remaining work and stop. If a problem stands between you and your assigned
-> outcome, fix it. Anything beyond that outcome — other beads, the rest of the
+> outcome, repair it only within your assigned scope and allowed effects. Anything beyond that outcome — other beads, the rest of the
 > epic, adjacent bugs or cleanup — is not yours: report it to your lead (or
-> `bd create` it) and do not fix it. If a test fails, debug and fix it — do not report
+> `bd create` it) and do not fix it. If an assigned verification fails, debug and fix its causal blocker within your allowed effects — do not report
 > the failure as your status. If you hit an obstacle, investigate and work around
 > it. You are done when your implementation works end-to-end, tests pass, and
 > you've self-reviewed. Declaring DONE without running verification is FAILURE. Run
@@ -810,7 +826,8 @@ review passes AND the outcome is verified end-to-end.
 **For every reviewer prompt (append to §2e and §2f templates):**
 
 > **CONTINUATION DISCIPLINE:** DO NOT rubber-stamp incomplete work. Read the ACTUAL
-> code, not just the implementer's report. If you find issues, report ALL of them —
+> code, not just the implementer's report. Reviewers report; they do not repair or implement.
+> Classify causal blockers and adjacent findings, then hand off the evidence. If you find issues, report ALL of them —
 > do not stop after finding the first one. Verify every requirement against the
 > actual implementation code. "Looks reasonable" is not a review — "I verified
 > requirement X at file:line" is a review.
@@ -820,22 +837,22 @@ review passes AND the outcome is verified end-to-end.
 **Never:**
 - Start implementation on main/master without explicit user consent
 - Skip reviews (spec compliance OR code quality)
-- Proceed with unfixed review issues
+- Proceed with unresolved causal blockers to the assigned outcome
 - Ignore implementer questions — answer before letting them proceed
 - Accept "close enough" on spec compliance
 - Skip the re-review after fixes (it is round 2 of the round cap: 2 review rounds, then `bd create` the rest)
 - Let self-review replace actual review (both needed)
 - Start code quality review before spec compliance is ✅
-- Move to next task while either review has open issues
+- Close a task with unresolved causal blockers to its acceptance criteria
 - Manually update beads status when `bd update --claim` / `bd close` should be used
 - Silently work around assumption failures — surface them
-- **Stop between waves** — the wave loop runs until `bd ready` returns no tasks
+- **Stop between waves** — continue only until the authorized graph is complete
 - **Summarize remaining work and stop** — that is premature wind-down, not completion
 - **Report "done" without running the actual end-to-end verification**
 
 **If a discrepancy between the task description, design doc, validation findings,
 or upstream results requires a product decision, block only the affected task and
-its dependents. Preserve the decision and continue independent ready tasks.**
+its dependents. Preserve the decision and continue independent authorized ready tasks.**
 
 Ask the user only when every remaining route to the delegated outcome depends on
 the same unresolved consequential choice. A discrepancy is not permission to guess,
@@ -850,7 +867,7 @@ Examples that require an action-local decision:
 **The pattern:**
 1. State the conflict clearly (source A says X, source B says Y)
 2. Identify the affected task and dependent tasks
-3. Continue independent ready tasks, causal verification, and repair
+3. Continue independent authorized ready tasks, causal verification, and repair
 4. Ask which source governs only if the product decision is still required
 5. Resume the affected branch when the answer arrives
 

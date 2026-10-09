@@ -355,14 +355,14 @@ REMOVED_DIRECTIVES = [
     "instead of dispatching explore agents",
     "dispatch for it now",
 ]
-INLINE_DEFAULT = "**Work inline by default.** Dispatch an agent only when"
+BOUNDED_DELEGATION = "**Use agents regularly for bounded assignments.**"
 
 
-def test_dispatch_by_default_never_reaches_the_session(shipped):
+def test_unbounded_dispatch_never_reaches_the_session(shipped):
     host, contexts, _, _ = shipped
     injected = "\n".join(contexts)
     assert [d for d in REMOVED_DIRECTIVES if d in injected] == [], host
-    assert INLINE_DEFAULT in injected, host
+    assert BOUNDED_DELEGATION in injected, host
 
 
 def test_pins_cover_files_each_host_ships():

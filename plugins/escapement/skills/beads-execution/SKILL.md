@@ -24,6 +24,23 @@ Positive routing examples:
 - "run the ready Beads tasks"
 - "start the next tracked task"
 
+## Assignment contract
+
+Use agents regularly for independent work, research, testing, and review.
+Every child receives its assigned outcome before dispatch. State the scope and
+allowed effects: repositories, evidence, file ownership, commands, and writes.
+State completion criteria and the handoff to the lead; a completed review or
+research assignment returns findings rather than delivering the parent's build.
+Reviewers report findings and recheck assigned repairs; they do not repair or
+implement without a new assignment. Implementers may fix what causally blocks
+their assigned outcome only within the authorized scope and allowed effects.
+For adjacent findings, report them and do not fix them. A parent applies the
+same boundary before assigning repairs; a child's discovery adds no authority.
+Use `bd ready` to select only authorized tasks; readiness is not delegated scope.
+Unknown optional evidence does not block a useful answer. Return available
+findings and the precise uncertainty; the parent persists returned payloads
+without recomputing them merely because the child lacked file tools.
+
 ## Execution contract
 
 1. Run `bd prime` after session start or context recovery.

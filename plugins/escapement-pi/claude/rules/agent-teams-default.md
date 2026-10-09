@@ -2,11 +2,27 @@
 
 ## When to Dispatch
 
-**Work inline by default.** Dispatch an agent only when that clearly beats doing it
-yourself: independent work that can truly run in parallel, a broad search whose raw
-output would flood your context, or a review that must be independent of the author.
-Dispatch is never a policy obligation, and a child's output is never a reason to widen
-the question.
+**Use agents regularly for bounded assignments.** Dispatch independent work,
+research, testing, and review when those roles help deliver the requested outcome.
+Choose inline execution for small self-contained actions. Neither choice widens
+the question or grants authority beyond the assignment.
+
+## Assignment contract
+
+Use agents regularly for independent work, research, testing, and review.
+Every child receives its assigned outcome before dispatch. State the scope and
+allowed effects: repositories, evidence, file ownership, commands, and writes.
+State completion criteria and the handoff to the lead; a completed review or
+research assignment returns findings rather than delivering the parent's build.
+Reviewers report findings and recheck assigned repairs; they do not repair or
+implement without a new assignment. Implementers may fix what causally blocks
+their assigned outcome only within the authorized scope and allowed effects.
+For adjacent findings, report them and do not fix them. A parent applies the
+same boundary before assigning repairs; a child's discovery adds no authority.
+Use `bd ready` to select only authorized tasks; readiness is not delegated scope.
+Unknown optional evidence does not block a useful answer. Return available
+findings and the precise uncertainty; the parent persists returned payloads
+without recomputing them merely because the child lacked file tools.
 
 ## Always Use Named Agents
 
@@ -84,7 +100,7 @@ Named agents and beads are complementary. Beads tracks *what* to do (`bd ready`,
 ## Causal Scope And Action-Local Continuation
 
 Team capacity serves the delegated outcome, not every issue an agent happens to find.
-Own and repair work that **causally blocks the delegated outcome** when it remains
+Implementers own and repair work that **causally blocks the delegated outcome** when it remains
 inside the delegated repository, audience, privilege, effect, and ownership boundaries.
 Record **adjacent discoveries** separately; do not dispatch execution for them or suspend
 the active outcome to solicit a scope expansion.
@@ -120,8 +136,9 @@ The operative directive for each pattern, one line, stays here:
 - **Completeness Critic** — after the per-lens reviewers report and before
   declaring the review done, dispatch a generative, blinded critic that surfaces
   what is MISSING (gaps no lens owned), UNDERSTATED (severity to calibrate up),
-  and MIS-SCOPED; each gap re-enters the loop as a new finding, inside the review
-  round cap below (2 review rounds; leftovers go to `bd create`).
+  and MIS-SCOPED within the assigned requirements; classify gaps as causal blockers
+  or adjacent discoveries. Apply the round cap below (2 review rounds;
+  nonblocking leftovers go to `bd create`).
 
 See the `dispatching-parallel-agents` skill for the full write-ups, the bad-
 implementation-class checklist, and the dispatch templates.
@@ -130,7 +147,7 @@ implementation-class checklist, and the dispatch templates.
 
 Every review→repair pairing runs at most 2 review rounds: round 1 reviews,
 repair fixes, round 2 checks those fixes and does not start a fresh sweep.
-After round 2, each remaining finding is an adjacent discovery: record it with
+After round 2, each remaining finding that does not block the assigned outcome is recorded with
 `bd create` and report it, not another repair round. Exception: a finding that
 causally blocks the delegated outcome gets one more repair round; if it is still
 open after that, escalate it as the blocker. A lane that has spent its rounds
@@ -189,11 +206,12 @@ subagent equally. Two additions specific to teams:
 ### For Subagents (Include in Every Agent Prompt)
 
 > **CONTINUATION DISCIPLINE:** Do not wind down prematurely. Do not summarize remaining
-> work and stop. If a problem stands between you and your assigned outcome, fix it.
+> work and stop. Reviewers report and recheck; they do not repair or implement.
+> As an implementer, repair what blocks your assigned outcome only within your scope and allowed effects.
 > Anything beyond that outcome — other beads, the rest of the epic, adjacent bugs or
 > cleanup — is not yours: report it to your lead (or `bd create` it) and do not fix it.
 > If you hit an obstacle, investigate and work around it — that is not a reason to stop.
-> You are done when the OUTCOME is verified, not when you have made an attempt. "Maximum
+> You are done when your assignment completion criteria are met and handed off, not when you have made an attempt. "Maximum
 > Steps Reached" is not acceptable unless you have genuinely exhausted every available
 > action. Review→repair pairings stop at 2 review rounds: after that, file each
 > remaining non-blocking finding with `bd create` instead of another repair round. If
