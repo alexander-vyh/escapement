@@ -7,14 +7,14 @@ tags: [workflow, artifacts, experimental]
 
 Implement tasks from an OpenSpec change.
 
-**Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
+**Applicability**: Use the change identified by the user or assigned task. If explicitly invoked without a change, resolve the intended change. Otherwise, absence of an identified change means this skill does not apply: continue the assignment without OpenSpec discovery or setup.
 
 **Steps**
 
 1. **Select the change**
 
-   If a name is provided, use it. Otherwise:
-   - Infer from conversation context if the user mentioned a change
+   Use the named or unambiguously assigned change. Only when explicitly invoked
+   without an identified change:
    - Auto-select if only one active change exists
    - If ambiguous, run `openspec list --json` to get available changes and use the **AskUserQuestion tool** to let the user select.
 
@@ -73,11 +73,10 @@ Implement tasks from an OpenSpec change.
    - Update or close the relevant bead for actual project tracking
    - Continue to next task
 
-   **Pause if:**
-   - Task is unclear → ask for clarification
-   - Implementation reveals a design issue → suggest updating artifacts
-   - Error or blocker encountered → report and wait for guidance
-   - User interrupts
+   Repair causal implementation and tooling failures within delegated scope.
+   Continue independent authorized work when one action is blocked. Ask only
+   when resolution requires a consequential decision outside existing authority.
+   Honor user instructions to pause or stop.
 
 7. **On completion or pause, show status**
 
