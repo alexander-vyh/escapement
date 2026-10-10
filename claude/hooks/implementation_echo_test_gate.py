@@ -14,6 +14,8 @@ dangerous deterministic anti-patterns before commit, push, PR, or bd close.
 from __future__ import annotations
 
 import json
+import ast
+import difflib
 import os
 import re
 import shlex
@@ -32,7 +34,7 @@ except ImportError:  # pragma: no cover
         return None
 
 
-from git_change_scope import remote_default_target
+from git_change_scope import change_sources, net_tree_scope, remote_default_target
 
 try:
     from data_fixture_echo import (
@@ -717,11 +719,40 @@ def analyze(
 
     source_files = {path: read_file(repo_root, path) for path in source_paths}
     test_files = {path: read_file(repo_root, path) for path in test_paths}
+    scope = net_tree_scope(repo_root)
+    previous_tests = {}
+    for change in scope.changes:
+        if change.filepath in test_files:
+            old, new = change_sources(repo_root, scope, change)
+            previous_tests[change.filepath] = old
+            test_files[change.filepath] = new
+    # Literal findings belong to introduced text, not historical assertions in
+    # an otherwise changed file. Keep whole changed functions for mock-only
+    # checks: removing their outcome assertion must still be rejected.
+    literal_tests = {}
+    for path, new in test_files.items():
+        old = previous_tests.get(path, "")
+        lines = new.splitlines(keepends=True)
+        changed = {index for tag, _, _, j, k in
+                 difflib.SequenceMatcher(None, old.splitlines(keepends=True), lines,
+                                         autojunk=False).get_opcodes()
+                 if tag in {"insert", "replace"} for index in range(j, k)}
+        if path.endswith(".py"):
+            try:
+                for node in ast.walk(ast.parse(new)):
+                    if isinstance(node, ast.Assert):
+                        span = set(range(node.lineno - 1, node.end_lineno))
+                        if span & changed:
+                            changed.update(span)
+            except SyntaxError:
+                pass
+        literal_tests[path] = "".join(line if index in changed else "\n"
+                                    for index, line in enumerate(lines))
     declarative_test_files = {
-        path: test_files[path] for path in test_paths if has_text_data_extension(path)
+        path: literal_tests[path] for path in test_paths if has_text_data_extension(path)
     }
     code_test_files = {
-        path: test_files[path]
+        path: literal_tests[path]
         for path in test_paths
         if path not in declarative_test_files
     }
@@ -735,7 +766,25 @@ def analyze(
             data_scalar_tokens,
         )
     )
-    issues.extend(find_mock_only_tests(test_files))
+    for path, new in test_files.items():
+        old = previous_tests.get(path, "")
+        extractor = (extract_python_test_functions if path.endswith(".py")
+                     else extract_js_test_blocks)
+        if path.endswith(".py"):
+            def extractor(text):
+                try:
+                    return [(node.name, ast.get_source_segment(text, node))
+                            for node in ast.walk(ast.parse(text))
+                            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and node.name.startswith("test_")]
+                except SyntaxError:
+                    return extract_python_test_functions(text)
+        unchanged = set(extractor(old))
+        for issue in find_mock_only_tests({path: new}):
+            if not any(issue.detail.startswith(name + " ")
+                       for name, body in extractor(new)
+                       if (name, body) in unchanged):
+                issues.append(issue)
     issues.extend(
         Issue(
             finding.filepath,
@@ -744,7 +793,7 @@ def analyze(
             f"appears inside description string(s) in: {', '.join(finding.sources)} "
             f"— the test re-asserts documentation, not a computed value",
         )
-        for finding in find_magic_number_echoes(source_files, test_files)
+        for finding in find_magic_number_echoes(source_files, literal_tests)
     )
     source_literals = extract_opaque_literals(source_files)
     candidate_values = {

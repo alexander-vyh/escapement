@@ -395,6 +395,7 @@ export default function escapementPi(pi: PiAPI): void {
             transcript_path: transcriptOf(context, sessionId, []),
             cwd: cwdOf(event, context),
             hook_event_name: "PreToolUse",
+            parent_session: parentSessionOf(context) || null,
             // Pairs this call's PreToolUse with its PostToolUse, as Claude and Codex do.
             tool_use_id: event.toolCallId,
             ...mapped,
@@ -467,7 +468,20 @@ export default function escapementPi(pi: PiAPI): void {
     if (runtime instanceof Error || runtime.stopGates.length === 0) return;
     const run = Array.isArray(event?.messages) ? event.messages : [];
     const sessionId = sessionIdOf(context);
-    const lastAssistant = [...run].reverse().find((message) => message?.role === "assistant");
+    // OMP can end a yielded worker with no event messages even though its
+    // final response is already saved on the current branch. Use that same
+    // history as the transcript, never an assistant before a newer user or
+    // a tool-call turn (including text accompanying a tool call).
+    const branch = context?.sessionManager?.getBranch?.();
+    const history = Array.isArray(branch) && branch.length ? branchMessages(branch) : run;
+    const lastSpeech: any = [...history].reverse().find(
+      (message: any) => message?.role === "assistant" || message?.role === "user",
+    );
+    const lastAssistant = lastSpeech?.role === "assistant"
+      && (!lastSpeech.stopReason || lastSpeech.stopReason === "stop")
+      && !(Array.isArray(lastSpeech.content)
+        && lastSpeech.content.some((block: any) => block?.type === "toolCall"))
+      ? lastSpeech : undefined;
     let result: DispatcherResponse;
     try {
       result = await runDispatcher(

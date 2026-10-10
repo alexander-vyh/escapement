@@ -2,6 +2,9 @@
 """Agent-dispatch hook: enforce named agents on every host.
 
 Enforcement:
+  - HARD BLOCK: an identified delegated worker dispatching another child.
+    It must work inline or return the blocker to its supervisor. Host identity
+    is required; missing identity is not mechanically enforced by this gate.
   - HARD BLOCK: an agent dispatch with no name. On Claude that is an Agent
     call without `name` (anonymous agents cannot be addressed via
     SendMessage). On Codex it is a spawn_agent call with neither task_name nor
@@ -29,7 +32,7 @@ except ImportError:  # pragma: no cover
     def _record_signal(*_args, **_kwargs) -> None:
         return None
 
-from _agent_dispatch import agent_dispatch, host as _host  # noqa: E402
+from _agent_dispatch import agent_dispatch, delegated_worker, host as _host  # noqa: E402
 
 _LOG_FILE = Path.home() / ".claude" / "hooks" / "agent-dispatch.log"
 
@@ -138,6 +141,23 @@ def main() -> int:
     if tool_input is None:
         return 0
     host = _host(data)
+    # Naming waivers grant no authority to expand a delegated assignment.
+    if delegated_worker(data):
+        reason = (
+            "Delegated worker dispatch blocked: finish the assigned work inline "
+            "with its existing tools, or return the narrow finding/blocker to "
+            "your supervisor. The supervisor can assign an independent lane; "
+            "do not launch another preparation or review child yourself."
+        )
+        _record_signal(
+            gate_name="enforce_named_agents", decision="deny",
+            reason="delegated_worker_dispatch", host=host,
+        )
+        json.dump({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }}, sys.stdout)
+        return 0
     block_text = _BLOCK_TEXT.get(host, _BLOCK_NO_NAME)
 
     agent_name = str(tool_input.get("name") or "").strip()

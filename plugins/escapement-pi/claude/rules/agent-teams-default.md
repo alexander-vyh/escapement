@@ -117,28 +117,24 @@ QA agents that work from the success criteria or spec — NOT from the code.
 
 The full QA-pattern catalog — with dispatch templates and worked examples — lives
 in the **`dispatching-parallel-agents` skill**; load it when you actually pair.
-The operative directive for each pattern, one line, stays here:
+Use these patterns for a concrete evidence gap, not as mandatory preparation
+rounds. Reuse the approved design, existing controls, and accepted review evidence.
+The lead can verify directly or delegate a bounded assignment.
 
-- **Independent Test Agent Pattern** — for any non-trivial implementation, pair a
-  `qa-tester` with the `implementer`; the tester writes tests from the SPEC /
-  success criteria and NEVER from the code, producing behavioral tests +
-  positive/negative controls + a statement of which bad implementations they
-  reject. The implementer must pass them.
-- **Mutation Challenger Pattern** — before a non-trivial behavior change, dispatch
-  a challenger (no production code) that invents 2-5 plausible bad implementations
-  including the tempting shortcut, and BLOCKS implementation until the named
-  fragile implementation fails at least one behavioral / fixture / contract /
-  architecture / static check.
-- **Outcome Verifier** — after implementation and review, dispatch a verifier that
-  checks the actual user-facing result (run the report/query, call the endpoint,
-  exercise the UI flow, verify the data/sync target), NEVER accepting "tests pass"
-  or "looks correct" as proof.
-- **Completeness Critic** — after the per-lens reviewers report and before
-  declaring the review done, dispatch a generative, blinded critic that surfaces
-  what is MISSING (gaps no lens owned), UNDERSTATED (severity to calibrate up),
-  and MIS-SCOPED within the assigned requirements; classify gaps as causal blockers
-  or adjacent discoveries. Apply the round cap below (2 review rounds;
-  nonblocking leftovers go to `bd create`).
+- **Independent Test Agent** — when independent test writing helps, give the tester
+  the spec and success criteria, including positive and negative controls.
+- **Mutation Challenger** — when a plausible bad implementation is not already
+  rejected by an existing check, ask a challenger to identify that missing check.
+  Block only the implementation that depends on the unresolved oracle.
+- **Outcome Verifier** — verify the actual user-facing result; delegate this when
+  independent verification adds evidence. Passing tests alone is not that result.
+- **Completeness Critic** — use a bounded critic for an unresolved coverage gap,
+  rather than automatically adding another review after other reviewers finish.
+  Classify findings as causal blockers or adjacent discoveries.
+
+Include ordinary verification and mandatory commit hooks in writer assignments,
+along with existing design and task/Jira context. A delegated worker returns a
+missing-context question to its supervisor instead of launching more agents.
 
 See the `dispatching-parallel-agents` skill for the full write-ups, the bad-
 implementation-class checklist, and the dispatch templates.

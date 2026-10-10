@@ -5,7 +5,9 @@ description: "Use when executing implementation plans with independent tasks in 
 
 # Subagent-Driven Development
 
-Execute a plan by dispatching fresh **named team** subagents per task, with two-stage review after each: spec compliance review first, then code quality review.
+Execute the assigned plan with bounded named agents. Verify spec compliance
+and code quality together when one review can cover both; separate review
+rounds are not mandatory.
 
 **Why named agents:** Named subagents can receive follow-up instructions without losing their context. Anonymous subagents are fire-and-forget — if the reviewer finds issues, you have to dispatch an entirely new agent. Named agents allow iterative review loops with the same agent.
 
@@ -14,7 +16,8 @@ Host mechanics used throughout this skill:
 - **Codex:** spawn with `spawn_agent` (`task_name` = the agent's name, `agent_type` = its role, `fork_turns: "none"` for a fresh context, `message` = the prompt) and collect with `wait_agent`. Follow up with `followup_task` to the same task name — the agent keeps its context. A subagent asks you questions with `send_message` to `/root`; answer with `send_message` back to its task name.
 - **Pi:** spawn through the `subagent` tool, e.g. `subagent({ context: "fresh", workflowScript: "return runs.run('impl-task1', { agent: 'worker', task: TASK_TEXT })" })` with the prompt as the task (`worker` implements, `reviewer` checks, Escapement's `adversarial-reviewer` reviews quality). Follow up with `subagent({ action: "resume", id, message })` on the retained run — `subagent({ action: "children.list" })` shows which runs are resumable — or, inside one workflow, `runs.run(key, { resume: previous.runId, task })`. A subagent asks you questions with `contact_supervisor` (reason `need_decision`); answer with `subagent_supervisor({ action: "reply", replyTo, message })`.
 
-**Core principle:** Fresh named subagent per task + two-stage review (spec then quality) = high quality, fast iteration
+**Core principle:** Reuse the approved plan, dispatch concrete assignments,
+and verify their results without repeating satisfied preparation.
 
 ## Assignment contract
 
@@ -172,9 +175,17 @@ Match depth of work to task type. Do not converge on an answer before reaching t
 - **Investigation / multi-file analysis:** 10-20 tool calls
 - **Full implementation with tests:** 20-40 tool calls
 
+## Assignment handoff
+
+Pass the existing design and task/Jira reference to each writer. Ordinary
+verification and mandatory commit hooks are authorized within the assignment.
+Do not require a commit while prohibiting its hooks. Workers return context gaps
+to the lead and do not launch another preparation workflow.
+
 ## Handling Implementer Status
 
-**DONE:** Proceed to spec compliance review.
+**DONE:** Check the handoff against the assigned acceptance criteria. Reuse
+existing review evidence; commission review only for a remaining evidence gap.
 
 **DONE_WITH_CONCERNS:** Read concerns. If about correctness or scope, use a follow-up to address. If observations, note and proceed.
 
@@ -274,19 +285,20 @@ the assigned tasks and outcome are verified, with nonblocking findings reported.
 **Never:**
 - Dispatch agents without `name` (they're anonymous and unaddressable)
 - Start implementation on main/master without explicit user consent
-- Skip reviews (spec compliance OR code quality)
+- Skip verifying spec compliance or code quality
 - Proceed with unresolved causal blockers to the assigned outcome
 - Dispatch multiple implementation subagents in parallel (conflicts)
 - Skip scene-setting context
 - Accept "close enough" on spec compliance
-- **Start code quality review before spec compliance is ✅**
+- Treat separate spec and quality reviewers as mandatory prerequisites
 - **Stop after partial completion** — all assigned tasks must be done, not just some
 - **Summarize remaining work instead of doing it** — that is premature wind-down
 
 ## Integration
 
 **Before starting:**
-- Have a plan. For new features, use `/discovery` to produce a design doc and walking skeleton tasks. For bugs and chores, a task list or notes are sufficient.
+- Reuse the assigned plan or approved design. Discovery is for unresolved design
+  work; implementation authorization does not require restarting it.
 - Work on a feature branch, not main: `git checkout -b <branch-name>`
 
 **Final code review:**
