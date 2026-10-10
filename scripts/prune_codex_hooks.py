@@ -34,6 +34,8 @@ LEGACY_REGISTRATIONS = {
         "statusMessage": "Checking implementation-echo tests",
         "timeout": 30,
         "sha256": {
+            # Changed-assertion scope (escapement #292).
+            "9e576832336223d3a7b1137aa8e8360720c4bedcf74f516251976ad101435167",
             "63b324594a1eb6ab2ebd1902c72e277fb7bfc280c7d6c98b752a7da76f8e511e",
             "1fa43667fbebac9555573729873faf3d269fc68d88f7e680570ef9abdf8ce19e",
         },

@@ -19,7 +19,7 @@ You delegate tasks to specialized **named** agents on a **team**. By precisely c
 
 Named agent teams and beads are complementary — beads tracks *what* to do, teams handle *how* agents coordinate while doing it.
 
-- **Project has `.beads/`:** Use `/beads-execution` for the dispatch loop (`bd ready` → claim → dispatch → review → `bd close`). Agents dispatched by beads-execution MUST still have a `name`.
+- **Project has `.beads/`:** Track the assigned work with `bd`. Invoke `/beads-execution` only when the user explicitly asks to execute a tracked task; repository presence alone does not start that workflow.
 - **No beads:** Use this skill directly. Named agents are the constant regardless of whether beads is present.
 
 ## When to Use
@@ -321,7 +321,7 @@ actual desired outcome and reject known fragile implementations.
 
 ### When to Pair
 
-- **Always pair** for feature/epic work with behavioral specs
+- **Consider pairing** for feature/epic work when independent testing adds evidence
 - **Consider pairing** for complex bug fixes where the fix could mask the root cause
 - **Skip pairing** for simple chores, config changes, one-liners
 
@@ -334,11 +334,11 @@ by construction: a true finding that no lens was pointed at is never *generated*
 so there is nothing for the verifier to refute. A real lean violation can slip
 every seam between the lenses and be caught only by a human afterward.
 
-The completeness critic closes that gap. It is a **generative** stage, not a
-verifying one, and runs as a final agent *after* the per-lens reviewers report but
-*before* you call the review done.
+Use a completeness critic when a concrete coverage gap remains after review.
+It generates missing findings rather than verifying existing ones. It is an
+optional bounded assignment, not another mandatory stage before completion.
 
-**Dispatch it on the same team, blinded to the other reviewers' verdicts** (give it
+**When needed, dispatch it on the same team, blinded to the other reviewers' verdicts** (give it
 the artifact and the list of lenses that ran, not their findings — so it reasons
 about what they *structurally could not have covered*, not just what they happened
 to miss). Its job is three questions:

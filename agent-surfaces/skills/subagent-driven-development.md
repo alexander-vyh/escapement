@@ -321,7 +321,7 @@ without recomputing them merely because the child lacked file tools.
 
 Named agents and beads are complementary — beads tracks *what* to do, naming enables *how* they coordinate.
 
-- **Project has `.beads/`:** Use `/beads-execution` for the dispatch loop (`bd ready` → claim → dispatch → review → `bd close`). Agents dispatched by beads-execution MUST still have a `name`.
+- **Project has `.beads/`:** Track the assigned work with `bd`. Invoke `/beads-execution` only when the user explicitly asks to execute a tracked task; repository presence alone does not start that workflow.
 - **No beads:** Use this skill directly. Named agents are the constant.
 
 ## When to Use
@@ -336,21 +336,18 @@ Named agents and beads are complementary — beads tracks *what* to do, naming e
 
 For each task in the plan:
 
-1. **Dispatch named implementer on the team**
-2. **Handle implementer status** (DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED)
-3. **Dispatch named spec reviewer on the team**
-4. **If in-scope causal blockers:** {{slot:fix_instructions}} fix instructions to implementer (same agent, retains context)
-5. **Dispatch named quality reviewer on the team**
-6. **If in-scope causal blockers:** {{slot:fix_instructions}} fix instructions to implementer
-7. **Mark task complete**
+1. **Dispatch a named implementer** with the existing design, task context,
+   allowed verification and commit hooks, and completion criteria.
+2. **Handle implementer status** (DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED).
+3. **Verify spec compliance and code quality** directly or with one bounded
+   reviewer. Reuse accepted evidence; separate reviewers are optional.
+4. **Repair in-scope causal blockers** using the same implementer and context.
+5. **Mark the task complete** when its assigned outcome is independently verified.
 
 ### After all assigned tasks
 
-Dispatch named final-reviewer on the team for entire implementation.
-
-## Dispatching Named Team Subagents
-
-{{slot:name_mandate}}
+Verify the integrated outcome. Dispatch a final reviewer only for an unresolved
+review gap; accepted task evidence does not require another review round.
 
 ### Implementer dispatch:
 
@@ -464,7 +461,8 @@ the assigned tasks and outcome are verified, with nonblocking findings reported.
 - Work on a feature branch, not main: `git checkout -b <branch-name>`
 
 **Final code review:**
-- After all assigned tasks pass, {{slot:final_diff_review}}, or dispatch an `adversarial-reviewer` agent against the branch as the final gate before merge.
+- Verify the final diff against the assigned outcome. Reuse accepted review
+  evidence; dispatch a bounded reviewer only for a remaining evidence gap.
 
 **Merging:**
 - Push the branch: `git push -u origin <branch-name>`
@@ -472,4 +470,6 @@ the assigned tasks and outcome are verified, with nonblocking findings reported.
 - Merge when CI passes and review is clean.
 
 **With beads:**
-- Use `/beads-execution` which wraps this skill with `bd` status tracking. Named agents are still required.
+- Keep `bd` state aligned with the assigned outcome. An explicit request to
+  execute a tracked task may invoke `/beads-execution`; generic implementation
+  does not restart that workflow.
