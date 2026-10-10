@@ -55,6 +55,15 @@ shared tree:
 3. **Never** `git stash`, `git checkout`, `git clean`, or discard when the tree holds WIP
    you did not write — that destroys another writer's work.
 
+## Completed worktree cleanup
+
+Ignored files are disposable with a delivered, clean, inactive worktree. Before
+finishing, transfer any local config or research the user intends to retain to
+its persistent destination, verify it there, and note what and where in the
+existing Bead. Temporary files need no preservation note or archive. Use
+`escapement-worktree finish` from outside the worktree; keep its delivery,
+dirty-file, ownership, and lock checks.
+
 ## Exemptions (Flexibility)
 
 - **Read-only work** (investigation, review, search) needs no worktree.

@@ -1,6 +1,6 @@
 ---
 name: "beads-worktree"
-description: "Use when creating an isolated worktree or checking Beads task-state resolution inside one. Escapement owns creation policy; Beads remains tracker state."
+description: "Use when creating or completing an isolated worktree, or checking Beads task-state resolution inside one. Escapement owns creation policy; Beads remains tracker state."
 ---
 
 # Beads + Git Worktrees
@@ -43,3 +43,23 @@ and the linked worktree. **Do not run `bd init` inside a worktree.**
    checkout.
 3. If the results differ, stop and investigate the actual Beads/Git layout;
    do not create a new database with `bd init` or remove `.beads/` blindly.
+
+## Completion and handoff
+
+Ignored files are disposable when the worktree is delivered, clean, and inactive.
+If local config or research must survive, transfer it before cleanup: apply config
+in its persistent location, or commit or attach research to the existing Bead.
+Verify the destination and note what changed and where in that Bead, without
+copying credentials. Temporary config, scratch research, caches, and incidental
+snapshots need no note or archive. An unfinished retention handoff remains work
+in progress.
+
+From outside the completed worktree, run:
+
+```bash
+python3 -B <injected-bundled-cli-path> finish --lifecycle-id <id>
+```
+
+The transaction verifies delivery, checks for tracked or nonignored untracked
+changes, and confirms there is no active owner or lock before removal. Ignored contents disappear
+with the checkout; external symlink targets remain intact.

@@ -775,19 +775,63 @@ def test_completed_finish_survives_unavailable_root_remote(tmp_path: Path) -> No
     assert not scenario.receipt.exists()
 
 
-def test_ignored_content_is_preserved(tmp_path: Path) -> None:
+def test_delivered_ignored_content_is_removed_without_following_symlinks(tmp_path: Path) -> None:
     scenario = _scenario(tmp_path)
     _land(scenario)
-    valuable = scenario.worktree / ".worktrees" / "valuable.cache"
-    valuable.parent.mkdir()
-    valuable.write_text("keep\n", encoding="utf-8")
+    temporary = scenario.worktree / ".worktrees" / "temporary" / "nested"
+    temporary.mkdir(parents=True)
+    for name in (".env", "research.md", "jira.json", "cache.db"):
+        (temporary / name).write_text("disposable\n", encoding="utf-8")
+    retained = tmp_path / "retained"
+    retained.mkdir()
+    sentinel = retained / "config.txt"
+    sentinel.write_text("persistent configuration\n", encoding="utf-8")
+    (temporary / "external-directory").symlink_to(retained, target_is_directory=True)
+    (temporary / "external-file").symlink_to(sentinel)
 
     result = _finish(scenario)
 
     assert result.returncode == 0, result.stderr
-    _assert_pending_preserved(scenario, result, "ignored-content")
-    assert valuable.read_text(encoding="utf-8") == "keep\n"
-    assert scenario.receipt.exists()
+    assert json.loads(result.stdout)["status"] == "completed"
+    assert not scenario.worktree.exists()
+    assert str(scenario.worktree) not in git(scenario.primary, "worktree", "list", "--porcelain").stdout
+    assert not scenario.receipt.exists()
+    assert git(scenario.primary, "show-ref", "--verify", "--quiet",
+               f"refs/heads/{scenario.branch}", check=False).returncode == 1
+    assert sentinel.read_text(encoding="utf-8") == "persistent configuration\n"
+    assert sorted(path.name for path in retained.iterdir()) == ["config.txt"]
+
+
+@pytest.mark.parametrize("state,reason", [
+    ("staged", "staged-content"), ("unstaged", "unstaged-content"),
+    ("untracked", "untracked-content"), ("locked", "worktree-locked"),
+    ("active", "worktree-active-process-cwd"), ("unmerged", "github-inspection-failed"),
+])
+def test_ignored_content_does_not_override_preservation(tmp_path: Path, state: str, reason: str) -> None:
+    scenario = _scenario(tmp_path)
+    _land(scenario)
+    temporary = scenario.worktree / ".worktrees" / "cache"
+    temporary.parent.mkdir()
+    temporary.write_text("temporary\n", encoding="utf-8")
+    if state in {"staged", "unstaged"}:
+        (scenario.worktree / "feature.txt").write_text("unfinished\n", encoding="utf-8")
+        if state == "staged":
+            git(scenario.worktree, "add", "feature.txt")
+    elif state == "untracked":
+        (scenario.worktree / "unfinished.txt").write_text("unfinished\n", encoding="utf-8")
+    elif state == "unmerged":
+        (scenario.worktree / "unfinished.txt").write_text("unfinished\n", encoding="utf-8")
+        git(scenario.worktree, "add", "unfinished.txt")
+        git(scenario.worktree, "commit", "-m", "not delivered")
+    elif state == "locked":
+        git(scenario.primary, "worktree", "lock", str(scenario.worktree))
+    elif state == "active":
+        _set_cwd_scan(scenario, cwds=[scenario.primary, temporary.parent])
+
+    result = _finish(scenario)
+
+    _assert_pending_preserved(scenario, result, reason)
+    assert temporary.read_text(encoding="utf-8") == "temporary\n"
 
 
 def test_in_worktree_finish_hands_off_then_external_finish_completes(tmp_path: Path) -> None:
