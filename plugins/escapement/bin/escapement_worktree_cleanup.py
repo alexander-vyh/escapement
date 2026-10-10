@@ -161,13 +161,10 @@ def _status_reason(repo: Path) -> str | None:
         "status",
         "--porcelain=v2",
         "-z",
-        "--ignored=matching",
         "--untracked-files=all",
         "--ignore-submodules=none",
     ).stdout
     for record in (item for item in status.split("\0") if item):
-        if record.startswith("! "):
-            return "ignored-content"
         if record.startswith("? "):
             return "untracked-content"
         if record.startswith(("1 ", "2 ", "u ")):
