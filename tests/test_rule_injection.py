@@ -317,10 +317,10 @@ PINNED_REQUIREMENTS = [
     ("outcome-ownership.md", 'Never make stopping one of the'),
     ("outcome-ownership.md", '### Wind-Down Anti-Patterns (The Silent Killer)'),
     ("outcome-ownership.md", '→ There is no follow-up. You are the follow-up. Do the remaining items NOW.'),
-    ("agent-teams-default.md", '**Always pair** for feature/epic work with behavioral specs'),
-    ("agent-teams-default.md", 'success criteria and NEVER from the code'),
-    ("agent-teams-default.md", 'including the tempting shortcut, and BLOCKS implementation until the named'),
-    ("agent-teams-default.md", 'NEVER accepting "tests pass"'),
+    ("agent-teams-default.md", 'Use these patterns for a concrete evidence gap, not as mandatory preparation'),
+    ("agent-teams-default.md", 'the spec and success criteria, never from the code'),
+    ("agent-teams-default.md", 'Block only the implementation that depends on the unresolved oracle.'),
+    ("agent-teams-default.md", 'Passing tests alone is not that result.'),
     ("agent-teams-default.md", 'do not dispatch execution for them'),
     ("outcome-ownership.md", '**An answered question is done.** Once you hold an answer the user can act on, deliver it'),
     ("research-findings-persistence.md", 'If a file is missing or a stub, **persist the payload the agent returned**; re-dispatch'),
@@ -349,6 +349,9 @@ def test_pinned_requirements_reach_the_session(shipped):
 # scan: "policy suggests always using parallel processing"). Removed on purpose;
 # re-adding one must fail here on every host.
 REMOVED_DIRECTIVES = [
+    "**Always pair** for feature/epic work",
+    "before a non-trivial behavior change, dispatch",
+    "after implementation and review, dispatch a verifier",
     "dispatch agents. This includes research",
     "Everything else should go to agents",
     "instead of dispatching a team",

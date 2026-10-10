@@ -257,7 +257,8 @@ rounds. Reuse the approved design, existing controls, and accepted review eviden
 The lead can verify directly or delegate a bounded assignment.
 
 - **Independent Test Agent** — when independent test writing helps, give the tester
-  the spec and success criteria, including positive and negative controls.
+  the spec and success criteria, never from the code, including positive and
+  negative controls.
 - **Mutation Challenger** — when a plausible bad implementation is not already
   rejected by an existing check, ask a challenger to identify that missing check.
   Block only the implementation that depends on the unresolved oracle.
@@ -286,7 +287,7 @@ reports; it does not re-dispatch itself or its partner.
 
 ### When to Pair
 
-- **Always pair** for feature/epic work with behavioral specs
+- **Consider pairing** for feature/epic work when independent testing adds evidence
 - **Consider pairing** for complex bug fixes where the fix could mask the root cause
 - **Skip pairing** for simple chores, config changes, one-liners
 
