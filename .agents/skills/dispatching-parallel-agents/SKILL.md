@@ -216,6 +216,10 @@ but that is a second line of defense. The first line is you.
 Use agents regularly for independent work, research, testing, and review.
 Every child receives its assigned outcome before dispatch. State the scope and
 allowed effects: repositories, evidence, file ownership, commands, and writes.
+Pass the existing approved design and task/Jira reference, when present. Ordinary
+verification and mandatory commit hooks are included in a writer assignment;
+do not prohibit them and then require a commit. Workers return missing context
+to the lead rather than starting another preparation or agent-dispatch workflow.
 State completion criteria and the handoff to the lead; a completed review or
 research assignment returns findings rather than delivering the parent's build.
 Reviewers report findings and recheck assigned repairs; they do not repair or
@@ -261,7 +265,7 @@ After agents return:
 
 ## Agent Pairing for Quality
 
-When dispatching implementation agents, pair them with independent QA agents that
+When useful, pair implementation agents with independent QA agents that
 work from the success criteria or spec — NOT from the code. The always-on
 `agent-teams-default.md` rule carries one-line summaries of these patterns and
 points here for the full write-ups. The fourth pattern — the **Completeness
@@ -269,7 +273,8 @@ Critic** — has its own section immediately below.
 
 ### Independent Test Agent Pattern
 
-For any non-trivial implementation task, dispatch alongside the implementer:
+Use this pattern when an independent test writer adds evidence not already
+provided by the assigned tests or approved design. It is not a mandatory round:
 
 Codex:
 
@@ -312,8 +317,10 @@ The QA agent must produce:
 
 ### Mutation Challenger Pattern
 
-For non-trivial behavior changes, dispatch a mutation-challenger before
-implementation. The mutation challenger does not write production code.
+A mutation challenger can investigate a specific unresolved weakness in an
+oracle. Existing discriminating controls satisfy this prerequisite; do not
+commission a separate review merely because implementation is starting.
+The mutation challenger does not write production code.
 
 The mutation challenger must:
 1. Read the Test Oracle Brief and proposed tests.
@@ -322,8 +329,8 @@ The mutation challenger must:
 4. For each bad implementation, answer:
    - Would the current tests/checks fail it?
    - If not, what test/check must be strengthened?
-5. Block implementation until the named fragile implementation fails at least
-   one behavioral, fixture, contract, architecture, or static check.
+5. Return concrete missing controls to the lead. Block only the implementation
+   whose correctness depends on that unresolved finding.
 
 Common bad implementation classes:
 - Hardcoded generated IDs instead of semantic business keys
@@ -336,9 +343,9 @@ Common bad implementation classes:
 
 ### Outcome Verifier
 
-After implementation and code review, dispatch an outcome-verifier. The
-outcome-verifier verifies the actual result the user cares about, not just test
-status or code quality.
+Verify the actual result the user cares about after implementation. The lead
+may do this directly or delegate a bounded outcome-verifier assignment. Reuse
+accepted evidence for unchanged inputs; another agent is not a prerequisite.
 
 Examples:
 - Report task: run the report/query and inspect returned rows or metrics

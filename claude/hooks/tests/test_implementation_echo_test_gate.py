@@ -23,6 +23,66 @@ def init_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def test_landing_scans_changed_assertions_not_historical_sha_fixtures(tmp_path):
+    repo = init_repo(tmp_path)
+    def git(*args):
+        subprocess.run(["git", "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.com", *args], cwd=repo,
+                       check=True, capture_output=True)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    source = repo / "src/app.py"
+    test = repo / "tests/test_package.py"
+    fixture_sha = "a1b2c3d4e5f60123456789abcdef0123456789abcd"
+    source.write_text(f"BUILD_SHA = '{fixture_sha}'\n")
+    historical = f"def test_package_contract():\n    assert package.sha == '{fixture_sha}'\n"
+    test.write_text(historical + "    assert package.obsolete == 1\n")
+    git("add", ".")
+    git("commit", "-m", "historical fixtures")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": str(repo),
+               "tool_input": {"command": "git commit -m change"}}
+    # Both files change, but the SHA assertion does not: the Cake regression.
+    source.write_text(source.read_text() + "ENABLED = True\n")
+    test.write_text(historical)
+    for stage in (False, True):
+        if stage:
+            git("add", ".")
+        code, output = run_hook(payload)
+        assert code == 0
+        assert not output or output.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    git("commit", "-m", "remove obsolete contract")
+    code, output = run_hook(payload)
+    assert code == 0
+    assert not output or output.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    git("mv", "tests/test_package.py", "tests/test_renamed_package.py")
+    test = repo / "tests/test_renamed_package.py"
+    code, output = run_hook(payload)
+    assert code == 0
+    assert not output or output.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    # A newly added multiline assertion in that existing function must block.
+    test.write_text(historical + f"    assert (\n        package.other_sha == '{fixture_sha}'\n    )\n")
+    for stage in (False, True):
+        if stage:
+            git("add", ".")
+        assert_denied(*run_hook(payload))
+
+
+def test_removing_outcome_from_existing_mock_test_still_blocks(tmp_path):
+    repo = init_repo(tmp_path)
+    (repo / "tests").mkdir()
+    path = repo / "tests/test_sync.py"
+    original = "def test_sync(client):\n    client.assert_called_once()\n    assert result == 1\n"
+    path.write_text(original)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                    "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+    path.write_text(original.replace("    assert result == 1\n", ""))
+    assert_denied(*run_hook({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": str(repo),
+                            "tool_input": {"command": "git commit -m change"}}))
+
+
 def run_hook(payload: dict) -> tuple[int, dict | None]:
     stdout = io.StringIO()
     with patch("sys.stdin", io.StringIO(json.dumps(payload))):

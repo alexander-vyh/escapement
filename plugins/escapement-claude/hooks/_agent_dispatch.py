@@ -100,3 +100,20 @@ def agent_dispatch(payload: object) -> dict | None:
 def is_subagent_call(payload: object) -> bool:
     """True for a tool call made inside a subagent (Codex sends its agent_id)."""
     return isinstance(payload, dict) and bool(payload.get("agent_id"))
+
+
+def delegated_worker(payload: object) -> bool:
+    """Host identity only, never a prompt or caller-supplied tool argument.
+
+    Codex sends agent_id on child calls. Pi forwards its session header's
+    parentSession. Claude uses the existing CLAUDE_AGENT_ID environment seam.
+    Missing identity is not evidence that a host enforces this boundary.
+    """
+    if not isinstance(payload, dict):
+        return False
+    current_host = host(payload)
+    if current_host == "pi":
+        return bool(payload.get("parent_session"))
+    if current_host == "codex":
+        return bool(payload.get("agent_id"))
+    return bool(payload.get("agent_id") or os.environ.get("CLAUDE_AGENT_ID"))

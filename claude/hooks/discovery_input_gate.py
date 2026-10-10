@@ -18,6 +18,7 @@ assumption that reads only "we will succeed" passes this hook. Content quality i
 the interview's job (brainstorming's forcing check) and the human's job.
 
 Behavior (uniform — no special-cased field, no "ask" path):
+  - Existing substantive committed designs can be updated without rediscovery.
   - `rapid`-schema changes are exempt.
   - Missing problem-framing.md            -> deny
   - Any of the six fields unfilled
@@ -37,6 +38,8 @@ Exit codes:
 """
 
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import NoReturn, Optional
@@ -215,11 +218,52 @@ def written_paths(data: dict) -> list:
     return []
 
 
+def reusable_design(file_path: str) -> bool:
+    """Reuse substantive designs already committed in this checkout's history.
+
+    An untracked/staged draft or committed headings-only stub is not prior work.
+    Git history establishes reuse, not a new agent-authored approval marker.
+    """
+    path = Path(file_path).resolve()
+    if path.name != "design.md":
+        return False
+    try:
+        root = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout.strip()
+        relative = path.relative_to(Path(root).resolve()).as_posix()
+        prior = subprocess.run(
+            ["git", "-C", root, "show", f"HEAD:{relative}"],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    prior = re.sub(r"<!--.*?-->", "", prior, flags=re.DOTALL)
+    for line in prior.splitlines():
+        line = line.strip()
+        if line.startswith(("#", "```", "~~~")):
+            continue
+        body = re.sub(r"^(?:[-*+]|[0-9]+[.)])\s+", "", line)
+        body = body.strip("*_` ")
+        if any(char.isalnum() for char in body) and not _body_is_unfilled(body):
+            return True
+    return False
+
+
 def judge_artifact(hook_event: str, file_path: str, change_dir: str, host: str) -> None:
     """Deny (and exit) unless change_dir holds a filled framing; else record allow."""
     # rapid-schema work is exempt. An unreadable schema fails CLOSED — we treat
     # it as feature/epic and require the framing.
     if read_schema(change_dir) == "rapid":
+        return
+
+    if reusable_design(file_path):
+        _record_signal(
+            gate_name="discovery_input_gate", decision="allow",
+            reason="reuse existing committed design", artifact=Path(file_path).name,
+            change_dir=change_dir,
+        )
         return
 
     framing_path = str(Path(change_dir) / "problem-framing.md")
