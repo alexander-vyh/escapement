@@ -326,9 +326,9 @@ The skill refuses to finalize the breakdown if any of these checks fail. All per
 5. **Epic done-bar present.** The epic must carry its own outcome-format acceptance criterion whose "not when" clause is "not when all child tasks are closed" (or stronger). An epic with no done-bar of its own — only a name and children — fails the check: "Epic '{name}' has no acceptance criterion independent of its children. Add a 'Done when … not when all children closed' bar." (See [Per-Epic Requirements](#per-epic-requirements).)
 6. **Epic scope-coverage gap.** Every seam/scope item named in the epic's source *and in the epic's own description* must map to at least one child task. If a named seam has no covering child: "Epic '{name}' names seam '{seam}' but no task covers it. Add the task or remove it from the epic's scope." This is the check that would have caught `cake-ta5.1`. (See [Per-Epic Requirements](#per-epic-requirements).)
 
-## Lean Review (automatic, feature/epic only)
+## Check the breakdown for waste
 
-Before presenting the breakdown to the user, review the task graph for waste. This is automatic — do not ask permission.
+Before presenting the breakdown, check the task graph for waste yourself.
 
 Checklist:
 - Are any tasks redundant or overlapping?
@@ -337,15 +337,13 @@ Checklist:
 - Is the walking skeleton actually minimal, or has scope crept in?
 - Would a lean practitioner cut anything from this list?
 
-Dispatch this as an isolated subagent so the review carries no anchoring bias from this conversation: `Agent(subagent_type: "personal-lean-advisor")`, prompt it with the breakdown's tasks (title, acceptance criteria, spec-id) plus the checklist above, and revise the breakdown if it finds waste.
-
-The user never sees the lean review unless it changes something — then note: "Lean review trimmed [N] tasks: [brief explanation]."
+Report material simplifications with the breakdown.
 
 Skip this step for rapid-tier work.
 
 ## Termination
 
-After generating the breakdown (and lean review for feature/epic), present it
+After generating the breakdown, present it
 and say: "Here's the breakdown -- {N} tasks across {M} groups. Say 'looks good'
 to create them in beads, or name what to change."
 
@@ -364,7 +362,7 @@ echo '{"kind":"breakdown_complete","extra":{"target":"<change-name>","tasks_gene
 Field definitions:
 - `target`: the change name or design doc topic
 - `tasks_generated`: total number of `bd create` commands executed
-- `tasks_trimmed_by_lean`: number of tasks removed or merged by the lean review (0 if rapid or no changes)
+- `tasks_trimmed_by_lean`: number of tasks removed or merged by the waste check (0 if rapid or no changes)
 - `spec_id_gaps`: number of tasks that had no `--spec-id` traceability (0 in legacy mode where specs don't exist)
 - `wip_warning_triggered`: true if the WIP estimate exceeded 7 and the user was warned
 - `input_mode`: "openspec" if reading from `openspec/changes/`, "legacy" if from `docs/plans/`
