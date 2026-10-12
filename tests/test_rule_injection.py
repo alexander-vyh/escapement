@@ -306,7 +306,7 @@ PINNED_REQUIREMENTS = [
     ("continuation-harness.md", '`permissionDecisionReason` — verbatim in substance'),
     ("continuation-harness.md", 'If you edited a tracked,'),
     ("continuation-harness.md", 'do NOT register a passing parse-check as the contract'),
-    ("continuation-harness.md", 'Don\'t write "I\'ll check back" as prose and end the turn'),
+    ("outcome-ownership.md", 'Prefer updates when state changes'),
     ("tdd-enforcement.md", '(d) a human ack'),
     ("tdd-enforcement.md", '## Behavioral config is not exempt'),
     ("tdd-enforcement.md", 'write the failing test FIRST, run it and confirm it fails *for the right reason*'),

@@ -1,113 +1,6 @@
 ---
 op: subagent-driven-development
 slots:
-  example_workflow:
-    claude: |-
-      ```
-      You: I'm using Subagent-Driven Development to execute this plan.
-
-      [Read delegated plan, select authorized tasks and assignment boundaries]
-
-      Task 1: Hook installation script
-
-      Agent(name="impl-hooks", prompt="[full task text]")
-
-      impl-hooks via SendMessage: "Should hooks install at user or system level?"
-      You: SendMessage(to="impl-hooks", message="User level (~/.config/myapp/hooks/)")
-
-      impl-hooks: DONE — implemented, 5/5 tests passing, committed
-
-      Agent(name="spec-review-hooks", prompt="Review against spec...")
-      spec-review-hooks: ✅ Spec compliant
-
-      Agent(name="quality-review-hooks", subagent_type="adversarial-reviewer", prompt="Review quality...")
-      quality-review-hooks: ✅ Approved
-
-      [Mark Task 1 complete. If beads: bd close <task-id>]
-
-      Task 2: Recovery modes
-
-      Agent(name="impl-recovery", prompt="[full task text]")
-      impl-recovery: DONE — 8/8 tests passing
-
-      Agent(name="spec-review-recovery", prompt="Review against spec...")
-      spec-review-recovery: ❌ Missing progress reporting, extra --json flag
-
-      SendMessage(to="impl-recovery", message="Fix: remove --json, add progress reporting")
-      impl-recovery: Fixed, committed
-
-      # Round 2 of the review round cap (2 review rounds); leftovers -> bd create
-      Agent(name="spec-review-recovery-2", prompt="Re-review...")
-      spec-review-recovery-2: ✅ Spec compliant
-
-      Agent(name="quality-review-recovery", subagent_type="adversarial-reviewer", prompt="Review quality...")
-      quality-review-recovery: Issue: magic number (100)
-
-      SendMessage(to="impl-recovery", message="Extract PROGRESS_INTERVAL constant")
-      impl-recovery: Done, committed
-
-      [Mark Task 2 complete]
-
-      [After all assigned tasks]
-      Agent(name="final-reviewer", subagent_type="adversarial-reviewer", prompt="Final review...")
-      final-reviewer: All requirements met, ready to merge
-
-      Done!
-      ```
-    codex: |-
-      ```
-      You: I'm using Subagent-Driven Development to execute this plan.
-
-      [Read delegated plan, select authorized tasks and assignment boundaries]
-
-      Task 1: Hook installation script
-
-      spawn_agent(task_name="impl_hooks", agent_type="default", fork_turns="none", message="[full task text]")
-
-      impl_hooks → /root: "Should hooks install at user or system level?"
-      You: send_message(target="impl_hooks", message="User level (~/.config/myapp/hooks/)")
-
-      impl_hooks: DONE — implemented, 5/5 tests passing, committed
-
-      spawn_agent(task_name="spec_review_hooks", agent_type="default", fork_turns="none", message="Review against spec...")
-      spec_review_hooks: ✅ Spec compliant
-
-      spawn_agent(task_name="quality_review_hooks", agent_type="adversarial-reviewer", fork_turns="none", message="Review quality...")
-      quality_review_hooks: ✅ Approved
-
-      [Mark Task 1 complete. If beads: bd close <task-id>]
-
-      Task 2: Recovery modes
-
-      spawn_agent(task_name="impl_recovery", agent_type="default", fork_turns="none", message="[full task text]")
-      impl_recovery: DONE — 8/8 tests passing
-
-      spawn_agent(task_name="spec_review_recovery", agent_type="default", fork_turns="none", message="Review against spec...")
-      spec_review_recovery: ❌ Missing progress reporting, extra --json flag
-
-      followup_task(target="impl_recovery", message="Fix: remove --json, add progress reporting")
-      impl_recovery: Fixed, committed
-
-      # Round 2 of the review round cap (2 review rounds); leftovers -> bd create
-      spawn_agent(task_name="spec_review_recovery_2", agent_type="default", fork_turns="none", message="Re-review...")
-      spec_review_recovery_2: ✅ Spec compliant
-
-      spawn_agent(task_name="quality_review_recovery", agent_type="adversarial-reviewer", fork_turns="none", message="Review quality...")
-      quality_review_recovery: Issue: magic number (100)
-
-      followup_task(target="impl_recovery", message="Extract PROGRESS_INTERVAL constant")
-      impl_recovery: Done, committed
-
-      [Mark Task 2 complete]
-
-      [After all assigned tasks]
-      spawn_agent(task_name="final_reviewer", agent_type="adversarial-reviewer", fork_turns="none", message="Final review...")
-      final_reviewer: All requirements met, ready to merge
-
-      Done!
-      ```
-
-      The example uses Codex calls. On Pi the loop is identical: each `spawn_agent` becomes `runs.run(key, { agent, task })` in a `subagent` `workflowScript` (`worker` implementers, `reviewer` spec reviewers, `adversarial-reviewer` quality reviewers), each `followup_task` becomes `subagent({ action: "resume", id, message })`, and an implementer's `contact_supervisor` question is answered with `subagent_supervisor({ action: "reply", replyTo, message })`.
   review_loop_example:
     claude: |-
       ```
@@ -274,9 +167,6 @@ slots:
   reviewer_role_kind:
     claude: "agent type"
     codex: "agent role (Codex `agent_type`, Pi `agent`)"
-  final_diff_review:
-    claude: "run `/code-review` for a diff-level pass"
-    codex: "run a diff-level review pass (Codex: `/review`)"
 targets:
   claude: claude/skills/subagent-driven-development/SKILL.md
   codex: .agents/skills/subagent-driven-development/SKILL.md
@@ -404,10 +294,6 @@ existing review evidence; commission review only for a remaining evidence gap.
 
 **BLOCKED:** Assess: context problem → {{slot:blocked_followup}} more context. Too hard → dispatch new agent with more capable model. Too large → break into pieces. Plan wrong → escalate to user.
 
-## Example Workflow
-
-{{slot:example_workflow}}
-
 ## Continuation Discipline
 
 **For the coordinator (you):**
@@ -436,8 +322,9 @@ the assigned tasks and outcome are verified, with nonblocking findings reported.
 > **CONTINUATION DISCIPLINE:** DO NOT rubber-stamp incomplete work. Read the ACTUAL
 > code, not just the report. Reviewers report findings; they do not repair or implement.
 > Classify causal blockers and adjacent findings; return evidence at completion. If you find issues, report ALL of them — do not stop
-> after finding the first one. Your job is complete when you have verified every
-> requirement against the actual implementation code.
+> after finding the first one. Your job is complete when the assigned review question
+> is answered with evidence. A repair recheck covers the reported defects and behavior
+> affected by the repair; it does not repeat the original full review.
 
 ## Red Flags
 
@@ -460,7 +347,7 @@ the assigned tasks and outcome are verified, with nonblocking findings reported.
   work; implementation authorization does not require restarting it.
 - Work on a feature branch, not main: `git checkout -b <branch-name>`
 
-**Final code review:**
+**Integrated outcome verification:**
 - Verify the final diff against the assigned outcome. Reuse accepted review
   evidence; dispatch a bounded reviewer only for a remaining evidence gap.
 
