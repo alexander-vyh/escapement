@@ -9,8 +9,17 @@ sources remain the workflow-policy authority. Translated events:
 - `tool_result` becomes PostToolUse.
 - `before_agent_start` becomes UserPromptSubmit.
 - `session_start` becomes SessionStart.
-- `agent_end` becomes Stop. A blocking Stop gate continues the run with a
-  follow-up message.
+- omp's `session_stop` becomes Stop for a main session; omp awaits it and
+  continues the run with a blocking Stop gate's reason. On Pi, which has no
+  `session_stop`, `agent_end` becomes Stop and a block continues the run with a
+  follow-up message. omp's own `agent_end` is not awaited and runs no Stop
+  gate, and omp sends no `session_stop` for a subagent: a delegated worker's
+  stop is not gated, and omp itself reminds it to yield and warns its parent.
+
+A Stop block holds a session at most once per unchanged reason and state
+(HEAD, the diff, untracked files, the session's contract and active bead), and
+at most three times per session; past that the stop is allowed with a notice
+and recorded as `stop_livelock_backstop`.
 
 The continuation harness's scheduled wakeup and task-mode re-entry are not
 ported to this host.

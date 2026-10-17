@@ -110,6 +110,7 @@ EXPECTED_SUPPORT_CLAIMS = {
     "code-touch-detection": "partial",
     "codex-code-touch-detection": "unsupported",
     "codex-scheduled-continuation": "unsupported",
+    "pi-stop-gate": "partial",
 }
 EXPECTED_SUPPORT_REASONS = {
     "codex-code-touch-detection": (
@@ -141,6 +142,15 @@ EXPECTED_SUPPORT_REASONS = {
         "Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, "
         "so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses "
         "the shared decision core only while the session is live."
+    ),
+    "pi-stop-gate": (
+        "On omp the stop gates run at a main session's awaited session_stop only: omp "
+        "emits it for no subagent and does not await extension agent_end, so a delegated "
+        "worker's stop is not judged; omp itself reminds a subagent to yield and warns its "
+        "parent when nothing came back. On omp and Pi a stop block holds a session at most "
+        "once per unchanged reason, repository, contract and active-bead state, and at most "
+        "three times per session; past that the stop is allowed with an advisory and "
+        "recorded as stop_livelock_backstop."
     ),
 }
 SUPPORT_CLAIM_SURFACES = (

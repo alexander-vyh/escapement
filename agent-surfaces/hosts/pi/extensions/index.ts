@@ -457,50 +457,84 @@ export default function escapementPi(pi: PiAPI): void {
     return { content: [...content, ...notes.map((text) => ({ type: "text", text }))] };
   });
 
-  // Pi's agent_end is Claude's Stop: the run is over unless something
-  // continues it. Stop gates run once per agent_end with a Claude Stop
-  // payload. A block continues the run with its reason as a follow-up user
-  // message -- Pi continues a run for messages queued during agent_end -- and
-  // the next agent_end in that chain says stop_hook_active, so a gate can let
-  // the session go instead of looping.
+  // A run's end is Claude's Stop: the run is over unless something continues
+  // it. Stop gates run once with a Claude Stop payload; a block's reason
+  // continues the run, and the continued run's end says stop_hook_active, so
+  // a gate can let the session go instead of looping.
+  const runStopGates = (
+    loaded: Runtime,
+    context: { cwd?: unknown; sessionManager?: { getBranch?: () => unknown } } | undefined,
+    stopHookActive: boolean,
+    lastAssistant: unknown,
+    run: unknown,
+    signal?: AbortSignal,
+  ): Promise<DispatcherResponse> => {
+    const sessionId = sessionIdOf(context);
+    return runDispatcher(
+      loaded,
+      loaded.stopGates,
+      {
+        session_id: sessionId,
+        cwd: context?.cwd,
+        hook_event_name: "Stop",
+        stop_hook_active: stopHookActive,
+        last_assistant_message: textOf(lastAssistant),
+        transcript_path: transcriptOf(context, sessionId, run),
+      },
+      signal,
+      context?.cwd,
+    );
+  };
+
+  // omp awaits session_stop before it settles a main session's run, and
+  // continues the run itself with a block's reason (a hidden
+  // session-stop-continuation turn). stop_hook_active is omp's: it is cleared
+  // whenever a stop is allowed, so every new prompt or background-job wake
+  // starts a fresh chain, and the gates bound repeats across chains. omp emits
+  // no session_stop for a subagent: it reminds the subagent to yield and warns
+  // the parent when nothing came back.
+  pi.on("session_stop", async (event, context) => {
+    if (runtime instanceof Error || runtime.stopGates.length === 0) return;
+    let result: DispatcherResponse;
+    try {
+      result = await runStopGates(
+        runtime,
+        context,
+        event?.stop_hook_active === true,
+        event?.last_assistant_message?.content,
+        event?.messages,
+        event?.signal,
+      );
+    } catch (error) {
+      pi.sendMessage(
+        { customType: "escapement", content: `Escapement Pi stop hooks failed: ${error}`, display: true },
+        { deliverAs: "nextTurn" },
+      );
+      return;
+    }
+    // An advisory is shown, never acted on: a next-turn notice continues nothing.
+    surfaceDiagnostics(pi, result, { deliverAs: "nextTurn" });
+    if (result.decision !== "block") return;
+    const reason = result.reason || "Escapement stop hooks blocked this stop";
+    // omp's continuation turn is hidden; this is how the user sees why the run went on.
+    context?.ui?.notify?.(reason, "warning");
+    return { decision: "block", reason };
+  });
+
+  // Pi has no session_stop; its agent_end is the same moment. A block
+  // continues the run with its reason as a follow-up user message -- Pi
+  // continues a run for messages queued during agent_end. omp also emits
+  // agent_end, marked with `willContinue`, without awaiting it: too late to
+  // continue anything, and a second judgement of a stop session_stop judged.
   let stopHookActive = false;
   pi.on("agent_end", async (event, context) => {
     if (runtime instanceof Error || runtime.stopGates.length === 0) return;
+    if (Object.hasOwn(event ?? {}, "willContinue")) return;
     const run = Array.isArray(event?.messages) ? event.messages : [];
-    const sessionId = sessionIdOf(context);
-    // OMP can end a yielded worker with no event messages even though its
-    // final response is already saved on the current branch. Use that same
-    // history as the transcript, never an assistant before a newer user or
-    // a tool-call turn (including text accompanying a tool call).
-    const branch = context?.sessionManager?.getBranch?.();
-    const history = Array.isArray(branch) && branch.length ? branchMessages(branch) : run;
-    const lastSpeech: any = [...history].reverse().find(
-      (message: any) => message?.role === "assistant" || message?.role === "user",
-    );
-    const lastAssistant = lastSpeech?.role === "assistant"
-      && (!lastSpeech.stopReason || lastSpeech.stopReason === "stop")
-      && !(Array.isArray(lastSpeech.content)
-        && lastSpeech.content.some((block: any) => block?.type === "toolCall"))
-      ? lastSpeech : undefined;
+    const lastAssistant = [...run].reverse().find((message) => message?.role === "assistant");
     let result: DispatcherResponse;
     try {
-      result = await runDispatcher(
-        runtime,
-        runtime.stopGates,
-        {
-          session_id: sessionId,
-          cwd: context?.cwd,
-          hook_event_name: "Stop",
-          stop_hook_active: stopHookActive,
-          // Not in Claude's Stop payload: a delegated worker is held to its
-          // delegated scope, not its parent's outcome (escapement-by3e).
-          parent_session: parentSessionOf(context),
-          last_assistant_message: textOf(lastAssistant?.content),
-          transcript_path: transcriptOf(context, sessionId, run),
-        },
-        undefined,
-        context?.cwd,
-      );
+      result = await runStopGates(runtime, context, stopHookActive, lastAssistant?.content, run);
     } catch (error) {
       stopHookActive = false;
       pi.sendMessage(
