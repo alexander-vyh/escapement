@@ -59,7 +59,8 @@
       "post_tool_source_event": "PostToolUse",
       "post_tool_target_event": "tool_result",
       "stop_source_event": "Stop",
-      "stop_target_event": "agent_end"
+      "stop_target_event": "session_stop",
+      "stop_fallback_target_event": "agent_end"
     }
   },
   "support_claims": [
@@ -87,6 +88,11 @@
       "id": "codex-scheduled-continuation",
       "status": "unsupported",
       "reason": "Codex has no scheduled wakeup, task-mode repository binding, or local judge rung, so a Codex session that genuinely ends is not re-entered; its Stop adapter reuses the shared decision core only while the session is live."
+    },
+    {
+      "id": "pi-stop-gate",
+      "status": "partial",
+      "reason": "On omp the stop gates run at a main session's awaited session_stop only: omp emits it for no subagent and does not await extension agent_end, so a delegated worker's stop is not judged; omp itself reminds a subagent to yield and warns its parent when nothing came back. On omp and Pi a stop block holds a session at most once per unchanged reason, repository, contract and active-bead state, and at most three times per session; past that the stop is allowed with an advisory and recorded as stop_livelock_backstop."
     }
   ],
   "mcp_servers": [
@@ -812,10 +818,11 @@
             "tests/test_pi_stop_hook_end_to_end.py::test_pi_undeclared_code_change_continues_the_run_once",
             "tests/test_pi_stop_hook_end_to_end.py::test_pi_following_the_block_releases_the_stop",
             "tests/test_pi_stop_hook_end_to_end.py::test_pi_user_stop_releases_the_session",
-            "tests/test_pi_worker_release_end_to_end.py::test_parent_stop_over_irc_releases_the_worker",
-            "tests/test_pi_worker_release_end_to_end.py::test_worker_that_handed_back_its_work_may_stop",
-            "tests/test_pi_worker_release_end_to_end.py::test_worker_with_no_handoff_blocks_until_the_livelock_backstop",
-            "tests/test_pi_worker_release_end_to_end.py::test_lead_with_unverified_contract_still_blocks"
+            "tests/test_omp_session_stop_end_to_end.py::test_session_stop_holds_an_undeclared_change_once_and_omp_continues_it",
+            "tests/test_omp_session_stop_end_to_end.py::test_a_new_chain_over_unchanged_state_is_not_held_again",
+            "tests/test_omp_session_stop_end_to_end.py::test_each_changed_state_is_held_until_the_session_ceiling",
+            "tests/test_omp_session_stop_end_to_end.py::test_omp_agent_end_runs_no_stop_gate",
+            "tests/test_omp_session_stop_end_to_end.py::test_pi_agent_end_holds_the_same_session_once_per_state"
           ]
         }
       }

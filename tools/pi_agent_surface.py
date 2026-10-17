@@ -234,8 +234,9 @@ def ready_post_tool_gates(manifest: dict[str, Any]) -> dict[str, list[dict[str, 
 def ready_stop_gates(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     """Hooks that judge the end of an agent run.
 
-    The extension runs them once at Pi's `agent_end` with a Stop payload; a
-    block continues the run with the reason as a follow-up user message.
+    The extension runs them once per run end with a Stop payload: at omp's
+    awaited `session_stop`, whose block omp continues itself, or at Pi's
+    `agent_end`, whose block continues as a follow-up user message.
     """
     adapter = manifest["adapters"]["pi"]
     gates: list[dict[str, Any]] = []
@@ -392,10 +393,14 @@ def validate_adapter(manifest: dict[str, Any]) -> list[str]:
         # result content the extension may extend (Pi extension docs).
         "post_tool_source_event": "PostToolUse",
         "post_tool_target_event": "tool_result",
-        # Run end: run as Stop hooks at agent_end; a block continues the run
-        # through pi.sendUserMessage(reason, {deliverAs: "followUp"}).
+        # Run end: run as Stop hooks at omp's awaited session_stop, which
+        # returns {decision: "block", reason} for omp to continue the run; Pi
+        # has no session_stop, so its agent_end continues the run through
+        # pi.sendUserMessage(reason, {deliverAs: "followUp"}). omp's own
+        # agent_end is not awaited and is skipped.
         "stop_source_event": "Stop",
-        "stop_target_event": "agent_end",
+        "stop_target_event": "session_stop",
+        "stop_fallback_target_event": "agent_end",
     }
     errors: list[str] = []
     if manifest.get("adapters", {}).get("pi") != expected:

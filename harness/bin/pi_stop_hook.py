@@ -2,9 +2,10 @@
 """
 Pi Stop adapter over the shared stop-decision core.
 
-The Pi extension runs Stop gates at Pi's `agent_end` with a Claude-shaped Stop
-payload and continues the run with a block's reason as a follow-up user
-message. This adapter is thin, like codex_stop_hook.py: translate the payload
+The Pi extension runs Stop gates with a Claude-shaped Stop payload at omp's
+awaited `session_stop` (omp continues the run with a block's reason) or, on Pi,
+at `agent_end` (the extension continues the run with a follow-up user
+message). This adapter is thin, like codex_stop_hook.py: translate the payload
 into thread state, ask `would_block_stop`, add the same double-keyed wind-down
 rung Codex uses, and word the way forward for Pi.
 
@@ -18,13 +19,9 @@ rungs and the local judge -- the continuation harness, which Pi does not have.
 So no reason here names ScheduleWakeup or a ~/.claude path; every command it
 names is one this Pi package ships.
 
-A delegated worker -- a Pi session whose header names a parent session -- is
-held to its delegated scope, not its parent's outcome: the parent owns the
-outcome and its verification, which delegation forbids the worker to run. So
-for a worker, a block becomes "hand your work back" (end with a message; omp
-delivers it to the parent), the parent's IRC "stop" is its user's release, and
-a run of identical blocks is capped so a gate bug cannot loop a worker without
-bound (escapement-by3e).
+A block is bounded across continuation chains, not only within one: omp clears
+stop_hook_active whenever a stop is allowed, so each new prompt or
+background-job wake would re-block an unchanged session (escapement-b35y).
 
 Fail-open: any internal error allows the stop AND appends an incident record,
 so a gate bug degrades to "no gate", never a stuck session, and is visible.
@@ -33,10 +30,12 @@ stdout carries at most the single decision JSON.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
 import shlex
+import subprocess
 import sys
 import time
 
@@ -68,10 +67,6 @@ _EXPLANATIONS = {
         "the declared verify command exited 0 but neuters itself (`|| true`, a bare "
         "`true`, `--no-verify`, `SKIP=`), so re-running it will not release this gate."
     ),
-    "worker_no_handoff": (
-        "this delegated worker changed work but ended with no message, so its "
-        "parent has nothing to read about what it produced."
-    ),
     "winddown_claim_work_remains": (
         "your last message says the work is done, but {cwd} still has git residue "
         "(modified tracked files, unpushed commits, or an upstream-gone branch)."
@@ -89,13 +84,6 @@ def resumption(reason: str, session_id: str, cwd: str) -> str:
     derive = f"{env} python3 {shlex.quote(str(BIN / 'derive_contract.py'))} --bead <id>"
     verify = f"{env} bash {shlex.quote(str(BIN / 'verify'))}"
     explanation = _EXPLANATIONS.get(reason, "this turn ends with unproven work.").format(cwd=cwd or "the cwd")
-    if reason == "worker_no_handoff":
-        return (
-            f"Escapement stop gate ({reason}): {explanation} End your turn with a "
-            "message naming what you produced and where it is persisted -- omp "
-            "delivers your last message to your parent, which owns verifying the "
-            "outcome; or your parent can release you by sending 'stop'."
-        )
     if reason == "winddown_claim_work_remains":
         ways = (
             "(1) commit and push the remaining tracked changes, or clean them up "
@@ -148,36 +136,84 @@ def last_user_text(transcript_path: object) -> str | None:
     return None
 
 
-# A worker held this many times in a row for the same reason is let go: the cap
-# turns a gate bug into one recorded livelock signal, not unbounded spend.
-WORKER_BACKSTOP_BLOCKS = 3
+# A gate that blocks the same unchanged state again is a loop, not a check: omp
+# clears stop_hook_active whenever a stop is allowed, so every new prompt or
+# background-job wake asks again. Each (reason, state) blocks at most once per
+# session, and a session is blocked at most this many times; past either, the
+# stop is allowed with an advisory and recorded as a livelock.
+STOP_BLOCK_CEILING = 3
+# Untracked files hashed by name, size and mtime; a tree with more is still
+# fingerprinted by HEAD, the tracked diff and the first this many.
+_UNTRACKED_LIMIT = 5000
+# The whole worktree, less .beads/: the task store and the gate-signal corpus
+# this very decision appends to are not work the agent did.
+_WORKTREE = ("--", ":(top)", ":(top,exclude).beads")
 
 
-def worker_scope(decision: str, reason: str, handoff: object) -> tuple[str, str]:
-    """A worker's block, judged by its delegated scope: did it hand anything back."""
-    if decision != "block":
-        return decision, reason
-    if isinstance(handoff, str) and handoff.strip():
-        return "allow", "worker_handed_off"
-    return "block", "worker_no_handoff"
+def state_fingerprint(thread_dir: pathlib.Path, cwd: str) -> str:
+    """What the agent can change to answer a block: the repository's working
+    state (HEAD, the diff against it, untracked files) and this session's
+    contract and active bead."""
+    digest = hashlib.sha256()
+    env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+
+    def git(*args: str) -> bytes:
+        try:
+            return subprocess.run(
+                ["git", *args], cwd=cwd or None, env=env, capture_output=True, timeout=10, check=False
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return b""
+
+    for args in (("rev-parse", "HEAD"), ("diff", "HEAD", "--no-ext-diff", "--binary", *_WORKTREE)):
+        digest.update(git(*args) + b"\0")
+    untracked = [
+        name for name in git("ls-files", "--others", "--exclude-standard", "-z", *_WORKTREE).split(b"\0") if name
+    ]
+    for name in untracked[:_UNTRACKED_LIMIT]:
+        try:
+            stat = (pathlib.Path(cwd or ".") / os.fsdecode(name)).stat()
+            digest.update(name + f":{stat.st_size}:{stat.st_mtime_ns}\0".encode())
+        except OSError:
+            digest.update(name + b":gone\0")
+    for name in ("contract.json", "active_bead.json"):
+        try:
+            stat = (thread_dir / name).stat()
+            digest.update(f"{name}:{stat.st_size}:{stat.st_mtime_ns}\0".encode())
+        except OSError:
+            digest.update(f"{name}:absent\0".encode())
+    return digest.hexdigest()
 
 
-def worker_backstop(thread_dir: pathlib.Path, decision: str, reason: str) -> tuple[str, str]:
-    """Count a worker's consecutive identical blocks; past the cap, allow."""
-    path = thread_dir / "worker_stop_blocks.json"
-    if decision != "block":
-        path.unlink(missing_ok=True)
-        return decision, reason
+def spent_budget(thread_dir: pathlib.Path, reason: str, cwd: str) -> str | None:
+    """Why this block may not stand ("unchanged" or "ceiling"), or None after
+    counting it against the session's budget."""
+    path = thread_dir / "stop_blocks.json"
     try:
-        prior = json.loads(path.read_text(encoding="utf-8"))
+        held = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        prior = {}
-    count = prior.get("count", 0) + 1 if isinstance(prior, dict) and prior.get("reason") == reason else 1
-    if count > WORKER_BACKSTOP_BLOCKS:
-        path.unlink(missing_ok=True)
-        return "allow", "worker_livelock_backstop"
-    path.write_text(json.dumps({"reason": reason, "count": count}), encoding="utf-8")
-    return decision, reason
+        held = []
+    held = held if isinstance(held, list) else []
+    key = [reason, state_fingerprint(thread_dir, cwd)]
+    if key in held:
+        return "unchanged"
+    if len(held) >= STOP_BLOCK_CEILING:
+        return "ceiling"
+    path.write_text(json.dumps([*held, key]), encoding="utf-8")
+    return None
+
+
+def livelock_advisory(held_for: str, spent: str, cwd: str) -> str:
+    """The allowed stop's notice: which block was withheld, and what is still open."""
+    why = (
+        "it already blocked this session with the repository, contract and bead unchanged"
+        if spent == "unchanged"
+        else f"it already blocked this session {STOP_BLOCK_CEILING} times"
+    )
+    explanation = _EXPLANATIONS.get(held_for, "this turn ends with unproven work.").format(cwd=cwd or "the cwd")
+    return f"Escapement stop gate ({held_for}): not blocking again -- {why}. Still unresolved: {explanation}"
+
+
 
 
 def _log_incident(record: dict) -> None:
@@ -234,20 +270,15 @@ def main() -> int:
         if decision == "allow" and reason == "conversational":
             if is_completion_claim(payload.get("last_assistant_message")) and git_work_remains(cwd):
                 decision, reason = "block", "winddown_claim_work_remains"
-        if payload.get("parent_session"):
-            decision, reason = worker_scope(decision, reason, payload.get("last_assistant_message"))
-            held_for = reason
-            decision, reason = worker_backstop(thread_dir, decision, reason)
-        record = {
-            "decision": decision,
-            "reason": reason,
-            "session_id": session_id,
-            "payload_keys": sorted(payload.keys()),
-        }
-        if reason == "worker_livelock_backstop":
-            record["held_for"] = held_for
+        record = {"decision": decision, "reason": reason, "session_id": session_id}
+        spent = spent_budget(thread_dir, reason, cwd) if decision == "block" else None
+        if spent:
+            record.update(decision="allow", reason="stop_livelock_backstop", held_for=reason, budget=spent)
+        record["payload_keys"] = sorted(payload.keys())
         _log_incident(record)
-        if decision == "block":
+        if spent:
+            print(json.dumps({"systemMessage": livelock_advisory(reason, spent, cwd)}))
+        elif decision == "block":
             print(json.dumps({"decision": "block", "reason": resumption(reason, session_id, cwd)}))
         return 0
     except Exception as exc:  # noqa: BLE001 -- fail-open with signal

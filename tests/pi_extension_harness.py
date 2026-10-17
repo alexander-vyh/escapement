@@ -43,8 +43,10 @@ for (const call of JSON.parse(process.argv[3])) {
       getBranch() { return branch; },
       getHeader() { return call.header; },
     },
-    ui: { notify() {} },
+    ui: { notify(message, type) { sent.push({ kind: "notify", text: String(message), type }); } },
   };
+  // JSON has no undefined; omp sends keys whose value is undefined.
+  for (const key of call.undefinedKeys ?? []) call.payload[key] = undefined;
   const before = sent.length;
   const result = (await handlers.get(call.event)(call.payload, context)) ?? null;
   results.push({ result, sent: sent.slice(before) });
@@ -153,23 +155,6 @@ class Session:
             "display": True, "timestamp": "2026-10-07T23:20:42.047Z",
         })
 
-    def irc(self, sender: str, text: str, from_parent: bool) -> None:
-        """An omp IRC delivery, as the session file records it: a custom_message
-        entry, not a user message; `fromParent` marks the sender as this
-        session's parent."""
-        details = {"id": uuid.uuid4().hex[:16], "from": sender, "message": text}
-        if from_parent:
-            details["fromParent"] = True
-        self.branch.append({
-            "type": "custom_message",
-            "customType": "irc:incoming",
-            "content": f"<irc>\nIncoming IRC message from agent `{sender}`:\n\n{text}\n</irc>",
-            "display": True,
-            "details": details,
-            "attribution": "agent",
-            "timestamp": 1791415164493,  # omp stamps IRC with Date.now()
-        })
-
     def say(self, text: str) -> dict:
         message = {"role": "assistant", "content": [{"type": "text", "text": text}], "stopReason": "stop", "timestamp": 2}
         self.branch.append(message)
@@ -197,7 +182,30 @@ class Session:
         return event
 
     def agent_end(self) -> dict:
+        """Pi's agent_end: the run's messages and nothing else."""
         return self._event("agent_end", {"type": "agent_end", "messages": list(self.branch)})
+
+    def omp_agent_end(self) -> dict:
+        """omp's agent_end, which omp does not await: it always carries
+        `willContinue`, undefined when the run is over."""
+        event = self._event("agent_end", {"type": "agent_end", "messages": list(self.branch)})
+        event["undefinedKeys"] = ["willContinue"]
+        return event
+
+    def session_stop(self, stop_hook_active: bool = False) -> dict:
+        """omp's awaited end-of-run hook, sent for a main session only.
+        stop_hook_active is omp's own: set after a block, cleared once a stop
+        is allowed."""
+        last = next((m for m in reversed(self.branch) if m.get("role") == "assistant"), None)
+        return self._event("session_stop", {
+            "type": "session_stop",
+            "messages": [m for m in self.branch if "role" in m],
+            "turn_id": 0,
+            "last_assistant_message": last,
+            "session_id": self.id,
+            "session_file": f"/sessions/{self.id}.jsonl",
+            "stop_hook_active": stop_hook_active,
+        })
 
     def prompt(self, text: str) -> dict:
         return self._event("before_agent_start", {"type": "before_agent_start", "prompt": text, "systemPrompt": "BASE PROMPT"})

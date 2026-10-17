@@ -187,10 +187,9 @@ EXPECTED_TS_FUNCTIONS = {
     # Bash tool already declares. It reads no command text and decides nothing;
     # resolving a `cd` prefix stays in the dispatcher.
     "cwdOf",
-    # Transcript and host identity (escapement-by3e): a worker's parent speaks
-    # over IRC, which the transcript must carry as the user it is; and the
-    # session header's parentSession is forwarded so pi_stop_hook -- not the
-    # bridge -- decides what a delegated worker owes.
+    # Transcript and host identity: a session branch as Pi's own context
+    # builds it, and the session header's parentSession, forwarded so
+    # bounded-child dispatch gates -- not the bridge -- know a delegated child.
     "branchMessages",
     "parentSessionOf",
 }
@@ -255,9 +254,8 @@ def _assert_thin_pi_extension(source: str) -> None:
         '"text"',
         '"message"',
         '"assistant"',
-        '"user"',
-        '"stop"',
-        '"toolCall"',
+        '"warning"',
+        '"willContinue"',
         '"block"',
         '"escapement"',
         '"followUp"',
@@ -265,11 +263,18 @@ def _assert_thin_pi_extension(source: str) -> None:
         '""',
         '"\\n\\n"',
     }
-    for event in ("before_agent_start", "session_start", "tool_result", "agent_end", "session_shutdown"):
+    handlers = {
         # A one-line handler has no closing `});` line; the entry function's
         # own closing brace bounds it, so a sibling module is never read as
         # part of the last handler.
-        handler = source.split(f'pi.on("{event}"', 1)[1].split("\n  });\n", 1)[0].split("\n}\n", 1)[0]
+        event: source.split(f'pi.on("{event}"', 1)[1].split("\n  });\n", 1)[0].split("\n}\n", 1)[0]
+        for event in (
+            "before_agent_start", "session_start", "tool_result", "session_stop", "agent_end", "session_shutdown",
+        )
+    }
+    # Both stop handlers build their payload in one shared closure.
+    handlers["runStopGates"] = source.split("const runStopGates", 1)[1].split("\n  };\n", 1)[0]
+    for event, handler in handlers.items():
         for literal in re.findall(r'`[^`]*`|"(?:[^"\\\\]|\\\\.)*"', handler):
             assert literal in allowed_literals, (
                 f"{event} handler adds text of its own: {literal}. "
@@ -476,6 +481,16 @@ def test_pi_architecture_check_rejects_selective_typescript_policy() -> None:
             "    surfaceDiagnostics(pi, result, { triggerTurn: false });\n    stopHookActive =",
             '    pi.sendUserMessage("Pi-only policy: summarize before stopping", { deliverAs: "followUp" });\n'
             "    surfaceDiagnostics(pi, result, { triggerTurn: false });\n    stopHookActive =",
+        ),
+        "session_stop prose": _mutate(
+            source,
+            '    return { decision: "block", reason };',
+            '    return { decision: "block", reason: `${reason}\\n\\nPi-only policy: summarize before stopping` };',
+        ),
+        "stop payload prose": _mutate(
+            source,
+            "        last_assistant_message: textOf(lastAssistant),",
+            '        last_assistant_message: `${textOf(lastAssistant)} (Pi-only policy: never stop early)`,',
         ),
         # payloads.ts is scanned like index.ts: a sibling module is no hiding place.
         "inspection in the payload module": _mutate(
