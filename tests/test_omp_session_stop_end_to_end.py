@@ -30,11 +30,11 @@ def plugin(tmp_path_factory) -> Path:
     return rendered_plugin(tmp_path_factory)
 
 
-def _write(repo: Path, session: Session, text: str) -> None:
-    write = {"path": str(repo / "src" / "app.py"), "content": text}
+def _write(repo: Path, session: Session, text: str, name: str = "src/app.py") -> None:
+    write = {"path": str(repo / name), "content": text}
     session.tool_call("write", write)
-    (repo / "src" / "app.py").write_text(text, encoding="utf-8")
-    session.tool_result("write", write, "Wrote src/app.py")
+    (repo / name).write_text(text, encoding="utf-8")
+    session.tool_result("write", write, f"Wrote {name}")
 
 
 def _changed_code(tmp_path: Path, parent: str | None = None) -> tuple[Path, Session]:
@@ -85,16 +85,22 @@ def test_session_stop_holds_an_undeclared_change_once_and_omp_continues_it(plugi
     assert _decisions(repo) == [("block", "no_declaration")]
 
 
-@pytest.mark.parametrize("source", ["new prompt", "background wake"])
+@pytest.mark.parametrize("source", ["new prompt", "new prompt after a tool wrote its own file", "background wake"])
 def test_a_new_chain_over_unchanged_state_is_not_held_again(plugin, tmp_path, source):
     repo, session = _changed_code(tmp_path)
     env = pi_env(tmp_path)
     first, continued = run(plugin, [session.session_stop(), session.session_stop(stop_hook_active=True)], env)
     assert _held(first) and _held(continued) is None
-    if source == "new prompt":
-        session.user("what does VALUE control?")
-    else:
+    if source == "background wake":
         session.notice("async-result", "<system-notice>\n1 background job has completed.\n</system-notice>")
+    else:
+        session.user("what does VALUE control?")
+    if source == "new prompt after a tool wrote its own file":
+        # Observed live: at the next session start an MCP server created its
+        # project file and Escapement's bootstrap its repo declaration. Neither
+        # is the agent's work, so neither answers the block.
+        (repo / ".serena").mkdir()
+        (repo / ".serena" / "project.yml").write_text("project_name: project\n", encoding="utf-8")
     session.say("VALUE sets the app's value.")
 
     # omp cleared stop_hook_active when it allowed the last stop.
@@ -110,16 +116,17 @@ def test_a_new_chain_over_unchanged_state_is_not_held_again(plugin, tmp_path, so
 
 def test_each_changed_state_is_held_until_the_session_ceiling(plugin, tmp_path):
     """Positive control: the bound is per state, not one block per session --
-    a session that keeps changing code is held again, up to a ceiling."""
+    a session that keeps changing code is held again, up to a ceiling. The
+    later changes are to a file the session created, which git does not track."""
     repo, session = _changed_code(tmp_path)
     env = pi_env(tmp_path)
 
     held = []
     for value in (2, 3, 4, 5):
         if value > 2:
-            session.user(f"now make it {value}")
-            _write(repo, session, f"VALUE = {value}\n")
-            session.say(f"VALUE now reads {value}.")
+            session.user(f"now add feature {value}")
+            _write(repo, session, f"FEATURE = {value}\n", "src/feature.py")
+            session.say(f"FEATURE now reads {value}.")
         stop, continued = run(plugin, [session.session_stop(), session.session_stop(stop_hook_active=True)], env)
         held.append(_held(stop) is not None)
         assert _held(continued) is None
