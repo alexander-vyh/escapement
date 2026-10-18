@@ -17,9 +17,9 @@ sources remain the workflow-policy authority. Translated events:
   stop is not gated, and omp itself reminds it to yield and warns its parent.
 
 A Stop block holds a session at most once per unchanged reason and state
-(HEAD, the diff, untracked files, the session's contract and active bead), and
-at most three times per session; past that the stop is allowed with a notice
-and recorded as `stop_livelock_backstop`.
+(HEAD, the tracked diff, untracked files the session itself wrote, the
+session's contract and active bead), and at most three times per session; past
+that the stop is allowed with a notice and recorded as `stop_livelock_backstop`.
 
 The continuation harness's scheduled wakeup and task-mode re-entry are not
 ported to this host.

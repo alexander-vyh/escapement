@@ -45,6 +45,7 @@ sys.path.insert(0, str(BIN))
 # Absence of the vendored core is a packaging failure; it must land on the same
 # fail-open-with-a-record path as every other error rather than crash on import.
 try:
+    from code_touch import written_paths
     from codex_stop_hook import git_work_remains, is_completion_claim
     from gate_signal_bridge import record_gate_signal
     from would_block_stop import harness_home, load_thread_state, thread_dir_for_session, would_block_stop
@@ -142,20 +143,22 @@ def last_user_text(transcript_path: object) -> str | None:
 # session, and a session is blocked at most this many times; past either, the
 # stop is allowed with an advisory and recorded as a livelock.
 STOP_BLOCK_CEILING = 3
-# Untracked files hashed by name, size and mtime; a tree with more is still
-# fingerprinted by HEAD, the tracked diff and the first this many.
-_UNTRACKED_LIMIT = 5000
 # The whole worktree, less .beads/: the task store and the gate-signal corpus
 # this very decision appends to are not work the agent did.
 _WORKTREE = ("--", ":(top)", ":(top,exclude).beads")
 
 
-def state_fingerprint(thread_dir: pathlib.Path, cwd: str) -> str:
-    """What the agent can change to answer a block: the repository's working
-    state (HEAD, the diff against it, untracked files) and this session's
-    contract and active bead."""
+def state_fingerprint(thread_dir: pathlib.Path, cwd: str, transcript_path: object) -> str:
+    """What the agent can change to answer a block: HEAD, the tracked diff
+    against it, the untracked files this session wrote (by content), and this
+    session's contract and active bead.
+
+    Untracked files nobody in this session wrote are left out: tools create
+    their own as a session starts (an MCP server's project file, Escapement's
+    repository declaration), and those are no answer to a block."""
     digest = hashlib.sha256()
     env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+    root = pathlib.Path(cwd or ".")
 
     def git(*args: str) -> bytes:
         try:
@@ -167,15 +170,18 @@ def state_fingerprint(thread_dir: pathlib.Path, cwd: str) -> str:
 
     for args in (("rev-parse", "HEAD"), ("diff", "HEAD", "--no-ext-diff", "--binary", *_WORKTREE)):
         digest.update(git(*args) + b"\0")
-    untracked = [
-        name for name in git("ls-files", "--others", "--exclude-standard", "-z", *_WORKTREE).split(b"\0") if name
-    ]
-    for name in untracked[:_UNTRACKED_LIMIT]:
+    untracked = {
+        (root / os.fsdecode(name)).resolve()
+        for name in git("ls-files", "--others", "--exclude-standard", "-z", *_WORKTREE).split(b"\0")
+        if name
+    }
+    written = transcript_path if isinstance(transcript_path, str) else None
+    for path in sorted({(root / name).resolve() for name in written_paths(written)} & untracked):
         try:
-            stat = (pathlib.Path(cwd or ".") / os.fsdecode(name)).stat()
-            digest.update(name + f":{stat.st_size}:{stat.st_mtime_ns}\0".encode())
+            content = hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:
-            digest.update(name + b":gone\0")
+            content = "gone"
+        digest.update(f"{path}:{content}\0".encode())
     for name in ("contract.json", "active_bead.json"):
         try:
             stat = (thread_dir / name).stat()
@@ -185,7 +191,7 @@ def state_fingerprint(thread_dir: pathlib.Path, cwd: str) -> str:
     return digest.hexdigest()
 
 
-def spent_budget(thread_dir: pathlib.Path, reason: str, cwd: str) -> str | None:
+def spent_budget(thread_dir: pathlib.Path, reason: str, cwd: str, transcript_path: object) -> str | None:
     """Why this block may not stand ("unchanged" or "ceiling"), or None after
     counting it against the session's budget."""
     path = thread_dir / "stop_blocks.json"
@@ -194,7 +200,7 @@ def spent_budget(thread_dir: pathlib.Path, reason: str, cwd: str) -> str | None:
     except (OSError, ValueError):
         held = []
     held = held if isinstance(held, list) else []
-    key = [reason, state_fingerprint(thread_dir, cwd)]
+    key = [reason, state_fingerprint(thread_dir, cwd, transcript_path)]
     if key in held:
         return "unchanged"
     if len(held) >= STOP_BLOCK_CEILING:
@@ -271,7 +277,7 @@ def main() -> int:
             if is_completion_claim(payload.get("last_assistant_message")) and git_work_remains(cwd):
                 decision, reason = "block", "winddown_claim_work_remains"
         record = {"decision": decision, "reason": reason, "session_id": session_id}
-        spent = spent_budget(thread_dir, reason, cwd) if decision == "block" else None
+        spent = spent_budget(thread_dir, reason, cwd, transcript_path) if decision == "block" else None
         if spent:
             record.update(decision="allow", reason="stop_livelock_backstop", held_for=reason, budget=spent)
         record["payload_keys"] = sorted(payload.keys())
