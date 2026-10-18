@@ -3,7 +3,7 @@
 // call; the hooks behind the dispatcher do.
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -78,6 +78,7 @@ export function cwdOf(event: unknown, context: unknown): unknown {
 //   read {path, offset?, limit?}             -> Read {file_path, offset?, limit?}
 //   write {path, content}                    -> Write {file_path, content}
 //   edit {path, edits: [{oldText, newText}]} -> Edit {file_path, old_string, new_string}
+//   edit {input: "[path#TAG]\nPUT ..."} (omp) -> Edit per file (claudeToolCalls)
 //   subagent {agent, task?}                  -> Agent {name, subagent_type, description, prompt}
 //   mcp {tool, server?, args?}               -> mcp__<server>__<tool> with args as input
 //   <server>_<tool> {...args}                -> <server>_<tool> with args as input
@@ -137,21 +138,8 @@ export function claudeToolCall(toolName: unknown, input: unknown): ClaudeToolCal
   }
 
   if (toolName !== "read" && toolName !== "write" && toolName !== "edit") return null;
-  let path = args.path;
-  if (typeof path !== "string" || path.length === 0) return null;
-  // omp's file tools also take its internal URIs (xd://github, local://x.md,
-  // artifact://3). Those name no file on disk, so no file gate applies to
-  // them -- judged as paths they resolved to `<repo>/xd:/github` and a
-  // harmless tool-device write was denied in the primary checkout. A file://
-  // URI names a file and maps to its path.
-  if (URI_SCHEME.test(path)) {
-    if (path.slice(0, 7).toLowerCase() !== "file://") return null;
-    try {
-      path = fileURLToPath(path);
-    } catch {
-      return null;
-    }
-  }
+  const path = diskPath(args.path);
+  if (path === null) return null;
 
   if (toolName === "read") {
     const toolInput: Record<string, unknown> = { file_path: path };
@@ -192,6 +180,115 @@ export function claudeToolCall(toolName: unknown, input: unknown): ClaudeToolCal
   };
 }
 
+// The file a file tool's path names, or null when it names none. omp's file
+// tools also take its internal URIs (xd://github, local://x.md, artifact://3).
+// Those name no file on disk, so no file gate applies to them -- judged as
+// paths they resolved to `<repo>/xd:/github` and a harmless tool-device write
+// was denied in the primary checkout. A file:// URI names a file. Pi and omp
+// expand a leading `~` to the home directory; judged as written, `~/notes.md`
+// resolved into the session's checkout.
+function diskPath(path: unknown): string | null {
+  if (typeof path !== "string" || path.length === 0) return null;
+  if (URI_SCHEME.test(path)) {
+    if (path.slice(0, 7).toLowerCase() !== "file://") return null;
+    try {
+      return fileURLToPath(path);
+    } catch {
+      return null;
+    }
+  }
+  if (path === "~") return homedir();
+  return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+}
+
+// omp's default edit tool (edit.mode "hashline") sends one string that may
+// change several files, optionally inside `*** Begin Patch` / `*** End Patch`:
+//   [src/app.py#1A2B]   a file, by path and snapshot tag
+//   PUT 5.=7:           replace lines 5-7 with the `+` rows that follow
+//   PUT >9:  PUT <9:    insert the rows after / before line 9
+//   CUT 3.=4            delete lines 3-4
+//   MV src/main.py      rename the file;  REM  delete it
+// A path drops its tag and quotes as omp's own reader does
+// (packages/tui/src/tools/hashline-format.ts and the edit renderer).
+const HASHLINE_TAG = /#[0-9a-fA-F]{4}$/;
+
+function hashlinePath(raw: string): string {
+  const path = raw.trim().replace(HASHLINE_TAG, "");
+  const quote = path[0];
+  return path.length >= 2 && (quote === '"' || quote === "'") && path.endsWith(quote) ? path.slice(1, -1) : path;
+}
+
+// Each edited file is one Claude Edit, and a rename's target is another, so a
+// file gate judges every file the call writes. The call names replaced lines by
+// number, not text: old_string holds one empty line per line removed and
+// new_string the rows added, which a gate counting lines projects exactly. An
+// operation the call does not size -- a block (`N*`), or a paste of lines an
+// earlier CUT captured -- counts as no change. A deletion maps to nothing, as
+// Claude's `rm` reaches no file gate. omp's other edit modes (apply_patch,
+// sloppy) send `*** <verb> File:` lines this reading does not cover: null.
+function hashlineCalls(text: string): ClaudeToolCall[] | null {
+  const files: { path: string; edited: boolean; removed: number; rows: string[]; rename?: string }[] = [];
+  let file: (typeof files)[number] | undefined;
+  // What the `+` rows under the current PUT are: none, an insert or sized
+  // replacement, or the body of an unsized one (each row also replaces one).
+  let rows: "none" | "added" | "replaced" = "none";
+  for (const raw of (text.startsWith("\uFEFF") ? text.slice(1) : text).split("\n")) {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    const header = line.trimEnd();
+    if (header.startsWith("[")) {
+      const path = hashlinePath(header.slice(1, header.endsWith("]") ? -1 : undefined));
+      if (path.length > 0) {
+        file = { path, edited: false, removed: 0, rows: [] };
+        files.push(file);
+        rows = "none";
+        continue;
+      }
+    }
+    const op = line.trim();
+    if (op.startsWith("***") && op !== "*** Begin Patch" && op !== "*** End Patch") return null;
+    if (file === undefined) continue;
+    if (rows !== "none" && line.startsWith("+")) {
+      file.rows.push(line.slice(1));
+      if (rows === "replaced") file.removed += 1;
+      continue;
+    }
+    rows = "none";
+    const [verb, target = ""] = op.split(/\s+/);
+    if (verb === "MV") file.rename = hashlinePath(op.slice(2));
+    if (verb !== "PUT" && verb !== "CUT") continue;
+    file.edited = true;
+    const body = verb === "PUT" && target.endsWith(":");
+    const spot = body ? target.slice(0, -1) : target;
+    const [from, to = from] = spot.split(".=");
+    const sized = spot.startsWith("<") || spot.startsWith(">") ? 0
+      : from !== "" && to !== "" && Number.isInteger(Number(from)) && Number.isInteger(Number(to))
+        ? Math.max(Number(to) - Number(from) + 1, 0)
+        : undefined;
+    if (verb === "CUT") file.removed += sized ?? 0;
+    else if (body) {
+      file.removed += sized ?? 0;
+      rows = sized === undefined ? "replaced" : "added";
+    }
+  }
+  const calls: ClaudeToolCall[] = [];
+  for (const { path, edited, removed, rows: added, rename } of files) {
+    const edit = diskPath(path);
+    if (edited && edit !== null) {
+      calls.push({
+        tool_name: "Edit",
+        tool_input: {
+          file_path: edit,
+          old_string: "\n".repeat(removed),
+          new_string: added.map((row) => `${row}\n`).join(""),
+        },
+      });
+    }
+    const moved = rename === undefined ? null : diskPath(rename);
+    if (moved !== null) calls.push({ tool_name: "Edit", tool_input: { file_path: moved, old_string: "", new_string: "" } });
+  }
+  return calls;
+}
+
 // A workflowScript launches its children as runs.run(key, {agent, task}) or
 // runs.all([{key, agent, task}, ...]) inside JavaScript. Each literal `agent:`
 // it names is one child dispatch, judged like a one-child call with the script
@@ -211,6 +308,7 @@ const SCRIPT_API: Record<string, true> = { call: true, search: true, describe: t
 export function claudeToolCalls(toolName: unknown, input: unknown): ClaudeToolCall[] | null {
   const args: Record<string, unknown> =
     input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {};
+  if (toolName === "edit" && typeof args.input === "string") return hashlineCalls(args.input);
   if (toolName === "mcpScript") {
     if (typeof args.code !== "string") return null;
     const paths = [...args.code.matchAll(SCRIPT_CALL)]
@@ -315,13 +413,13 @@ function claudeTranscript(messages: unknown[]): string {
         if (block?.type === "text" && typeof block.text === "string") {
           blocks.push({ type: "text", text: block.text });
         } else if (block?.type === "toolCall") {
-          const mapped = claudeToolCall(block.name, block.arguments);
-          blocks.push({
-            type: "tool_use",
-            id: block.id,
-            name: mapped?.tool_name ?? block.name,
-            input: mapped?.tool_input ?? block.arguments ?? {},
-          });
+          // One Pi call may be several Claude calls: an omp edit of two files
+          // is two Edits, and both files were written.
+          const mapped = claudeToolCalls(block.name, block.arguments);
+          const calls = mapped?.length ? mapped : [{ tool_name: block.name, tool_input: block.arguments ?? {} }];
+          for (const call of calls) {
+            blocks.push({ type: "tool_use", id: block.id, name: call.tool_name, input: call.tool_input });
+          }
         }
       }
       const usage = "usage" in message && message.usage && typeof message.usage === "object"

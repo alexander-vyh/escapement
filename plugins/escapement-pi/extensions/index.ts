@@ -3,7 +3,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
-  branchMessages, claudeToolCall, claudeToolCalls, cwdOf, parentSessionOf, sessionIdOf, textOf, TranscriptFiles,
+  branchMessages, claudeToolCalls, cwdOf, parentSessionOf, sessionIdOf, textOf, TranscriptFiles,
 } from "./payloads.ts";
 
 type Handler = (event: any, context: any) => any;
@@ -427,29 +427,32 @@ export default function escapementPi(pi: PiAPI): void {
     if (runtime instanceof Error) return;
     const gates = runtime.postToolGates.get(event.toolName) ?? [];
     if (gates.length === 0) return;
-    const mapped = claudeToolCall(event.toolName, event.input);
-    if (mapped === null) return;
+    const calls = claudeToolCalls(event.toolName, event.input);
+    if (calls === null || calls.length === 0) return;
     const content = Array.isArray(event.content) ? event.content : [];
     const sessionId = sessionIdOf(context);
-    let notes: string[];
+    let notes: string[] = [];
     try {
-      const result = await runDispatcher(
-        runtime,
-        gates,
-        {
-          session_id: sessionId,
-          transcript_path: transcriptOf(context, sessionId, []),
-          cwd: cwdOf(event, context),
-          hook_event_name: "PostToolUse",
-          tool_use_id: event.toolCallId,
-          ...mapped,
-          tool_response: { content: textOf(content), is_error: Boolean(event.isError) },
-        },
-        context?.signal,
-        context?.cwd,
-      );
-      notes = [result.reason, result.hookSpecificOutput?.additionalContext]
-        .filter((note): note is string => Boolean(note));
+      // An omp edit of several files maps to one call per file; each is judged.
+      for (const mapped of calls) {
+        const result = await runDispatcher(
+          runtime,
+          gates,
+          {
+            session_id: sessionId,
+            transcript_path: transcriptOf(context, sessionId, []),
+            cwd: cwdOf(event, context),
+            hook_event_name: "PostToolUse",
+            tool_use_id: event.toolCallId,
+            ...mapped,
+            tool_response: { content: textOf(content), is_error: Boolean(event.isError) },
+          },
+          context?.signal,
+          context?.cwd,
+        );
+        notes = notes.concat([result.reason, result.hookSpecificOutput?.additionalContext]
+          .filter((note): note is string => Boolean(note)));
+      }
     } catch (error) {
       notes = [`Escapement Pi post-tool hooks failed: ${error}`];
     }
