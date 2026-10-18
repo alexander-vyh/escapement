@@ -175,6 +175,14 @@ EXPECTED_TS_FUNCTIONS = {
     "claudeToolCall",
     # A workflowScript's children, each mapped exactly as a one-child call.
     "claudeToolCalls",
+    # The file a file tool's path names (omp URIs name none; `~` is home),
+    # shared by every file-tool mapping so each resolves a path the same way.
+    "diskPath",
+    # omp's hashline edit, one string naming several files, read into one
+    # Claude Edit per file. hashlinePath strips a header's tag and quotes as
+    # omp's own reader does.
+    "hashlineCalls",
+    "hashlinePath",
     "textOf",
     "claudeTranscript",
     # Host identity, not policy: reads Pi's session id off the handler context
@@ -285,7 +293,7 @@ def _assert_thin_pi_extension(source: str) -> None:
     # smuggles policy into TypeScript has to look at the payload to decide.
     # One regex test is plumbing, not policy: the mapping asks whether a file
     # tool's path is a URI (omp's xd://, local://) rather than a file on disk.
-    mapping = _top_level_body(source, "claudeToolCall")
+    mapping = _top_level_body(source, "diskPath")
     assert mapping.count("URI_SCHEME.test(path)") == 1
     uninspected = source.replace("URI_SCHEME.test(path)", "", 1)
     for inspector in (".includes(", ".indexOf(", ".match(", ".search(", ".test(", ".exec("):
@@ -306,7 +314,7 @@ def _assert_thin_pi_extension(source: str) -> None:
     assert elsewhere.count(".input") == handed_to_mapping, (
         "a Pi tool's input is read outside the payload mapping; policy belongs in a gate"
     )
-    assert elsewhere.count(".arguments") == 2 and "claudeToolCall(block.name, block.arguments)" in elsewhere, (
+    assert elsewhere.count(".arguments") == 2 and "claudeToolCalls(block.name, block.arguments)" in elsewhere, (
         "a transcript tool call's arguments are read outside the payload mapping"
     )
     assert "args." not in elsewhere and "args[" not in elsewhere, (
@@ -395,7 +403,7 @@ def _mutate(source: str, anchor: str, replacement: str) -> str:
 
 def test_pi_architecture_check_rejects_selective_typescript_policy() -> None:
     source = _extension_source()
-    call_anchor = "    const mapped = claudeToolCall(event.toolName, event.input);"
+    call_anchor = "    const calls = claudeToolCalls(event.toolName, event.input);"
     mutants = {
         "string inspection before dispatch": _mutate(
             source,
