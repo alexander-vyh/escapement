@@ -377,6 +377,8 @@ problem-solving successes into reusable practice — and insists those routines 
   (a fake `--spec-id`, throwaway waiver text) without doing the underlying work. Both
   enabling *and* coercive designs can produce it if implementation conditions are wrong.
   *Repo cites:* Wiesche, Schermann & Krcmar (2013).
+  Contrast **means–ends decoupling** (§10): process followed faithfully that still does
+  not move the outcome. Tighter enforcement fixes gaming; it does nothing for that.
 
 - **Hook gate** — A `PreToolUse`/`Stop`/etc. hook that intercepts an action and denies,
   asks, or warns. Distinct from a *molecule gate* (§4, a human decision point).
@@ -514,6 +516,54 @@ implementation. Sequence: **Outcome → Oracle → Constraints → Tests → Cod
 
 ---
 
+## 10. Outcome failure modes
+
+Six terms that change a decision about whether a mechanism helps deliver outcomes, selected
+in the 2026-11 concept review. Each carries its primary source.
+
+- **Means–ends decoupling** — Process is genuinely implemented and followed, but its link to
+  the outcome is weak or unknown. Distinct from *mock bureaucracy* (§6), where the letter is
+  gamed. *Diagnostic:* the gate is obeyed and outcomes still match the no-gate baseline.
+  *Action:* remove or replace the mechanism; stricter enforcement will not help.
+  *Roots:* Bromley & Powell (2012).
+
+- **Goal displacement** (also **teleological drift**, less common) — Instrumental rules or
+  sub-tasks become ends in themselves and the original outcome falls away. *Diagnostic:* the
+  work product is process artifacts, investigations or new safeguards rather than the
+  requested change. *Action:* restate the outcome and its done-check; cut the sub-task.
+  *Roots:* Merton (1940) for goal displacement. "Teleological drift" is in use with the same
+  sense, e.g. Weber (2011), "Combating the Teleological Drift of Life Insurance Solvency
+  Regulation"; its application to agent work is [analytical mapping].
+
+- **Rule strain** — Individually reasonable rules whose combined burden makes one more rule
+  net-negative; often **stakeholder red tape**, where the rule serves the controller and the
+  worker or user pays. *Diagnostic:* each rule has a rationale, yet the rule set costs more
+  turns than it saves. *Action:* judge the set, not the rule; adding a rule requires removing
+  or narrowing another.
+  *Roots:* Bozeman & Feeney (2011); Bozeman & Anderson (2014).
+
+- **Oracle soundness vs completeness** — A sound check never accepts wrong behavior; a
+  complete one accepts all correct behavior. *Diagnostic:* does the done-check fail on the
+  unchanged code (soundness evidence), and could a correct change fail it (completeness)?
+  *Action:* confirm the check fails before the change; widen it only for named requirements.
+  *Roots:* Barr et al. (2015).
+
+- **Separation of duties** — The worker may run the frozen done-check while repairing, but
+  cannot author it after seeing its own implementation, alter it, or attest its result.
+  Independence is not implied by a second agent: **dependent failures** occur when
+  reviewers share model, context and premises. *Diagnostic:* can the worker edit the
+  done-check or its recorded result? *Action:* freeze the check before implementation; the
+  worker may report it as wrong, never rewrite it.
+  *Roots:* NIST SP 800-53 Rev. 5, AC-5 and AU-9(4); Knight & Leveson (1986).
+
+- **Utility of dialog** — Ask, act or wait is chosen by expected value under uncertainty,
+  consequence and interruption cost; asking is a costly action, not a safe default.
+  *Diagnostic:* would the answer change the action, and is a wrong action costly or
+  irreversible? *Action:* if not, act on the recommended default and report it.
+  *Roots:* Horvitz (1999).
+
+---
+
 ## Appendix: the base-principle map at a glance
 
 | Modern term | Base principle | Provenance |
@@ -533,3 +583,7 @@ implementation. Sequence: **Outcome → Oracle → Constraints → Tests → Cod
 | Positive / negative control | Experimental design | Roots |
 | Molecule / formula / pour | Templating + DAG scheduling | analytical mapping |
 | Dolt (beads backend) | Version control for data | Roots |
+| Means–ends decoupling | Institutional theory | Roots (Bromley & Powell) |
+| Goal displacement | Bureaucratic dysfunction | Roots (Merton) |
+| Rule strain / red tape | Public-administration rule theory | Roots (Bozeman) |
+| Separation of duties | Security controls | Roots (NIST SP 800-53) |
